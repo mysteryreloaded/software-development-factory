@@ -4072,7 +4072,7 @@ export class Swarm {
     if (!comment) throw new HttpError(400, 'Say why the pull request is closing: the comment is posted on it.');
     const issues = listed ? issuesResolvedBy(listed) : [];
     const ceo = this.ceo().name;
-    await this.backend.commentPull(repo.fullName, rec.prNumber, `${comment}\n\n<sub>Closed by ${ceo}, the cubefarm CEO, after triage.${issues.length ? ' Its issue stays open, so it is built again.' : ''}</sub>`);
+    await this.backend.commentPull(repo.fullName, rec.prNumber, `${comment}\n\n<sub>Closed by ${ceo}, the ZetaSoft CEO, after triage.${issues.length ? ' Its issue stays open, so it is built again.' : ''}</sub>`);
     // Closing deletes no branch and leaves the issue open, so the scheduler hands it out again.
     await this.backend.closePull(repo.fullName, rec.prNumber);
     this.postMessage('office', `🗂️ ${ceo} closed PR #${rec.prNumber} on floor ${repo.floor}: ${comment.split('\n')[0].slice(0, 200)}`);
@@ -4954,7 +4954,7 @@ export class Swarm {
     this.ceoIssues.check();
     const title = String(x.title ?? '').trim().slice(0, 120);
     if (!title) throw new Error('An issue needs a title.');
-    const body = `${String(x.body ?? '').trim()}\n\n---\n_Filed by ${this.ceo().name}, the cubefarm CEO._`;
+    const body = `${String(x.body ?? '').trim()}\n\n---\n_Filed by ${this.ceo().name}, the ZetaSoft CEO._`;
     const n = await this.backend.createIssue(repo.fullName, title, body);
     this.ceoIssues.record(repo.id);
     return `Filed #${n} on floor ${repo.floor}: ${title}.`;
