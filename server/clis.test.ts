@@ -139,10 +139,16 @@ describe('launchArgs', () => {
     expect(codexHookCommand('/usr/bin/node', "/home/o'neil/.cubefarm/bin/codex-hook.cjs", false)).toBe(`'/usr/bin/node' '/home/o'"'"'neil/.cubefarm/bin/codex-hook.cjs'`);
   });
 
-  it("lets OpenCode run without stopping to ask, and without updating itself", () => {
+  it("lets OpenCode run on its own private server, without stopping to ask, and without updating itself", () => {
     const config = (patch: Partial<LaunchContext>) => JSON.parse(launchArgs('opencode', ctx(patch)).env.OPENCODE_CONFIG_CONTENT);
     for (const role of ['agent'] as const) expect(config({ role }).permission).toEqual({ edit: 'allow', bash: 'allow', webfetch: 'allow' });
     expect(config({}).autoupdate).toBe(false);
+    for (const patch of [{}, { resumeId: 's1' }] as const) {
+      const args = launchArgs('opencode', ctx(patch)).args;
+      expect(args).toContain('--standalone');
+      expect(args).not.toContain('--server');
+      expect(args.slice(args.indexOf('--prompt'))).toEqual(['--prompt', '--looks like a flag']);
+    }
   });
 });
 
