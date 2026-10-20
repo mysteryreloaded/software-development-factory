@@ -345,7 +345,8 @@ export function Chat({ autoFocus = true }: { autoFocus?: boolean }) {
   const info = useStore((s) => s.ceo);
   const settings = useStore((s) => s.settings);
   const running = useStore((s) => Object.values(s.agents).filter(isBusy).length);
-  const [text, setText] = useState('');
+  const text = useStore((s) => s.ceoDraft);
+  const setText = useStore((s) => s.setCeoDraft);
   const scroller = useRef<HTMLDivElement>(null);
 
   // Reading the thread marks it read.
