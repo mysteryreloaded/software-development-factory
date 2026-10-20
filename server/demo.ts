@@ -758,6 +758,21 @@ export function createDemoBackend(scale: DemoScale | null = null): Backend {
       return { title: i?.title ?? `Issue #${number}`, body: i?.body ?? '', createdAt: i?.createdAt };
     },
     commentPull: async (fullName, number) => `https://github.com/${fullName}/pull/${number}#issuecomment-${Date.now()}`,
+    prDiff: async (fullName, number) => {
+      const pr = repos.get(fullName)?.pulls.find((p) => p.number === number);
+      if (!pr) throw new Error(`Unknown PR #${number}`);
+      return [
+        '--- a/src/app.ts',
+        '+++ b/src/app.ts',
+        '@@ -1,3 +1,5 @@',
+        `+  // ${pr.title}`,
+        '+  export const change = "demo";',
+        '--- a/src/app.test.ts',
+        '+++ b/src/app.test.ts',
+        '@@ -1,2 +1,4 @@',
+        '+  it("keeps the demo behaviour", () => { expect(change).toBe("demo"); });',
+      ].join('\n');
+    },
     uploadEvidence: async (fullName, filePath) => `https://github.com/${fullName}/raw/swarm-qa-evidence/${filePath}`,
     ensureClone: async () => new Promise((r) => setTimeout(r, 400)),
     syncMain: async (fullName, _branch, { touch }) => {
@@ -1231,6 +1246,15 @@ function ceoSession(opts: SessionOptions, cb: SessionCallbacks): SessionHandle {
       await use('escalate', { floor, pr, reason: `I tried ${tool}, but the office refused: ${refused(out)}` });
       return `PR #${pr} on floor ${floor} is stuck and I couldn't move it, so it's with you now.`;
     },
+    // A QA-passed PR on a floor with CEO code review: read the diff the office wrote, then approve through the real tool.
+    async codeReview(floor: number, pr: number, facts: string) {
+      const diff = facts.match(/diff is at (\S+?)(?:\s|$)/)?.[1];
+      if (diff) await read(diff, 20);
+      await think('A small change that stays inside its issue, and the tests cover it. Good to merge.');
+      const out = await use('approve_pull', { floor, pr, comment: 'Read the diff: the change is contained, the tests cover the new behaviour, and it can merge.' });
+      if (out.startsWith('Refused')) return `PR #${pr} on floor ${floor} passed QA, but I couldn't approve it: ${refused(out)}`;
+      return `PR #${pr} on floor ${floor} passed QA and the diff reads well, so I approved it.`;
+    },
     async chat(text: string) {
       const s = await status();
       await think('Reading your message.');
@@ -1288,10 +1312,13 @@ function ceoSession(opts: SessionOptions, cb: SessionCallbacks): SessionHandle {
   const prompt = opts.prompt;
   const where = prompt.match(/[Ff]loor (\d+) \(([^,)]+)/);
   const triage = prompt.match(/^Triage: pull request #(\d+) on floor (\d+)/);
+  const review = prompt.match(/^Code review: pull request #(\d+) on floor (\d+)/);
   const run = triage
     ? () => scripts.triage(Number(triage[2]), Number(triage[1]), prompt)
-    : /no longer needs triage/.test(prompt)
-      ? async () => 'Nothing to do.'
+    : review
+      ? () => scripts.codeReview(Number(review[2]), Number(review[1]), prompt)
+      : /no longer needs triage|no longer needs a code review/.test(prompt)
+        ? async () => 'Nothing to do.'
       : /just joined the company/.test(prompt)
         ? () => scripts.onboard(Number(where?.[1]), where?.[2] ?? '')
         : /has a brief for floor/.test(prompt)
