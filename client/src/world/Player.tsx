@@ -35,6 +35,7 @@ import { leavePerch, perch, takePerchTurn, type Perch } from './perch';
 import { roofAction } from './roof/roofState';
 import { greet } from './Chatter';
 import { joinPong, pongCamera, pongMouse, tickPaddle } from './toys/pongState';
+import { gesture, touchInput, useTouch } from './touch';
 
 /** How fast the right stick moves the ping-pong paddle, full over (in mouse pixels a second). */
 const PAD_PADDLE = 600;
@@ -160,7 +161,7 @@ export function runFocusAction(focus: Focus, via: 'key' | 'click' = 'key') {
 
 /** E (or the pad's A): act on the crosshair's target, even with your hands full (a panel opening drops the ball).
  * With coffee in hand it takes a sip instead, except at the coffee machine. */
-function interact() {
+export function interact() {
   const s = useStore.getState();
   const act = eAction(s.held, s.focus?.action.kind ?? null);
   if (act === 'sip') sipCoffee();
@@ -202,6 +203,21 @@ const isTyping = (e: KeyboardEvent) => {
   return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
 };
 
+/** What a crosshair-style raycast (the centre of the screen, or a tap point) is aimed at. */
+function pickFocus(ray: THREE.Raycaster): Focus | null {
+  const roots = [...interactables.keys()];
+  const hits = ray.intersectObjects(roots, true);
+  for (const h of hits) {
+    let o: THREE.Object3D | null = h.object;
+    while (o && !interactables.has(o)) o = o.parent;
+    if (!o) continue;
+    const info = interactables.get(o)!;
+    if (h.distance <= info.range) return info.pick?.(h.point, o) ?? { id: info.id, label: info.label, action: info.action };
+    break;
+  }
+  return null;
+}
+
 export function Player({ colliders, floor }: { colliders: Rect[]; floor: number }) {
   const { camera, gl } = useThree();
   const keys = useRef(new Set<string>());
@@ -209,6 +225,7 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
   const bob = useRef(0);
   const ray = useMemo(() => new THREE.Raycaster(), []);
   const center = useMemo(() => new THREE.Vector2(0, 0), []);
+  const tapNdc = useMemo(() => new THREE.Vector2(), []);
   const frame = useRef(0);
   const lookFilter = useMemo(createLookFilter, []);
   const padRun = useRef(false);
@@ -243,6 +260,50 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
 
   useEffect(() => {
     canvasEl = gl.domElement;
+    gl.domElement.style.touchAction = 'none'; // no native scroll/zoom over the 3D view
+    // One finger on the canvas, first person only (the joystick and buttons live outside it): a drag turns the
+    // view like the mouse would, a short still touch taps the crosshair's target (E via 'click'), a held still
+    // touch on a peelable sticky peels it off. No compat mouse events follow (preventDefault on the touch down).
+    const touchLook = { id: null as number | null, x: 0, y: 0, moved: 0, start: 0 };
+    const onTouchStart = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !useTouch.getState().on || touchLook.id !== null) return;
+      if (cameraMode() !== 'first') return; // other views: CameraRig.tsx
+      const s = useStore.getState();
+      if (!s.started || s.overlay || s.travel || isConfirmOpen() || photoActive()) return;
+      e.preventDefault();
+      touchLook.id = e.pointerId;
+      touchLook.x = e.clientX;
+      touchLook.y = e.clientY;
+      touchLook.moved = 0;
+      touchLook.start = performance.now();
+    };
+    const onTouchMove = (e: PointerEvent) => {
+      if (e.pointerId !== touchLook.id) return;
+      e.preventDefault();
+      const dx = e.clientX - touchLook.x;
+      const dy = e.clientY - touchLook.y;
+      touchLook.x = e.clientX;
+      touchLook.y = e.clientY;
+      touchLook.moved += Math.hypot(dx, dy);
+      touchInput.lookDx += dx;
+      touchInput.lookDy += dy;
+    };
+    const onTouchEnd = (e: PointerEvent) => {
+      if (e.pointerId !== touchLook.id) return;
+      touchLook.id = null;
+      const g = gesture(touchLook.moved, performance.now() - touchLook.start);
+      if (g === 'drag') return;
+      const s = useStore.getState();
+      if (s.overlay || s.travel || isConfirmOpen() || photoActive()) return;
+      const r = gl.domElement.getBoundingClientRect();
+      tapNdc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(tapNdc, camera);
+      ray.far = 8;
+      const found = pickFocus(ray);
+      if (!found) return;
+      if (g === 'longPress' && peelAimed(found)) return;
+      runFocusAction(found, 'click');
+    };
     // Left button only. If the mouse is already captured, use what you're holding (winding up a throw until
     // the button comes up) or, empty-handed, act on the crosshair's target (like E). Otherwise this press
     // just captures the mouse, so the click that locks never also acts.
@@ -352,6 +413,10 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       useStore.getState().setCharge(null); // the button's release would be missed
     };
     gl.domElement.addEventListener('mousedown', onMouseDown);
+    gl.domElement.addEventListener('pointerdown', onTouchStart);
+    window.addEventListener('pointermove', onTouchMove);
+    window.addEventListener('pointerup', onTouchEnd);
+    window.addEventListener('pointercancel', onTouchEnd);
     window.addEventListener('mouseup', onMouseUp);
     for (const type of QUIET_EVENTS) window.addEventListener(type, onQuietMouse, true);
     document.addEventListener('pointerlockchange', onLockChange);
@@ -368,6 +433,10 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       stopLookLock();
       stopPads();
       gl.domElement.removeEventListener('mousedown', onMouseDown);
+      gl.domElement.removeEventListener('pointerdown', onTouchStart);
+      window.removeEventListener('pointermove', onTouchMove);
+      window.removeEventListener('pointerup', onTouchEnd);
+      window.removeEventListener('pointercancel', onTouchEnd);
       window.removeEventListener('mouseup', onMouseUp);
       for (const type of QUIET_EVENTS) window.removeEventListener(type, onQuietMouse, true);
       document.removeEventListener('pointerlockchange', onLockChange);
@@ -429,12 +498,12 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
     const k = keys.current;
     const b = bindings();
     const padOn = !s.overlay && !isConfirmOpen() && s.started;
-    const px = padOn ? pad.lx : 0;
-    const py = padOn ? pad.ly : 0;
+    const px = (padOn ? pad.lx : 0) + touchInput.x;
+    const py = (padOn ? pad.ly : 0) + touchInput.y;
     if (!px && !py) padRun.current = false;
     const fwd = Math.max(-1, Math.min(1, (anyHeld(b, 'forward', k) ? 1 : 0) - (anyHeld(b, 'back', k) ? 1 : 0) - py));
     const strafe = Math.max(-1, Math.min(1, (anyHeld(b, 'right', k) ? 1 : 0) - (anyHeld(b, 'left', k) ? 1 : 0) + px));
-    const running = anyHeld(b, 'run', k) || padRun.current;
+    const running = anyHeld(b, 'run', k) || padRun.current || touchInput.run;
     const speed = running ? 6.5 : 3.6;
     tickSip();
 
@@ -463,6 +532,11 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
     // and you don't walk anywhere.
     if (s.held?.kind === 'paddle') {
       if (padOn && (pad.rx || pad.ry)) pongMouse(pad.rx * PAD_PADDLE * dt, pad.ry * PAD_PADDLE * dt);
+      if (touchInput.lookDx || touchInput.lookDy) {
+        pongMouse(touchInput.lookDx, touchInput.lookDy, useLookPrefs.getState().sensitivity);
+        touchInput.lookDx = 0;
+        touchInput.lookDy = 0;
+      }
       tickPaddle(dt);
       const v = pongCamera(s.held.id);
       const shake = reduceMotion() ? 0 : 1; // Settings → Accessibility, or the system's reduced motion
@@ -494,6 +568,15 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       const flip = useLookPrefs.getState().invertY ? -1 : 1;
       look.current.yaw -= lookCurve(pad.rx) * turn;
       look.current.pitch = Math.max(p?.minPitch ?? -1.35, Math.min(p?.maxPitch ?? 1.35, look.current.pitch - lookCurve(pad.ry) * turn * 0.75 * flip));
+    }
+    // a one-finger drag on the canvas (set above, Player's own touch handler)
+    if (touchInput.lookDx || touchInput.lookDy) {
+      const { sensitivity, invertY } = useLookPrefs.getState();
+      const tk = LOOK_RADIANS_PER_PX * sensitivity * (p?.look ?? 1);
+      look.current.yaw -= touchInput.lookDx * tk;
+      look.current.pitch = Math.max(p?.minPitch ?? -1.35, Math.min(p?.maxPitch ?? 1.35, look.current.pitch - touchInput.lookDy * tk * (invertY ? -1 : 1)));
+      touchInput.lookDx = 0;
+      touchInput.lookDy = 0;
     }
     const { yaw, pitch } = look.current;
     let moving = false;
@@ -546,18 +629,7 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
     }
     ray.setFromCamera(center, camera);
     ray.far = 8;
-    const roots = [...interactables.keys()];
-    const hits = ray.intersectObjects(roots, true);
-    let found: Focus | null = null;
-    for (const h of hits) {
-      let o: THREE.Object3D | null = h.object;
-      while (o && !interactables.has(o)) o = o.parent;
-      if (!o) continue;
-      const info = interactables.get(o)!;
-      if (h.distance <= info.range) found = info.pick?.(h.point, o) ?? { id: info.id, label: info.label, action: info.action };
-      break;
-    }
-    s.setFocus(found);
+    s.setFocus(pickFocus(ray));
   });
 
   return null;

@@ -2907,6 +2907,67 @@ input.inline:focus {
   top: -8px;
   left: 26px;
 }
+/* ---------- touch controls (phones, tablets: TouchControls.tsx) ---------- */
+
+.touch-controls {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+}
+.touch-stick {
+  position: absolute;
+  left: max(24px, env(safe-area-inset-left));
+  bottom: max(24px, env(safe-area-inset-bottom));
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  border: 3px solid var(--ink);
+  pointer-events: auto;
+  touch-action: none;
+}
+.touch-stick-thumb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px;
+  border-radius: 50%;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  pointer-events: none;
+}
+.touch-buttons {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+.touch-btn {
+  min-width: 56px;
+  min-height: 56px;
+  padding: 8px 14px;
+  font-family: var(--font);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  box-shadow: 0 4px 0 var(--ink);
+  cursor: pointer;
+  touch-action: none;
+}
+.touch-btn-use {
+  background: #ffd98a;
+  max-width: 160px;
+}
 .voice-speaking {
   position: absolute;
   right: 8px;

@@ -22,6 +22,8 @@ import { useRoof } from '../world/roof/roofState';
 import { RoofHud } from './RoofHud';
 import { usageChip } from '../ops';
 import { togglePhoto, usePhotoGate } from '../photo/gate';
+import { useTouch } from '../world/touch';
+import { TouchControls } from './TouchControls';
 
 /** While the office is on its way to updating itself (or restarting to do it); opens the console's Office row. */
 function OfficeUpdateChip() {
@@ -140,6 +142,7 @@ export function HUD() {
   const centerDot = useA11y((s) => s.prefs.centerDot);
   // In the overview, the building view and the follow cam there's no crosshair to aim (camera/rig.ts).
   const onFoot = useCameraView((s) => s.mode) === 'first';
+  const touchOn = useTouch((s) => s.on);
 
   const roof = floor === ROOF;
   const scope = useRoof((s) => s.telescope); // the telescope's eyepiece has its own crosshair
@@ -196,15 +199,21 @@ export function HUD() {
       </div>
       {started && !overlay && onFoot && (focus || sip) && (
         <div className="hud-hint">
-          <Key action="interact" /> {!held && <>/ <kbd>Click</kbd> </>}
+          {touchOn ? (
+            'Tap '
+          ) : (
+            <>
+              <Key action="interact" /> {!held && <>/ <kbd>Click</kbd> </>}
+            </>
+          )}
           {sip ? (held?.kind === 'sausage' ? 'Take a bite' : 'Sip coffee') : (dropLabel ?? focus?.label)}
-          {!held && focus?.action.kind === 'card' && focus.action.peel && (
+          {!touchOn && !held && focus?.action.kind === 'card' && focus.action.peel && (
             <>
               {' '}
               · <Key action="drop" /> / hold <kbd>Click</kbd> take it
             </>
           )}
-          {!sip && focus?.action.kind === 'jukebox' && (
+          {!touchOn && !sip && focus?.action.kind === 'jukebox' && (
             <>
               {' '}
               · <Key action="volumeDown" /> <Key action="volumeUp" /> / <kbd>Scroll</kbd> volume
@@ -213,13 +222,20 @@ export function HUD() {
         </div>
       )}
       {started && !overlay && !travel && onFoot && <HeldHint />}
-      {started && !overlay && !locked && !travel && onFoot && <div className="hud-resume">Click to look around</div>}
+      {started && !overlay && !locked && !travel && onFoot && !touchOn && <div className="hud-resume">Click to look around</div>}
       {started && !(settings.setupDone && settings.tutorialStep >= 0) && (
         <div className="hud-help">
-          <MoveKeys joined /> move · <Key action="run" /> run · <Key action="interact" /> / <kbd>Click</kbd> interact · <Key action="phone" /> phone · <Key action="emote" /> emote · <Key action="ping" /> ping · <Key action="photo" /> photo ·{' '}
-          <Key action="overview" /> overview · <Key action="workers" /> workers · <Key action="mute" /> mute · <Key action="help" /> help · <kbd>Esc</kbd> free mouse
+          {touchOn ? (
+            '🕹️ walk · drag to look · tap to use'
+          ) : (
+            <>
+              <MoveKeys joined /> move · <Key action="run" /> run · <Key action="interact" /> / <kbd>Click</kbd> interact · <Key action="phone" /> phone · <Key action="emote" /> emote · <Key action="ping" /> ping · <Key action="photo" /> photo ·{' '}
+              <Key action="overview" /> overview · <Key action="workers" /> workers · <Key action="mute" /> mute · <Key action="help" /> help · <kbd>Esc</kbd> free mouse
+            </>
+          )}
         </div>
       )}
+      {started && !overlay && !travel && onFoot && touchOn && <TouchControls />}
 
       <div className={`fade ${travel?.phase === 'closing' ? 'fade-in' : ''}`}>
         {travel && <div className="fade-label">{travel.to === 0 ? 'Lobby' : travel.to === ROOF ? 'Roof' : `Floor ${travel.to}`}</div>}

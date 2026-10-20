@@ -20,6 +20,13 @@ visit. Five tabs, at the bottom:
 Pocket mode uses the same live connection and commands as the 3D office, and loads no 3D at all until you tap
 **🏢 Open the 3D office** (Company tab, or ⚙️).
 
+### Touch controls in the 3D office
+
+On a phone or tablet, the 3D office itself gets touch controls: a joystick (bottom-left) to walk, running at the
+edge; drag anywhere else on the view to look around; tap an object to use it, the same as pressing E. **Use**
+(bottom-right, above the phone button) acts on whatever the crosshair is aiming at, and **Throw**, **Drop** and
+**Reload** appear there while your hands are full.
+
 ## Install it
 
 The office is an installable web app: Chrome and Edge offer **Install** in the address bar (on Android: ⋮ → **Add
