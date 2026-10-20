@@ -10,6 +10,7 @@ import { BuildingView } from './BuildingView';
 import { OverviewChips } from './OverviewChips';
 import { hovered, pickAt, type Pick } from './picking';
 import { bindCamera, bindCanvas, cameraMode, cutKind, dragView, rigFlying, setHover, setViewport, useCameraView, visitFloor, zoomView } from './rig';
+import { gesture, pinchDelta } from '../touch';
 
 // Inside the Canvas: hands the camera to the rig (rig.ts), and in the overview, the building view and the follow cam
 // turns the mouse into the views' controls: drag to pan, the wheel to zoom, a click (or the pad's A, at the middle of
@@ -24,6 +25,8 @@ function act(p: Pick, via: 'key' | 'click') {
 
 const viewing = () => cameraMode() !== 'first';
 const DRAG_PX = 5;
+/** A pinch's px moved over this many px of zoomView's deltaY. */
+const PINCH_SCALE = 3;
 
 export function CameraRig() {
   const camera = useThree((s) => s.camera);
@@ -104,6 +107,71 @@ export function CameraRig() {
       el.removeEventListener('mouseleave', onLeave);
     };
   }, [gl, camera, mouse, ndc, ray]);
+
+  // Touch, in the overview, the building view and the follow cam: one finger drags (pans or tilts the tower),
+  // two pinch (zoom), and a short still touch taps whatever is under it, like a click.
+  useEffect(() => {
+    const el = gl.domElement;
+    const touches = new Map<number, { x: number; y: number }>();
+    let tap: { x: number; y: number; t: number; moved: number } | null = null;
+    let pinchAt: number | null = null;
+    const pinchDist = () => {
+      const pts = [...touches.values()];
+      return pts.length === 2 ? Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) : null;
+    };
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' || !viewing() || useStore.getState().overlay) return;
+      e.preventDefault();
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      tap = touches.size === 1 ? { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 } : null;
+      pinchAt = pinchDist();
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!touches.has(e.pointerId)) return;
+      e.preventDefault();
+      const prev = touches.get(e.pointerId)!;
+      const dx = e.clientX - prev.x;
+      const dy = e.clientY - prev.y;
+      touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touches.size >= 2) {
+        const d = pinchDist();
+        if (pinchAt != null && d != null) zoomView(pinchDelta(pinchAt, d) * PINCH_SCALE);
+        if (d != null) pinchAt = d;
+        tap = null; // two fingers: a pinch, never a tap
+      } else if (touches.size === 1 && viewing()) {
+        dragView(dx, dy);
+        if (tap) tap.moved += Math.hypot(dx, dy);
+      }
+    };
+    const onUp = (e: PointerEvent) => {
+      if (!touches.has(e.pointerId)) return;
+      const was = tap;
+      touches.delete(e.pointerId);
+      pinchAt = touches.size === 2 ? pinchDist() : null;
+      if (touches.size > 0 || !was) {
+        tap = null;
+        return;
+      }
+      tap = null;
+      if (!viewing() || rigFlying() || useStore.getState().overlay) return;
+      if (gesture(was.moved, performance.now() - was.t) === 'drag') return;
+      const r = el.getBoundingClientRect();
+      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      const p = pickAt(ray, cameraMode() === 'building' ? 'building' : 'overview');
+      if (p) act(p, 'click');
+    };
+    el.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [gl, camera, ndc, ray]);
 
   useFrame(({ size }) => {
     setViewport(size.width, size.height);
