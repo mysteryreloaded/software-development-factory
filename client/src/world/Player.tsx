@@ -55,6 +55,12 @@ const hushMouse = () => {
 export function requestLook() {
   const s = useStore.getState();
   if (!canvasEl || s.overlay || !s.started || isConfirmOpen() || !lookAllowed() || photoActive()) return;
+  if (useTouch.getState().on) {
+    // A phone has no mouse to grab, and a lock here freezes touch input on some browsers (Android Chrome):
+    // the stick reads as forward-only and swipes don't move the view. Let go of any lock already held instead.
+    if (document.pointerLockElement) document.exitPointerLock();
+    return;
+  }
   const el = canvasEl;
   // Raw (unadjusted) input skips the OS mouse path that produces bogus spikes on Windows.
   // Browsers that can't do it reject with NotSupportedError (Firefox ignores the option).

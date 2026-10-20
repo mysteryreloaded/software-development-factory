@@ -14,6 +14,7 @@ import { BOARD, GONG } from '../world/layout';
 import { createLookFilter, filterLookDelta, LOOK_RADIANS_PER_PX, resetLookFilter, useLookPrefs } from '../world/look';
 import { bodyState } from '../world/people';
 import { runSkyFrames } from '../world/sky/useDayTime';
+import { useTouch } from '../world/touch';
 import { GRADES, needsGrade } from './filters';
 import { flyStep, look, newFreeCam, orbitFrom, orbitStep, rollStep, zoom, type FlyInput, type Orbit } from './flight';
 import { usePhotoGate } from './gate';
@@ -363,7 +364,7 @@ export default function PhotoScene() {
     const onKeyUp = (e: KeyboardEvent) => void keys.delete(e.code);
     const onBlur = () => keys.clear();
     const onMouseDown = (e: MouseEvent) => {
-      if (e.button !== 0 || document.pointerLockElement === canvas) return;
+      if (e.button !== 0 || document.pointerLockElement === canvas || useTouch.getState().on) return;
       try {
         canvas.requestPointerLock?.()?.catch?.(() => undefined);
       } catch {
