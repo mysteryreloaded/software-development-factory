@@ -158,7 +158,16 @@ export function LiveTerminal({ agentId, className }: { agentId: string; classNam
       if (term.buffer.active.type === 'alternate') {
         // The app in the alt buffer scrolls itself on a wheel event xterm reports to it; dragging down pans the
         // same way a scrollback drag would (earlier output/up), so it gets the opposite sign of a drag down.
-        term.element?.dispatchEvent(new WheelEvent('wheel', { deltaY: -deltaY, bubbles: true, cancelable: true }));
+        term.element?.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -deltaY,
+            deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+            clientX: t.clientX,
+            clientY: t.clientY,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
         return;
       }
       const step = touchScrollLines(deltaY, carryPx, lineHeightPx());
