@@ -193,6 +193,7 @@ export function compactRepo(r: RepoView, secrets: readonly string[] = []): RepoV
     color: r.color,
     autoAssign: r.autoAssign,
     autoMerge: r.autoMerge,
+    ceoReview: r.ceoReview,
     folderSync: null,
     browserTesting: r.browserTesting,
     links: r.links,
@@ -272,6 +273,7 @@ export function compactQa(q: QaView, secrets: readonly string[] = []): QaView {
     commentUrl: q.commentUrl,
     mergeNote: textOrNull(q.mergeNote, 120, secrets),
     ceoLooking: q.ceoLooking,
+    ceoReview: q.ceoReview,
     updatedAt: q.updatedAt,
   };
 }

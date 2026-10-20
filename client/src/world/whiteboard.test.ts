@@ -19,6 +19,7 @@ const qaRec = (n: number, status: QaStatus): QaView => ({
   commentUrl: null,
   mergeNote: null,
   ceoLooking: false,
+  ceoReview: null,
   updatedAt: 0,
 });
 const prCard = (n: number, status?: QaStatus, ghost = false): KanbanCard => ({ key: `pr-${n}`, number: n, prNumber: n, title: `PR ${n}`, qa: status ? qaRec(n, status) : undefined, ghost });

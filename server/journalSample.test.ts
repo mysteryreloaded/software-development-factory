@@ -49,6 +49,7 @@ const floor = (id: string, n: number, issues: number): RepoView => ({
   color: '#ff0000',
   autoAssign: true,
   autoMerge: true,
+  ceoReview: false,
   folderSync: null,
   browserTesting: true,
   links: [],

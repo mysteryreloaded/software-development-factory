@@ -17,6 +17,7 @@ const pull = (p: Partial<MergePull> = {}): MergePull => ({
 
 const record = (r: Partial<MergeRecord> = {}): MergeRecord => ({
   passedSha: 'abc123',
+  ceoApprovedSha: null,
   mergeFixes: 0,
   pendingSince: null,
   mergeRetryAt: null,
@@ -223,6 +224,32 @@ describe('mergeStep', () => {
 
     it('still updates a branch that fell behind while waiting', () => {
       expect(mergeStep(pull({ mergeState: 'BEHIND' }), record({ mergeRetryAt: NOW + 60_000 }), NOW, base).do).toBe('update-branch');
+    });
+  });
+
+  describe("the CEO's code review", () => {
+    const ceo = { ...base, ceoReview: true };
+
+    it('waits when the floor has it on and the head commit is not approved yet', () => {
+      expect(mergeStep(pull(), record(), NOW, ceo)).toEqual({ do: 'wait', note: "waiting for the CEO's code review", set: { pendingSince: null } });
+    });
+
+    it('merges once the CEO approved the head commit', () => {
+      expect(mergeStep(pull(), record({ ceoApprovedSha: 'abc123' }), NOW, ceo).do).toBe('merge');
+    });
+
+    it('waits when the CEO approved an older commit', () => {
+      expect(mergeStep(pull(), record({ ceoApprovedSha: 'old000' }), NOW, ceo)).toEqual({ do: 'wait', note: "waiting for the CEO's code review", set: { pendingSince: null } });
+    });
+
+    it('merges as today when the floor has it off', () => {
+      expect(mergeStep(pull(), record({ ceoApprovedSha: null }), NOW, base).do).toBe('merge');
+    });
+
+    it('still requeues new commits, and sends back failing checks and conflicts, while waiting', () => {
+      expect(mergeStep(pull({ headSha: 'new456' }), record(), NOW, ceo).do).toBe('requeue');
+      expect(mergeStep(pull({ checks: 'failing', failedChecks: [{ name: 'Vercel', url: 'https://vercel.com/o/r/abc' }] }), record(), NOW, ceo)).toMatchObject({ do: 'send-back', reason: 'checks' });
+      expect(mergeStep(pull({ mergeable: 'CONFLICTING' }), record(), NOW, ceo)).toMatchObject({ do: 'send-back', reason: 'conflict' });
     });
   });
 });

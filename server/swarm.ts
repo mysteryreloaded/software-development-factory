@@ -107,6 +107,7 @@ interface PersistedRepo {
   color: string;
   autoAssign: boolean;
   autoMerge: boolean; // PRs merge themselves once QA passes and GitHub's checks are green
+  ceoReview: boolean; // QA-passed PRs wait for the CEO to approve the head commit before they merge
   browserTesting: boolean;
   links: string[]; // other connected repos this floor's agents may read
   localPath: string | null; // the manager's own project folder (null: a clone under WORKSPACE_ROOT)
@@ -150,13 +151,14 @@ interface PersistedAgent {
 }
 
 /** A pull request's trip through QA. */
-interface QaRecord extends Omit<QaView, 'ceoLooking'> {
+interface QaRecord extends Omit<QaView, 'ceoLooking' | 'ceoReview'> {
   issueNumber: number | null;
   devSessionId: string | null; // the dev's Claude Code session, resumed to fix QA findings
   fixInstructions: string | null;
   sessionFailures: number;
   testedSha: string | null; // the head commit QA is testing
   passedSha: string | null; // the head commit QA signed off on: auto-merge merges exactly that
+  ceoApprovedSha: string | null; // the head commit the CEO approved: on floors with it on, merging waits for this
   fixReason: 'qa' | 'checks' | 'conflict' | null; // why it was last sent back to a developer
   mergeFixes: number; // times it went back for failing checks or conflicts
   retests: number; // QA rounds caused by merge fixes or new commits rather than by QA failing it
@@ -620,6 +622,7 @@ export class Swarm {
         repos: (loaded.repos ?? []).map((r) => ({
           ...r,
           autoMerge: r.autoMerge ?? true,
+          ceoReview: r.ceoReview ?? false,
           links: r.links ?? [],
           mission: r.mission ?? '',
           summary: r.summary ?? '',
@@ -642,6 +645,7 @@ export class Swarm {
           ...q,
           testedSha: q.testedSha ?? null,
           passedSha: q.passedSha ?? null,
+          ceoApprovedSha: q.ceoApprovedSha ?? null,
           fixReason: q.fixReason ?? null,
           mergeFixes: q.mergeFixes ?? 0,
           retests: q.retests ?? 0,
@@ -937,6 +941,7 @@ export class Swarm {
       color: r.color,
       autoAssign: r.autoAssign,
       autoMerge: r.autoMerge,
+      ceoReview: r.ceoReview,
       folderSync: rt.folderSync,
       browserTesting: r.browserTesting,
       links: r.links,
@@ -1005,6 +1010,8 @@ export class Swarm {
   }
 
   private qaView(q: QaRecord): QaView {
+    const floor = this.state.repos.find((r) => r.id === q.repoId)?.ceoReview ?? false;
+    const approved = q.ceoApprovedSha != null && q.ceoApprovedSha === q.passedSha;
     return {
       repoId: q.repoId,
       prNumber: q.prNumber,
@@ -1017,6 +1024,7 @@ export class Swarm {
       commentUrl: q.commentUrl,
       mergeNote: q.mergeNote,
       ceoLooking: q.status === 'needs-human' && !q.escalated && this.triageJob(q) != null,
+      ceoReview: q.status === 'passed' ? (approved ? 'approved' : floor ? 'waiting' : null) : null,
       updatedAt: q.updatedAt,
       shots: q.shots ?? [],
     };
@@ -1308,6 +1316,7 @@ export class Swarm {
       color: FLOOR_COLORS[(floor - 1) % FLOOR_COLORS.length],
       autoAssign: !!opts.autoAssign,
       autoMerge: true,
+      ceoReview: false,
       browserTesting: true,
       links: [],
       localPath: folder,
@@ -1415,7 +1424,7 @@ export class Swarm {
 
   updateRepo(
     id: string,
-    patch: Partial<Pick<PersistedRepo, 'autoAssign' | 'autoMerge' | 'browserTesting' | 'color' | 'links' | 'mission' | 'summary' | 'qaBrief'>> & { previewCommand?: unknown; previewEnv?: unknown },
+    patch: Partial<Pick<PersistedRepo, 'autoAssign' | 'autoMerge' | 'ceoReview' | 'browserTesting' | 'color' | 'links' | 'mission' | 'summary' | 'qaBrief'>> & { previewCommand?: unknown; previewEnv?: unknown },
   ) {
     const repo = this.repo(id);
     const preview = parsePreviewPatch(patch.previewCommand, patch.previewEnv);
@@ -1425,6 +1434,10 @@ export class Swarm {
     if (patch.autoMerge !== undefined) {
       repo.autoMerge = !!patch.autoMerge;
       if (repo.autoMerge) void this.syncRepo(repo.id);
+    }
+    if (patch.ceoReview !== undefined) {
+      repo.ceoReview = !!patch.ceoReview;
+      if (!repo.ceoReview) void this.syncRepo(repo.id); // waiting PRs move on
     }
     if (patch.browserTesting !== undefined) repo.browserTesting = !!patch.browserTesting;
     if (patch.color && /^#[0-9a-f]{6}$/i.test(patch.color)) repo.color = patch.color;
@@ -1474,12 +1487,12 @@ export class Swarm {
 
   /** One step toward merging a QA-passed PR. Returns true when it merged. */
   private async advanceMerge(repo: PersistedRepo, rec: QaRecord, pr: PullInfo): Promise<boolean> {
-    let step = mergeStep(pr, rec, Date.now(), { base: repo.defaultBranch });
+    let step = mergeStep(pr, rec, Date.now(), { base: repo.defaultBranch, ceoReview: repo.ceoReview });
     if (step.do === 'details') {
       // GitHub works mergeability out lazily and lists often say UNKNOWN; asking about the PR itself gets an answer.
       const d = await this.backend.prDetails(repo.fullName, pr.number);
       pr = { ...pr, headSha: d.headSha, mergeable: d.mergeable, mergeState: d.mergeState };
-      step = mergeStep(pr, rec, Date.now(), { base: repo.defaultBranch, detailed: true });
+      step = mergeStep(pr, rec, Date.now(), { base: repo.defaultBranch, detailed: true, ceoReview: repo.ceoReview });
     }
     Object.assign(rec, step.set);
     if (step.do === 'requeue') {
@@ -1511,7 +1524,8 @@ export class Swarm {
       this.mergeNote(rec, `updating the branch with ${repo.defaultBranch}`);
       await this.backend.updateBranch(repo.fullName, pr.number);
       const details = await this.backend.prDetails(repo.fullName, pr.number);
-      this.setQa(rec, { passedSha: details.headSha });
+      // A clean update carries the CEO's approval over to the new head, as it carries the passed commit over.
+      this.setQa(rec, rec.ceoApprovedSha === rec.passedSha ? { passedSha: details.headSha, ceoApprovedSha: details.headSha } : { passedSha: details.headSha });
       return false;
     }
     if (step.do !== 'merge') return false;
@@ -2668,6 +2682,7 @@ export class Swarm {
         mergeNote: null,
         testedSha: null,
         passedSha: null,
+        ceoApprovedSha: null,
         fixReason: null,
         mergeFixes: 0,
         retests: 0,
@@ -4841,6 +4856,7 @@ export class Swarm {
           preview: { command: r.preview.command, env: r.preview.env, status: this.previews.view(r).status },
           autoAssign: r.autoAssign,
           autoMerge: r.autoMerge,
+          ceoReview: r.ceoReview,
           folderSync: rt.folderSync,
           team: { size: team.agents.length, max: s.maxAgents, free: this.available(r).length, pendingHires: team.pendingHires.length, pendingLetGos: team.pendingLetGos.length },
           throughput: {

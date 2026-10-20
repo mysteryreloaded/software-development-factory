@@ -177,7 +177,7 @@ export function sampleDay(base: JournalFrame, midnight: number, rand = seeded(7)
     ev({ type: 'repo', repo });
     tick(repo.id, `${a.name} opened PR #${n}`, 'good');
     rest(a, { status: 'done', prNumber: n, prUrl: pr.url });
-    const q: QaView = { repoId: repo.id, prNumber: n, status: 'queued', round: 1, devAgentId: a.id, qaAgentId: null, summary: null, checks: [], commentUrl: null, mergeNote: null, ceoLooking: false, updatedAt: t };
+    const q: QaView = { repoId: repo.id, prNumber: n, status: 'queued', round: 1, devAgentId: a.id, qaAgentId: null, summary: null, checks: [], commentUrl: null, mergeNote: null, ceoLooking: false, ceoReview: null, updatedAt: t };
     qa.set(qaKey(repo.id, n), q);
     emitQa(q);
   }

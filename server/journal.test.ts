@@ -78,6 +78,7 @@ function repo(pulls: PullInfo[]): RepoView {
     color: '#ff0000',
     autoAssign: true,
     autoMerge: true,
+    ceoReview: false,
     folderSync: null,
     browserTesting: false,
     links: [],
