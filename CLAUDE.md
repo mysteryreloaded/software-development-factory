@@ -8,9 +8,11 @@ It ships on npm as `cubefarm` (`npx cubefarm`); it used to be called Office Swar
 
 ## SAFETY (read first)
 
-- The live office runs from `C:\Projects\office-swarm` on this machine, on ports 4317 (server) and 5317 (Vite),
-  with its state in `~/.cubefarm`. Never edit or run anything there, never read or write `~/.cubefarm` directly, and
-  never use ports 4317 or 5317.
+- The live office runs from `/home/nenad/dev/software-development-factory` on this machine, on ports 4317 (server)
+  and 5317 (Vite), with its state in `~/.cubefarm`. Never edit or run anything there, never read or write
+  `~/.cubefarm` outside your own worktree and temp folder, and never use ports 4317 or 5317.
+- The office and your teammates run on this machine: stop only processes you started (by their PID), never
+  `pkill` or `killall`, and never kill `node` or `opencode` by name or port.
 - Test only in demo mode (fake GitHub, fake agents, no Claude usage), with an isolated `SWARM_HOME` and your reserved
   `SWARM_PORT` (from your job instructions):
 
