@@ -315,8 +315,23 @@ export interface CodeReviewPr {
   url: string;
   passedSha: string; // the head commit QA signed off on
   summary: string | null;
+  issue: { number: number; title: string; body: string } | null; // the issue the PR closes; null: none
   diffPath: string | null; // null: the office could not fetch the diff
   diffCut: boolean; // the diff is longer than the cap, so the file is its first part only
+}
+
+/**
+ * Whether a code-review tool may act on PR #pr of `floor`: only in a code-review job, and only on that job's own
+ * PR on its floor. Throws HttpError 409 (no code-review job, or a different floor or PR).
+ */
+export function checkReviewTarget(r: {
+  jobFloor: number | null; // the floor of the CEO's current code-review job; null when it isn't on one
+  jobPr: number | null; // the PR of that job; null when it isn't on one
+  floor: number;
+  pr: number;
+}) {
+  if (r.jobFloor == null || r.floor !== r.jobFloor || r.pr !== r.jobPr)
+    throw new HttpError(409, `Your code review is of PR #${r.jobPr ?? '?'} on floor ${r.jobFloor ?? '?'}: approve_pull and request_changes only act on it.`);
 }
 
 export function ceoJobPrompt(job: CeoJob, floor: { floor: number; fullName: string; clone: string; mission: string; backlog: number } | null, pr?: TriagePr | CodeReviewPr | null): string {
@@ -346,6 +361,7 @@ export function ceoJobPrompt(job: CeoJob, floor: { floor: number; fullName: stri
         `Code review: pull request #${r.number} on floor ${floor.floor} (${floor.fullName}) passed QA, and on this floor it merges only once you approve its head commit.`,
         `"${r.title}" · ${r.url} · read-only clone of the default branch at ${floor.clone}`,
         `QA passed commit ${r.passedSha}. QA summary: ${r.summary ?? 'none yet'}`,
+        r.issue ? `Its issue #${r.issue.number} "${r.issue.title}":\n"""${r.issue.body}"""` : 'No linked issue.',
         r.diffPath
           ? `The PR's diff is at ${r.diffPath}${r.diffCut ? ` (the diff is longer, so it is cut to the first ${Math.round(MAX_PR_DIFF / 1000)} KB)` : ''}.`
           : "The office could not fetch the PR's diff, so there is no file to read. End the job without a verdict; the office tells the manager.",

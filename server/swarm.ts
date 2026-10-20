@@ -6,7 +6,7 @@ import type { Backend } from './backend.ts';
 import type { LogEntry, SessionHandle, SessionResult } from './agentRunner.ts';
 import { MAX_PR_DIFF, type PrDetails } from './github.ts';
 import { defaultProjectsDir, DESK_SWEEP_INTERVAL_MS, HOME_DIR, LOG_BUFFER, SCHEDULER_INTERVAL_MS, STATE_FILE, SYNC_INTERVAL_MS, VERSION } from './config.ts';
-import { askedFor, ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, createOfficeTools, floorCapacity, IssueCap, jobLabel, NOT_ASKED, planDependencies, plannedSize, scalePlan, type CeoJob, type CodeReviewPr, type OfficeTools, type TeamNow } from './ceo.ts';
+import { askedFor, ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, checkReviewTarget, createOfficeTools, floorCapacity, IssueCap, jobLabel, NOT_ASKED, planDependencies, plannedSize, scalePlan, type CeoJob, type CodeReviewPr, type OfficeTools, type TeamNow } from './ceo.ts';
 import { afterClose, ASK_AGAIN_MS, closedWhy, closuresHeld, forgettable, issueOpen, nameList, pullNow, stillOpen, stoppedMessage, toAsk, toHold, type Closure, type FloorState, type KnownPull, type LearnedPull } from './closeCleanup.ts';
 import { depsPromptLine, type DepsOutcome } from './deps.ts';
 import { setUpDesk } from './deskSetup.ts';
@@ -4126,6 +4126,7 @@ export class Swarm {
    * (A new commit re-queues it for QA, so a passed record with another head is no review due.)
    */
   private reviewRecord(job: CeoJob) {
+    if (!this.state.repos.find((r) => r.id === job.repoId)?.ceoReview) return undefined; // review switched off: no review due
     return this.state.qa.find((q) => q.repoId === job.repoId && q.prNumber === job.prNumber && q.status === 'passed' && q.ceoApprovedSha !== q.passedSha);
   }
 
@@ -4140,6 +4141,13 @@ export class Swarm {
     const listed = this.repoRt.get(repo.id)?.pulls.find((p) => p.number === rec.prNumber);
     const pr = await this.backend.prDetails(repo.fullName, rec.prNumber).catch(() => null);
     if ((pr ?? listed)?.state !== 'OPEN') return null;
+    // The issue the PR closes, so the CEO can check the work against its scope.
+    const issueNumber = rec.issueNumber ?? pr?.closesIssues[0] ?? listed?.closesIssues[0] ?? null;
+    let issue: CodeReviewPr['issue'] = null;
+    if (issueNumber) {
+      const i = await this.backend.issueDetails(repo.fullName, issueNumber).catch(() => null);
+      if (i) issue = { number: issueNumber, title: i.title, body: i.body.slice(0, 6000) };
+    }
     let diffPath: string | null = null;
     let diffCut = false;
     try {
@@ -4158,6 +4166,7 @@ export class Swarm {
       url: pr?.url ?? listed?.url ?? '',
       passedSha: rec.passedSha,
       summary: rec.summary,
+      issue,
       diffPath,
       diffCut,
     };
@@ -4170,11 +4179,13 @@ export class Swarm {
   private async reviewTarget(x: { floor: number; pr: number }) {
     const job = this.state.ceo.job;
     const jobFloor = job?.kind === 'code-review' ? (this.state.repos.find((r) => r.id === job.repoId)?.floor ?? null) : null;
+    const jobPr = job?.kind === 'code-review' ? (job.prNumber ?? null) : null;
     const repo = this.state.repos.find((r) => r.floor === x.floor);
     const pr = Number(x.pr);
     const listed = repo ? this.repoRt.get(repo.id)?.pulls.find((p) => p.number === pr) : undefined;
-    if (job?.kind !== 'code-review' || !repo || x.floor !== jobFloor)
+    if (!repo)
       throw new HttpError(409, `Your code review is of PR #${job?.prNumber ?? '?'} on floor ${jobFloor ?? '?'}: approve_pull and request_changes only act on it.`);
+    checkReviewTarget({ jobFloor, jobPr, floor: x.floor, pr });
     const rec = this.state.qa.find((q) => q.repoId === repo.id && q.prNumber === pr);
     if (!rec || rec.status !== 'passed' || !rec.passedSha) throw new HttpError(409, `PR #${pr} isn't awaiting a code review${rec ? `: it is ${rec.status}` : ''}.`);
     // The last sync may be a minute old and doesn't know the head: ask GitHub about this PR.

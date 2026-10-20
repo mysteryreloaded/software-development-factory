@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { EAST_DESKS, MAX_DESKS } from '../client/src/world/layout.ts';
 import { FLOOR_SEATS, type QaStatus } from '../shared/types.ts';
 import type { HttpError } from './httpError.ts';
-import { ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, createOfficeTools, floorCapacity, IssueCap, jobLabel, planDependencies, plannedSize, scalePlan, type CeoJob, type CodeReviewPr, type DependsRequest, type TeamNow } from './ceo.ts';
+import { ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, checkReviewTarget, createOfficeTools, floorCapacity, IssueCap, jobLabel, planDependencies, plannedSize, scalePlan, type CeoJob, type CodeReviewPr, type DependsRequest, type TeamNow } from './ceo.ts';
 
 describe('seats', () => {
   it('match the desks the client draws', () => {
@@ -341,6 +341,7 @@ describe('code review', () => {
     url: 'https://github.com/acme/app/pull/108',
     passedSha: 'deadbeef',
     summary: 'All checks pass; the slider works on phones.',
+    issue: { number: 7, title: 'Jukebox is too loud', body: 'The volume is maxed out and nobody can work.' },
     diffPath: '/home/ceo/reviews/acme__app-108.diff',
     diffCut: false,
   };
@@ -370,6 +371,38 @@ describe('code review', () => {
 
   it('has nothing to do once the PR is no longer awaiting a review', () => {
     expect(ceoJobPrompt(job, floor, null)).toBe('Pull request #108 no longer needs a code review. Reply "Nothing to do."');
+  });
+
+  it('carries the PR issue so the CEO can check the work against its scope', () => {
+    const prompt = ceoJobPrompt(job, floor, pr);
+    expect(prompt).toContain(`Its issue #${pr.issue!.number} "${pr.issue!.title}":`);
+    expect(prompt).toContain(`"""${pr.issue!.body}"""`);
+  });
+
+  it('says no linked issue when the PR closes none', () => {
+    expect(ceoJobPrompt(job, floor, { ...pr, issue: null })).toContain('No linked issue.');
+  });
+});
+
+describe('checkReviewTarget', () => {
+  const ok = { jobFloor: 2, jobPr: 108, floor: 2, pr: 108 };
+
+  it('allows the job own PR on its floor', () => {
+    expect(() => checkReviewTarget(ok)).not.toThrow();
+  });
+
+  it('refuses without a code-review job', () => {
+    expect(() => checkReviewTarget({ jobFloor: null, jobPr: null, floor: 2, pr: 108 })).toThrow(expect.objectContaining({ status: 409 }));
+  });
+
+  it('refuses another floor', () => {
+    expect(() => checkReviewTarget({ ...ok, floor: 3 })).toThrow(
+      expect.objectContaining({ status: 409, message: 'Your code review is of PR #108 on floor 2: approve_pull and request_changes only act on it.' }),
+    );
+  });
+
+  it('refuses another PR on the job floor', () => {
+    expect(() => checkReviewTarget({ ...ok, pr: 109 })).toThrow(expect.objectContaining({ status: 409 }));
   });
 });
 
