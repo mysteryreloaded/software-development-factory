@@ -146,7 +146,7 @@ export interface LaunchContext {
   notify: { script: string; url: string };
   /** Codex's hook program: forwards each hook to the office (notify.url). */
   codexHook: string;
-  plugin: string; // file URL of the OpenCode plugin
+  plugin: string; // file URL of the folder the office wrote the OpenCode 2 plugin to (OpenCode 2 loads a local plugin from a directory, not a file)
   /** The Playwright MCP server, when the floor tests in a browser. Claude Code gets it through its MCP config file. */
   browser: { command: string; args: string[] } | null;
 }
@@ -368,33 +368,82 @@ process.stdin.on('end', async () => {
 });
 `;
 
-/** OpenCode plugin: reports its session and when it goes idle (a turn is complete). No imports: loaded from a file. */
-export const OPENCODE_PLUGIN_SOURCE = String.raw`// cubefarm: tells the office when OpenCode's session goes idle.
-export default async function CubefarmPlugin({ client } = {}) {
-  const url = process.env.CUBEFARM_NOTIFY_URL;
-  if (!url) return {};
-  let root;
-  const post = (body) =>
-    fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(3000) }).catch(() => {});
-  const lastReply = async (id) => {
-    try {
-      const res = await client.session.messages({ path: { id } });
-      const reply = (res?.data ?? []).filter((m) => m?.info?.role === 'assistant').pop();
-      return (reply?.parts ?? []).filter((p) => p?.type === 'text').map((p) => p.text).join('\n').trim();
-    } catch {
-      return '';
-    }
-  };
-  return {
-    event: async ({ event }) => {
-      const props = event?.properties ?? {};
-      if (event?.type === 'session.created' && !props.info?.parentID && !root) root = props.info?.id;
-      const sessionID = props.sessionID ?? props.info?.id;
-      if (event?.type === 'session.idle' && (!root || sessionID === root)) {
-        post({ hook_event_name: 'TurnComplete', session_id: sessionID ?? null, last_assistant_message: sessionID ? await lastReply(sessionID) : '' });
-      }
-      if (event?.type === 'session.error') post({ hook_event_name: 'TurnError', session_id: sessionID ?? null, error: String(props.error?.data?.message ?? props.error?.name ?? 'error') });
-    },
-  };
+/**
+ * OpenCode 2's plugin, as a folder: OpenCode 2 loads a local plugin from a directory (its package.json points at
+ * index.js, which default-exports { id, setup } with no imports, because @opencode/plugin is not installed). setup
+ * starts the event loop in the background and returns at once (the loader awaits setup, and an open loop would keep
+ * the plugin loading). The root session is the first session.created without a parentID; a turn is complete when it
+ * (or any session while the root is unknown) goes idle, or when its execution succeeds (a one-shot `run` exits right
+ * after, without an idle), and session.error is a failed turn. Each session's server has its own CUBEFARM_NOTIFY_URL,
+ * so the post goes to its own office.
+ */
+export const OPENCODE_PLUGIN_FILES: Record<string, string> = {
+  'package.json': String.raw`{"type":"module","exports":{".":"./index.js"}}`,
+  'index.js': String.raw`// cubefarm: tells the office when an OpenCode turn ends, and posts the last assistant message with it.
+function post(url, body) {
+  fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(3000) }).catch(() => {});
 }
-`;
+
+function text(msg) {
+  // v2 messages are flat ({ type: 'user' | 'assistant' | 'idle', content: [...] }); the v1 ones nest it ({ info, parts })
+  if (msg?.type !== 'assistant' && msg?.info?.role !== 'assistant') return '';
+  const parts = msg?.content ?? msg?.parts ?? [];
+  return parts.filter((p) => p?.type === 'text').map((p) => p.text).join('\n').trim();
+}
+
+let firstContext;
+async function lastReply(ctx, sessionID) {
+  let raw;
+  try {
+    raw = await ctx.session.context({ sessionID });
+    if (raw !== undefined && !firstContext) {
+      firstContext = true;
+      console.error('[cubefarm] opencode context: ' + JSON.stringify(raw).slice(0, 1500));
+    }
+    const messages = raw == null ? [] : Array.isArray(raw) ? raw : raw?.data ?? [];
+    return messages.map(text).reverse().find((t) => t !== '') ?? '';
+  } catch (err) {
+    console.error('[cubefarm] opencode context: ' + String(err?.message ?? err));
+    return '';
+  }
+}
+
+async function follow(ctx, url) {
+  let root;
+  let firstEvent;
+  const lastTurn = new Map(); // sessionID -> the turn end we last reported ({ at, kind })
+  for await (const event of ctx.event.subscribe({ signal: new AbortController().signal })) {
+    if (!firstEvent) {
+      firstEvent = true;
+      console.error('[cubefarm] opencode event: ' + JSON.stringify(event).slice(0, 2000));
+    }
+    const d = event?.data ?? {};
+    if (event?.type === 'session.created' && !root && !d.parentID) root = d.sessionID;
+    const sessionID = d.sessionID;
+    if ((event?.type === 'session.idle' || event?.type === 'session.execution.succeeded') && (!root || sessionID === root)) {
+      const now = Date.now();
+      const prev = lastTurn.get(sessionID);
+      // OpenCode 2 can report one turn end with both events; take only the first of the two
+      if (!(prev && prev.kind !== event.type && now - prev.at < 1000)) {
+        lastTurn.set(sessionID, { at: now, kind: event.type });
+        post(url, { hook_event_name: 'TurnComplete', session_id: sessionID ?? null, last_assistant_message: sessionID ? await lastReply(ctx, sessionID) : '' });
+      }
+    }
+    if (event?.type === 'session.error') {
+      const e = d.error;
+      const message = typeof e === 'string' ? e : e?.message ?? e?.data?.message ?? e?.name;
+      post(url, { hook_event_name: 'TurnError', session_id: sessionID ?? null, error: message ? String(message) : 'error' });
+    }
+  }
+}
+
+async function setup(ctx) {
+  const url = process.env.CUBEFARM_NOTIFY_URL;
+  if (!url) return;
+  // OpenCode awaits setup while loading the plugin, so the event loop must not block it: run it in the background.
+  void follow(ctx, url).catch((err) => console.error('[cubefarm] opencode loop stopped: ' + String(err?.message ?? err)));
+}
+
+export default { id: 'cubefarm', setup };
+`
+};

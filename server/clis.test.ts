@@ -1,8 +1,9 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { CODEX_HOOK_EVENTS, codexHookCommand, CROSS_TURN_TOOLS, hookReviewKey, interruptions, launchArgs, oneAtATime, trustKey, unwrapCmdShim, type LaunchContext } from './clis.ts';
+import { CODEX_HOOK_EVENTS, codexHookCommand, CROSS_TURN_TOOLS, hookReviewKey, interruptions, launchArgs, oneAtATime, OPENCODE_PLUGIN_FILES, trustKey, unwrapCmdShim, type LaunchContext } from './clis.ts';
 import { describeOfficeTool, describeTool, newScreenshots, screenshotFile, summariseResult } from './agentRunner.ts';
 
 const dir = path.join(os.tmpdir(), 'npm-global');
@@ -149,6 +150,73 @@ describe('launchArgs', () => {
       expect(args).not.toContain('--server');
       expect(args.slice(args.indexOf('--prompt'))).toEqual(['--prompt', '--looks like a flag']);
     }
+  });
+});
+
+describe('the OpenCode 2 plugin', () => {
+  // The events and messages exactly as OpenCode 2 delivers them: the event is an { type, data } envelope; messages
+  // are flat — type is the role, the text is in content, and the turn ends with a synthetic { type: 'idle' } marker.
+  const events = [
+    { type: 'session.created', data: { sessionID: 'ses_1' } },
+    { type: 'session.idle', data: { sessionID: 'ses_1' } },
+    { type: 'session.execution.succeeded', data: { sessionID: 'ses_1' } }, // the same turn reported again: deduped
+    { type: 'session.error', data: { sessionID: 'ses_1', error: { message: 'boom' } } },
+  ];
+  const messages = [
+    { type: 'user', text: 'say hi', files: [] },
+    { type: 'assistant', content: [{ type: 'reasoning', text: 'hmm' }, { type: 'text', text: 'Hi there' }] },
+    { type: 'idle', outcome: 'succeeded' },
+  ];
+
+  /** Runs the written plugin's setup against a fake ctx with the given events and messages, counting the POSTs. */
+  async function run(url: string | undefined, evs: Record<string, unknown>[], msgs: unknown[]): Promise<Record<string, unknown>[]> {
+    const posts: Record<string, unknown>[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      posts.push(JSON.parse(String(init?.body)));
+      return { ok: true, json: async () => ({}) };
+    }) as typeof fetch;
+    const prev = process.env.CUBEFARM_NOTIFY_URL;
+    if (url === undefined) delete process.env.CUBEFARM_NOTIFY_URL;
+    else process.env.CUBEFARM_NOTIFY_URL = url;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-opencode-plugin-'));
+    let resolveDone!: () => void;
+    const done = new Promise<void>((r) => (resolveDone = r));
+    let subscribed = false;
+    const ctx = {
+      signal: new AbortController().signal,
+      event: { subscribe: () => { subscribed = true; return { [Symbol.asyncIterator]: async function* () { yield* evs; resolveDone(); } }; } },
+      session: { context: async () => msgs },
+    };
+    try {
+      for (const [name, content] of Object.entries(OPENCODE_PLUGIN_FILES)) fs.writeFileSync(path.join(dir, name), content);
+      const mod = await import(pathToFileURL(path.join(dir, 'index.js')).href) as { default: { setup: (c: unknown) => Promise<void> } };
+      await mod.default.setup(ctx);
+      // setup returns at once; the event loop it started in the background runs to the end of the fake stream
+      if (subscribed) await done;
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      if (prev === undefined) delete process.env.CUBEFARM_NOTIFY_URL;
+      else process.env.CUBEFARM_NOTIFY_URL = prev;
+      globalThis.fetch = realFetch;
+    }
+    return posts;
+  }
+
+  it('posts a TurnComplete with the last assistant message, a TurnError for session.error, and nothing without a URL', async () => {
+    expect(await run('http://127.0.0.1:1/api/hooks/t', events, messages)).toEqual([
+      { hook_event_name: 'TurnComplete', session_id: 'ses_1', last_assistant_message: 'Hi there' },
+      { hook_event_name: 'TurnError', session_id: 'ses_1', error: 'boom' },
+    ]);
+    expect(await run(undefined, events, messages)).toEqual([]);
+  });
+
+  it('posts a TurnComplete for an idle session before any root session is known', async () => {
+    const evs = [
+      { type: 'session.idle', data: { sessionID: 'ses_a' } },
+      { type: 'session.created', data: { sessionID: 'ses_b', parentID: 'ses_a' } },
+    ];
+    expect(await run('http://127.0.0.1:1/api/hooks/t', evs, messages)).toEqual([{ hook_event_name: 'TurnComplete', session_id: 'ses_a', last_assistant_message: 'Hi there' }]);
   });
 });
 

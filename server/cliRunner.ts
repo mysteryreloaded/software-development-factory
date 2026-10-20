@@ -6,7 +6,7 @@ import type { Request, Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { browserProblem, playwrightMcp } from './browser.ts';
 import { HOME_DIR } from './config.ts';
-import { cliLabel, CODEX_HOOK_SOURCE, codexThread, commandFor, hookReviewKey, interruptions, isCli, launchArgs, NOTIFY_SOURCE, OPENCODE_PLUGIN_SOURCE, STATUSLINE_SOURCE, trustKey } from './clis.ts';
+import { cliLabel, CODEX_HOOK_SOURCE, codexThread, commandFor, hookReviewKey, interruptions, isCli, launchArgs, NOTIFY_SOURCE, OPENCODE_PLUGIN_FILES, STATUSLINE_SOURCE, trustKey } from './clis.ts';
 import { adoptPty, discardPty, hooksReady, keeperHookUrl, keeperPid, leaveKeeper, spawnPty, startKeeper, terminalsAvailable, type Pty } from './ptyClient.ts';
 import {
   clip,
@@ -106,7 +106,9 @@ function writeHelpers() {
   fs.writeFileSync(path.join(BIN_DIR, 'statusline.cjs'), STATUSLINE_SOURCE);
   fs.writeFileSync(path.join(BIN_DIR, 'notify.cjs'), NOTIFY_SOURCE);
   fs.writeFileSync(path.join(BIN_DIR, 'codex-hook.cjs'), CODEX_HOOK_SOURCE);
-  fs.writeFileSync(path.join(BIN_DIR, 'opencode-plugin.mjs'), OPENCODE_PLUGIN_SOURCE);
+  const pluginDir = path.join(BIN_DIR, 'opencode-plugin');
+  fs.mkdirSync(pluginDir, { recursive: true });
+  for (const [name, source] of Object.entries(OPENCODE_PLUGIN_FILES)) fs.writeFileSync(path.join(pluginDir, name), source);
   helpersWritten = true;
 }
 
@@ -676,7 +678,7 @@ export function startCliSession(opts: SessionOptions, callbacks: SessionCallback
     files,
     notify: { script: path.join(BIN_DIR, 'notify.cjs'), url: hookUrl },
     codexHook: path.join(BIN_DIR, 'codex-hook.cjs'),
-    plugin: pathToFileURL(path.join(BIN_DIR, 'opencode-plugin.mjs')).href,
+    plugin: pathToFileURL(path.join(BIN_DIR, 'opencode-plugin')).href,
     browser,
   });
 
