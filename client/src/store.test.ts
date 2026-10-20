@@ -222,3 +222,27 @@ describe('batched agents and watched terminal lines (#228)', () => {
     expect(useStore.getState().logs.ken.map((l) => l.id)).toEqual([7]);
   });
 });
+
+describe('the CEO chat draft', () => {
+  beforeEach(() => {
+    useStore.setState({ ceoDraft: '' });
+  });
+
+  it('keeps the draft when the phone is put away', () => {
+    useStore.getState().setCeoDraft('half a thought');
+    useStore.getState().openOverlay(null);
+    expect(useStore.getState().ceoDraft).toBe('half a thought');
+  });
+
+  it('keeps the draft across a reconnect snapshot', () => {
+    useStore.getState().setCeoDraft('half a thought');
+    useStore.getState().apply(snapshot([]));
+    expect(useStore.getState().ceoDraft).toBe('half a thought');
+  });
+
+  it('is cleared by send', () => {
+    useStore.getState().setCeoDraft('half a thought');
+    useStore.getState().setCeoDraft('');
+    expect(useStore.getState().ceoDraft).toBe('');
+  });
+});

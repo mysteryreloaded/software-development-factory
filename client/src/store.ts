@@ -113,6 +113,7 @@ interface State {
   ceo: CeoInfo;
   messages: PhoneMessage[];
   phoneReadAt: number;
+  ceoDraft: string; // the phone chat's unsent message to the CEO: kept while the phone is put away (this tab only)
   version?: string; // the cubefarm version the server runs
   officeCommit?: string | null; // undefined: the server can't update itself
   officeUpdate?: OfficeUpdateView;
@@ -152,6 +153,7 @@ interface State {
   setReplaying(v: boolean): void;
   setRestarting(v: boolean): void;
   setOfficeUpdate(u: OfficeUpdateView): void;
+  setCeoDraft(text: string): void;
   openOverlay(o: Overlay | null): void;
   setFocus(f: Focus | null): void;
   /** Pick something up (or swap), or let go of it with null. Always ends a charge. */
@@ -242,6 +244,7 @@ export const useStore = create<State>((set, get) => ({
   ceo: { queue: [], job: null, lastReviewAt: null, nextReviewAt: null },
   messages: [],
   phoneReadAt: 0,
+  ceoDraft: '',
   usage: { state: 'normal', until: null, warning: null },
   ops: EMPTY_OPS,
   doctor: [],
@@ -541,6 +544,7 @@ export const useStore = create<State>((set, get) => ({
   setReplaying: (replaying) => set({ replaying }),
   setRestarting: (restarting) => set({ restarting }),
   setOfficeUpdate: (officeUpdate) => set({ officeUpdate }),
+  setCeoDraft: (ceoDraft) => set({ ceoDraft }),
   openOverlay(overlay) {
     // Terminals and the floor's app are live, whatever the time-lapse shows.
     if (overlay && get().replaying && (overlay.kind === 'terminal' || overlay.kind === 'app')) {
