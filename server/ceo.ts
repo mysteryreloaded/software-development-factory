@@ -2,6 +2,7 @@ import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@
 import { z } from 'zod';
 import { blockers, holdUps, setDependsOn } from '../shared/issues.ts';
 import { FLOOR_SEATS, type AgentCli, type CeoJobKind, type QaStatus } from '../shared/types.ts';
+import { MAX_PR_DIFF } from './github.ts';
 import { HttpError } from './httpError.ts';
 import { ONE_TURN } from './prompts.ts';
 import { MAX_TRIAGES, type TriagePr } from './triage.ts';
@@ -16,8 +17,8 @@ export const NOT_ASKED = "Only the manager decides on new work, and they haven't
 
 export interface CeoJob {
   kind: CeoJobKind;
-  repoId?: string; // onboard / plan / triage
-  prNumber?: number; // triage: the stuck pull request
+  repoId?: string; // onboard / plan / triage / code-review
+  prNumber?: number; // triage: the stuck pull request; code-review: the one that passed QA
   text?: string; // chat: the manager's message(s)
   at: number;
 }
@@ -40,6 +41,8 @@ export interface OfficeHandlers {
   rerunChecks(a: { floor: number; pr: number }): Promise<string>;
   closePull(a: { floor: number; pr: number; comment: string }): Promise<string>;
   escalate(a: { floor: number; pr: number; reason: string }): Promise<string>;
+  approvePull(a: { floor: number; pr: number; comment: string }): Promise<string>;
+  requestChanges(a: { floor: number; pr: number; note: string }): Promise<string>;
 }
 
 export interface OfficeTools {
@@ -181,6 +184,26 @@ export function createOfficeTools(h: OfficeHandlers): OfficeTools {
       { floor: z.number().int(), pr: z.number().int().positive(), reason: z.string().min(1).max(300).describe('One line: what is wrong and what the manager has to decide') },
       (a) => run(() => h.escalate(a)),
     ),
+    tool(
+      'approve_pull',
+      "Code review only: approve this job's pull request once you are happy with it: your review is posted on the PR, and it merges once GitHub's checks are green (auto-merge floors) or when the manager merges it (the rest).",
+      {
+        floor: z.number().int(),
+        pr: z.number().int().positive(),
+        comment: z.string().min(1).max(1000).describe('Posted on the PR: what you looked at and why it can merge'),
+      },
+      (a) => run(() => h.approvePull(a)),
+    ),
+    tool(
+      'request_changes',
+      "Code review only: send this job's pull request back to a developer with your note: your review is posted on the PR, and the developer fixes it before it is tested and reviewed again.",
+      {
+        floor: z.number().int(),
+        pr: z.number().int().positive(),
+        note: z.string().min(1).max(1000).describe("What the developer should change, exactly; it goes with the fix and it's re-reviewed when it comes back"),
+      },
+      (a) => run(() => h.requestChanges(a)),
+    ),
   ];
   const server = createSdkMcpServer({ name: 'office', version: '1.0.0', tools: defs });
   return {
@@ -285,24 +308,52 @@ export function ceoSystemPrompt(o: {
   ].join('\n');
 }
 
-export function ceoJobPrompt(job: CeoJob, floor: { floor: number; fullName: string; clone: string; mission: string; backlog: number } | null, pr?: TriagePr | null): string {
+/** The PR facts a code-review job's prompt carries: QA's sign-off and where the office put the diff for the CEO to read. */
+export interface CodeReviewPr {
+  number: number;
+  title: string;
+  url: string;
+  passedSha: string; // the head commit QA signed off on
+  summary: string | null;
+  diffPath: string | null; // null: the office could not fetch the diff
+  diffCut: boolean; // the diff is longer than the cap, so the file is its first part only
+}
+
+export function ceoJobPrompt(job: CeoJob, floor: { floor: number; fullName: string; clone: string; mission: string; backlog: number } | null, pr?: TriagePr | CodeReviewPr | null): string {
   switch (job.kind) {
-    case 'triage':
-      if (!floor || !pr) return `Pull request #${job.prNumber ?? '?'} no longer needs triage. Reply "Nothing to do."`;
+    case 'triage': {
+      const t = pr as TriagePr | null; // the caller passes the facts of this job's kind
+      if (!floor || !t) return `Pull request #${job.prNumber ?? '?'} no longer needs triage. Reply "Nothing to do."`;
       return [
-        `Triage: pull request #${pr.number} on floor ${floor.floor} (${floor.fullName}) is stuck and needs a decision before it reaches the manager.`,
-        `"${pr.title}" · ${pr.url} · read-only clone of the default branch at ${floor.clone}`,
-        `Why it stopped: ${pr.why ?? 'unknown'}`,
-        `QA round ${pr.round}. QA summary: ${pr.summary ?? 'none yet'}`,
-        pr.fixInstructions ? `QA's fix instructions:\n${pr.fixInstructions}` : '',
-        pr.mergeNote ? `Merge note: ${pr.mergeNote}` : '',
-        `GitHub checks: ${pr.checks}${pr.failedChecks.length ? ` (failed: ${pr.failedChecks.join(', ')})` : ''}${pr.pendingChecks.length ? ` (running: ${pr.pendingChecks.join(', ')})` : ''} · mergeable: ${pr.mergeable} (${pr.mergeState})`,
-        `This is triage ${pr.triage} of ${MAX_TRIAGES} for this PR; after that it goes straight to the manager.`,
+        `Triage: pull request #${t.number} on floor ${floor.floor} (${floor.fullName}) is stuck and needs a decision before it reaches the manager.`,
+        `"${t.title}" · ${t.url} · read-only clone of the default branch at ${floor.clone}`,
+        `Why it stopped: ${t.why ?? 'unknown'}`,
+        `QA round ${t.round}. QA summary: ${t.summary ?? 'none yet'}`,
+        t.fixInstructions ? `QA's fix instructions:\n${t.fixInstructions}` : '',
+        t.mergeNote ? `Merge note: ${t.mergeNote}` : '',
+        `GitHub checks: ${t.checks}${t.failedChecks.length ? ` (failed: ${t.failedChecks.join(', ')})` : ''}${t.pendingChecks.length ? ` (running: ${t.pendingChecks.join(', ')})` : ''} · mergeable: ${t.mergeable} (${t.mergeState})`,
+        `This is triage ${t.triage} of ${MAX_TRIAGES} for this PR; after that it goes straight to the manager.`,
         '',
-        `Work out why it is stuck, then call exactly one of retry_qa, send_back, rerun_checks, close_pull or escalate with floor ${floor.floor} and pr ${pr.number}. If you end without one, the manager is alerted. Your final message: one or two sentences on what you found and did.`,
+        `Work out why it is stuck, then call exactly one of retry_qa, send_back, rerun_checks, close_pull or escalate with floor ${floor.floor} and pr ${t.number}. If you end without one, the manager is alerted. Your final message: one or two sentences on what you found and did.`,
       ]
         .filter((l) => l !== '')
         .join('\n');
+    }
+    case 'code-review': {
+      const r = pr as CodeReviewPr | null; // the caller passes the facts of this job's kind
+      if (!floor || !r) return `Pull request #${job.prNumber ?? '?'} no longer needs a code review. Reply "Nothing to do."`;
+      return [
+        `Code review: pull request #${r.number} on floor ${floor.floor} (${floor.fullName}) passed QA, and on this floor it merges only once you approve its head commit.`,
+        `"${r.title}" · ${r.url} · read-only clone of the default branch at ${floor.clone}`,
+        `QA passed commit ${r.passedSha}. QA summary: ${r.summary ?? 'none yet'}`,
+        r.diffPath
+          ? `The PR's diff is at ${r.diffPath}${r.diffCut ? ` (the diff is longer, so it is cut to the first ${Math.round(MAX_PR_DIFF / 1000)} KB)` : ''}.`
+          : "The office could not fetch the PR's diff, so there is no file to read. End the job without a verdict; the office tells the manager.",
+        'Review it for correctness, scope against its issue, tests for new behaviour, and anything that could break the project.',
+        `Then call exactly one of approve_pull or request_changes with floor ${floor.floor} and pr ${r.number}. request_changes' note tells the developer exactly what to change.`,
+        'Your final message: one or two sentences.',
+      ].join('\n');
+    }
     case 'onboard':
       if (!floor) return 'A floor was added but has since been removed. Reply "Nothing to do."';
       return [
@@ -358,6 +409,8 @@ export function jobLabel(job: CeoJob, floor: { floor: number; fullName: string }
       return 'Replying to you';
     case 'triage':
       return `Triaging PR #${job.prNumber ?? '?'} · ${where}`;
+    case 'code-review':
+      return `Reviewing PR #${job.prNumber ?? '?'} · ${where}`;
   }
 }
 

@@ -4,9 +4,9 @@ import crypto from 'node:crypto';
 import type { WebSocket } from 'ws';
 import type { Backend } from './backend.ts';
 import type { LogEntry, SessionHandle, SessionResult } from './agentRunner.ts';
-import type { PrDetails } from './github.ts';
+import { MAX_PR_DIFF, type PrDetails } from './github.ts';
 import { defaultProjectsDir, DESK_SWEEP_INTERVAL_MS, HOME_DIR, LOG_BUFFER, SCHEDULER_INTERVAL_MS, STATE_FILE, SYNC_INTERVAL_MS, VERSION } from './config.ts';
-import { askedFor, ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, createOfficeTools, floorCapacity, IssueCap, jobLabel, NOT_ASKED, planDependencies, plannedSize, scalePlan, type CeoJob, type OfficeTools, type TeamNow } from './ceo.ts';
+import { askedFor, ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, createOfficeTools, floorCapacity, IssueCap, jobLabel, NOT_ASKED, planDependencies, plannedSize, scalePlan, type CeoJob, type CodeReviewPr, type OfficeTools, type TeamNow } from './ceo.ts';
 import { afterClose, ASK_AGAIN_MS, closedWhy, closuresHeld, forgettable, issueOpen, nameList, pullNow, stillOpen, stoppedMessage, toAsk, toHold, type Closure, type FloorState, type KnownPull, type LearnedPull } from './closeCleanup.ts';
 import { depsPromptLine, type DepsOutcome } from './deps.ts';
 import { setUpDesk } from './deskSetup.ts';
@@ -511,6 +511,8 @@ export class Swarm {
       rerunChecks: (a) => this.triageRerunChecks(a),
       closePull: (a) => this.triageClosePull(a),
       escalate: (a) => this.triageEscalate(a),
+      approvePull: (a) => this.reviewApprove(a),
+      requestChanges: (a) => this.reviewRequestChanges(a),
     });
   }
   private ceoIssues = new IssueCap(MAX_ISSUES_PER_JOB); // issues filed during the current CEO job
@@ -1438,6 +1440,10 @@ export class Swarm {
     if (patch.ceoReview !== undefined) {
       repo.ceoReview = !!patch.ceoReview;
       if (!repo.ceoReview) void this.syncRepo(repo.id); // waiting PRs move on
+      else
+        // Every passed PR on the floor now waits for a verdict on its passed commit.
+        for (const rec of this.state.qa.filter((q) => q.repoId === repo.id && q.status === 'passed' && q.ceoApprovedSha !== q.passedSha))
+          this.enqueueCeo({ kind: 'code-review', repoId: repo.id, prNumber: rec.prNumber, at: Date.now() });
     }
     if (patch.browserTesting !== undefined) repo.browserTesting = !!patch.browserTesting;
     if (patch.color && /^#[0-9a-f]{6}$/i.test(patch.color)) repo.color = patch.color;
@@ -2732,17 +2738,20 @@ export class Swarm {
     } else this.toast('info', `PR #${prNumber} is queued for QA`);
   }
 
-  /** Manager's "send back to dev" for a PR that needs a human or failed QA: a developer fixes it, with the note. */
-  async sendBackToDev(repoId: string, prNumber: number, note?: string, from?: string) {
+  /**
+   * Manager's "send back to dev" for a PR that needs a human or failed QA: a developer fixes it, with the note. The CEO's
+   * request_changes reuses it on a passed PR (allowPassed), so its note is the only fix the developer gets.
+   */
+  async sendBackToDev(repoId: string, prNumber: number, note?: string, from?: string, opts: { allowPassed?: boolean } = {}) {
     const repo = this.repo(repoId);
     const find = () => this.state.qa.find((q) => q.repoId === repo.id && q.prNumber === prNumber);
     const listed = this.repoRt.get(repo.id)?.pulls.find((p) => p.number === prNumber);
-    sendBackPatch(prNumber, listed, find(), repo.defaultBranch, note, from); // refuse before asking GitHub
+    sendBackPatch(prNumber, listed, find(), repo.defaultBranch, note, from, opts); // refuse before asking GitHub
     // The last sync's mergeability may be stale or UNKNOWN: ask about the PR itself whether it conflicts now.
     const details = await this.backend.prDetails(repo.fullName, prNumber).catch(() => null);
     const pr = details && listed ? { ...listed, state: details.state, mergeable: details.mergeable, mergeState: details.mergeState } : listed;
     const rec = find();
-    const patch = sendBackPatch(prNumber, pr, rec, repo.defaultBranch, note, from);
+    const patch = sendBackPatch(prNumber, pr, rec, repo.defaultBranch, note, from, opts);
     this.clearPrepStrikes(repo.id, prNumber);
     this.setQa(rec!, { ...patch, preQa: null });
     setTimeout(() => this.schedule(), 200);
@@ -2938,6 +2947,8 @@ export class Swarm {
         qaChecks: pull?.checks ?? null,
         shots,
       });
+      // A floor with CEO code review waits for a verdict on this commit before it merges.
+      if (pass && repo.ceoReview) this.enqueueCeo({ kind: 'code-review', repoId: repo.id, prNumber: rec.prNumber, at: Date.now() });
       // QA's findings travel with the merge fix; the developer's push then gets one more QA round.
       if (next === 'conflict') this.sendBack(repo, rec, 'conflict', conflictFixInstructions(fixInstructions, repo.defaultBranch), false);
       const stillConflicts = pull && (pull.mergeable === 'CONFLICTING' || pull.mergeState === 'DIRTY') ? `, and it still conflicts with ${repo.defaultBranch} with its ${MAX_MERGE_FIXES} merge fixes used up` : '';
@@ -3764,8 +3775,9 @@ export class Swarm {
   private startCeoWork(): void {
     const a = this.state.agents.find((x) => x.id === CEO_ID);
     const c = this.state.ceo;
-    // A triage whose PR is no longer stuck (the manager stepped in, or it closed) has nothing left to do.
-    const stale = c.queue.filter((j) => j.kind === 'triage' && !this.stuckRecord(j));
+    // A triage whose PR is no longer stuck (the manager stepped in, or it closed), and a code review that is no longer
+    // due (new commits, or a verdict already given), have nothing left to do.
+    const stale = c.queue.filter((j) => (j.kind === 'triage' && !this.stuckRecord(j)) || (j.kind === 'code-review' && !this.reviewRecord(j)));
     if (stale.length) {
       c.queue = c.queue.filter((j) => !stale.includes(j));
       this.emitCeo();
@@ -3773,7 +3785,7 @@ export class Swarm {
     }
     if (!a || BUSY.includes(a.status) || c.job || c.queue.length === 0) return;
     if (this.slotsFull()) return;
-    const rank: Record<CeoJob['kind'], number> = { chat: 0, triage: 0, onboard: 1, plan: 1, review: 2 };
+    const rank: Record<CeoJob['kind'], number> = { chat: 0, triage: 0, onboard: 1, plan: 1, 'code-review': 1, review: 2 };
     // A floor's jobs wait for its clone and first sync, so the CEO has something to read.
     const ready = (j: CeoJob) => {
       const rt = j.repoId ? this.repoRt.get(j.repoId) : undefined;
@@ -3820,10 +3832,12 @@ export class Swarm {
     this.save();
     await fs.mkdir(CEO_DIR, { recursive: true }).catch(() => undefined);
     const triage = job.kind === 'triage' ? await this.triagePr(job) : null;
+    const review = job.kind === 'code-review' ? await this.codeReviewPr(job) : null;
     if (a.status !== 'working') {
       // stopped before the session started
       this.state.ceo.job = null;
       if (job.kind === 'triage') this.endTriage(job);
+      if (job.kind === 'code-review') this.endCodeReview(job);
       this.emitCeo();
       return;
     }
@@ -3832,7 +3846,7 @@ export class Swarm {
     rt.session = this.backend.startSession(
       {
         cwd: CEO_DIR,
-        prompt: ceoJobPrompt(job, floor, triage),
+        prompt: ceoJobPrompt(job, floor, triage ?? review),
         systemAppend: ceoSystemPrompt(this.ceoPromptInput(a)),
         model: a.model || CEO_MODEL,
         effort: a.effort || CEO_EFFORT,
@@ -3875,6 +3889,7 @@ export class Swarm {
     const job = this.state.ceo.job;
     this.state.ceo.job = null;
     if (job?.kind === 'triage') this.endTriage(job);
+    if (job?.kind === 'code-review') this.endCodeReview(job);
     if (result.interrupted) this.interrupted(a);
     if (a.status === 'stopped') {
       // the manager already logged the stop
@@ -4102,6 +4117,102 @@ export class Swarm {
     const step = triageStep({ kind: 'escalate', reason: String(x.reason ?? '').split('\n')[0].slice(0, 300) });
     if (step.do === 'escalate') this.escalate(rec, step.note && `${this.ceo().name}: ${step.note}`);
     return `The manager has PR #${rec.prNumber} now, with your diagnosis.`;
+  }
+
+  // ---------- code review ----------
+
+  /**
+   * The record a code-review job is for, while it still awaits a verdict: passed on a head the CEO has not approved.
+   * (A new commit re-queues it for QA, so a passed record with another head is no review due.)
+   */
+  private reviewRecord(job: CeoJob) {
+    return this.state.qa.find((q) => q.repoId === job.repoId && q.prNumber === job.prNumber && q.status === 'passed' && q.ceoApprovedSha !== q.passedSha);
+  }
+
+  /**
+   * What a code-review job's prompt says about its PR: QA's sign-off and the diff file the office wrote for the CEO to
+   * read (the CEO has no shell). null: no review is due.
+   */
+  private async codeReviewPr(job: CeoJob): Promise<CodeReviewPr | null> {
+    const rec = this.reviewRecord(job);
+    const repo = this.state.repos.find((r) => r.id === job.repoId);
+    if (!rec || !repo || !rec.passedSha) return null;
+    const listed = this.repoRt.get(repo.id)?.pulls.find((p) => p.number === rec.prNumber);
+    const pr = await this.backend.prDetails(repo.fullName, rec.prNumber).catch(() => null);
+    if ((pr ?? listed)?.state !== 'OPEN') return null;
+    let diffPath: string | null = null;
+    let diffCut = false;
+    try {
+      const diff = await this.backend.prDiff(repo.fullName, rec.prNumber);
+      diffCut = diff.length >= MAX_PR_DIFF;
+      const [owner, name] = repo.fullName.split('/');
+      diffPath = path.join(CEO_DIR, 'reviews', `${owner}__${name}-${rec.prNumber}.diff`);
+      await fs.mkdir(path.dirname(diffPath), { recursive: true });
+      await fs.writeFile(diffPath, diff);
+    } catch (err) {
+      console.warn(`could not write the diff of ${repo.fullName}#${rec.prNumber} for the CEO's review: ${oneLine(err)}`);
+    }
+    return {
+      number: rec.prNumber,
+      title: pr?.title ?? listed?.title ?? '',
+      url: pr?.url ?? listed?.url ?? '',
+      passedSha: rec.passedSha,
+      summary: rec.summary,
+      diffPath,
+      diffCut,
+    };
+  }
+
+  /**
+   * The PR a code-review tool names; refused (409) unless it is this code-review job's PR on its floor, still passed,
+   * and its head is still the commit QA signed off on: anything else goes back to QA or the manager first.
+   */
+  private async reviewTarget(x: { floor: number; pr: number }) {
+    const job = this.state.ceo.job;
+    const jobFloor = job?.kind === 'code-review' ? (this.state.repos.find((r) => r.id === job.repoId)?.floor ?? null) : null;
+    const repo = this.state.repos.find((r) => r.floor === x.floor);
+    const pr = Number(x.pr);
+    const listed = repo ? this.repoRt.get(repo.id)?.pulls.find((p) => p.number === pr) : undefined;
+    if (job?.kind !== 'code-review' || !repo || x.floor !== jobFloor)
+      throw new HttpError(409, `Your code review is of PR #${job?.prNumber ?? '?'} on floor ${jobFloor ?? '?'}: approve_pull and request_changes only act on it.`);
+    const rec = this.state.qa.find((q) => q.repoId === repo.id && q.prNumber === pr);
+    if (!rec || rec.status !== 'passed' || !rec.passedSha) throw new HttpError(409, `PR #${pr} isn't awaiting a code review${rec ? `: it is ${rec.status}` : ''}.`);
+    // The last sync may be a minute old and doesn't know the head: ask GitHub about this PR.
+    const pull = await this.backend.prDetails(repo.fullName, pr).catch(() => listed);
+    if (!pull || pull.state !== 'OPEN') throw new HttpError(409, `PR #${pr} is no longer open, so there is nothing to review.`);
+    if (pull.headSha !== rec.passedSha) throw new HttpError(409, `New commits since QA: PR #${pr} goes back to QA first, and you can review it again when it passes.`);
+    return { repo, rec, pull, listed };
+  }
+
+  /** Code review: the CEO's verdict is posted on the PR, and the office sets the approved commit, which the merge gate waits for. */
+  private async reviewApprove(x: { floor: number; pr: number; comment: string }) {
+    const { repo, rec, pull } = await this.reviewTarget(x);
+    const comment = String(x.comment ?? '').trim();
+    if (!comment) throw new HttpError(400, 'Say what you looked at and why it can merge: the comment is posted on the PR.');
+    const ceo = this.ceo().name;
+    await this.backend.commentPull(repo.fullName, rec.prNumber, `✅ Code review: approved by ${ceo}, the CEO.\n\n${comment}`);
+    this.setQa(rec, { ceoApprovedSha: pull.headSha });
+    if (repo.autoMerge) void this.syncRepo(repo.id); // the merge gate merges it once the checks are green
+    return `Approved PR #${rec.prNumber}${repo.autoMerge ? "; it merges once GitHub's checks are green" : '; the manager merges it'}.`;
+  }
+
+  /** Code review: the CEO sends the PR back to a developer, with their note as the only fix instructions. */
+  private async reviewRequestChanges(x: { floor: number; pr: number; note: string }) {
+    const { repo, rec } = await this.reviewTarget(x);
+    const note = String(x.note ?? '').trim();
+    if (!note) throw new HttpError(400, 'Say what the developer should change: the note goes with the fix.');
+    const ceo = this.ceo().name;
+    await this.backend.commentPull(repo.fullName, rec.prNumber, `🔁 Code review: changes requested by ${ceo}, the CEO.\n\n${note}`);
+    await this.sendBackToDev(repo.id, rec.prNumber, note, `${ceo}, the CEO`, { allowPassed: true });
+    return `PR #${rec.prNumber} goes back to a developer with your note; it is tested and reviewed again when the fix lands.`;
+  }
+
+  /** A code-review job ended without a verdict (done, failed or stopped): the manager hears, once, and the job is not re-queued. */
+  private endCodeReview(job: CeoJob) {
+    const rec = this.reviewRecord(job);
+    if (!rec) return; // decided already, or no longer passed
+    const repo = this.state.repos.find((r) => r.id === rec.repoId);
+    if (repo) this.postMessage('office', `⚠️ ${this.ceo().name} ended the code review of PR #${rec.prNumber} on ${repo.fullName} without a verdict. Merge it yourself, or switch CEO review off.`);
   }
 
   // ---------- idle desks ----------

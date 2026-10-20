@@ -43,6 +43,8 @@ export interface Backend {
   /** createdAt: when it was filed (absent when the demo no longer knows). */
   issueDetails(fullName: string, number: number): Promise<{ title: string; body: string; createdAt?: string }>;
   commentPull(fullName: string, number: number, body: string): Promise<string>;
+  /** The PR's diff (github.ts prDiff), for the CEO's code review; capped there. */
+  prDiff(fullName: string, number: number): Promise<string>;
   uploadEvidence(fullName: string, filePath: string, data: Buffer): Promise<string>;
   ensureClone(fullName: string): Promise<void>;
   /** Fast-forward the floor's main checkout to GitHub when that is safe; returns how it stands. */
@@ -136,6 +138,7 @@ export const realBackend: Backend = {
   prDetails: github.prDetails,
   issueDetails: github.issueDetails,
   commentPull: github.commentPull,
+  prDiff: github.prDiff,
   uploadEvidence: github.uploadEvidence,
   ensureClone: workspace.ensureClone,
   syncMain: workspace.syncMain,

@@ -5,6 +5,7 @@ import { conflictFixInstructions } from './qaOutcome.ts';
 
 // The manager's "send back to the developer" on a PR that needs a human (or failed QA): QA's findings are already
 // clear, so a developer fixes it straight away, with the manager's note, instead of spending another QA round first.
+// The CEO's code review reuses it on a PR that passed (allowPassed).
 
 /** A note for the developer longer than this is refused. */
 export const MAX_SEND_BACK_NOTE = 1000;
@@ -40,6 +41,7 @@ export interface SendBackPatch {
  * 409 while it is being tested or fixed, or when it isn't waiting on anyone. The scheduler hands a failed record to
  * its author, or any free developer. The extra QA round is counted as a retest, so the round numbers stay honest.
  * A conflicting PR QA never passed goes out as a QA fix, so its instructions add the merge with base.
+ * allowPassed also takes a passed record (the CEO's request_changes): the note is the only fix it gets.
  */
 export function sendBackPatch(
   prNumber: number,
@@ -48,10 +50,12 @@ export function sendBackPatch(
   base: string,
   note?: string,
   from = 'the manager', // who wrote the note
+  opts: { allowPassed?: boolean } = {},
 ): SendBackPatch {
   if (!pr || pr.state !== 'OPEN') throw new HttpError(404, `PR #${prNumber} is not open`);
   if (rec?.status === 'testing' || rec?.status === 'fixing') throw new HttpError(409, `PR #${prNumber} is already ${rec.status}`);
-  if (!rec || (rec.status !== 'needs-human' && rec.status !== 'failed')) {
+  const waiting = rec?.status === 'needs-human' || rec?.status === 'failed' || (opts.allowPassed && rec?.status === 'passed');
+  if (!rec || !waiting) {
     throw new HttpError(409, `PR #${prNumber} isn't waiting on you: only a PR that failed QA or needs a human can go back to a developer`);
   }
   const conflict = pr.mergeable === 'CONFLICTING' || pr.mergeState === 'DIRTY';
