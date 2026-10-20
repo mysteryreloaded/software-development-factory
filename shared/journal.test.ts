@@ -63,6 +63,7 @@ function repo(patch: Partial<RepoView> = {}): RepoView {
     color: '#ff0000',
     autoAssign: true,
     autoMerge: true,
+    ceoReview: false,
     folderSync: 'in sync',
     browserTesting: true,
     links: [],
@@ -120,7 +121,7 @@ function agent(patch: Partial<JournalAgent> = {}): JournalAgent {
 }
 
 function qa(patch: Partial<QaView> = {}): QaView {
-  return { repoId: 'o/r', prNumber: 2, status: 'queued', round: 1, devAgentId: 'ada', qaAgentId: null, summary: null, checks: [], commentUrl: null, mergeNote: null, ceoLooking: false, updatedAt: 1, ...patch };
+  return { repoId: 'o/r', prNumber: 2, status: 'queued', round: 1, devAgentId: 'ada', qaAgentId: null, summary: null, checks: [], commentUrl: null, mergeNote: null, ceoLooking: false, ceoReview: null, updatedAt: 1, ...patch };
 }
 
 /** A keyframe as the journal writes it: slimmed by journalFrame. */

@@ -67,6 +67,7 @@ export interface RepoView {
   color: string; // accent color for the floor
   autoAssign: boolean;
   autoMerge: boolean; // PRs merge themselves once QA passes and GitHub's checks are green
+  ceoReview: boolean; // QA-passed PRs wait for the CEO to approve the head commit before they merge
   folderSync: string | null; // how the floor's main checkout stands against GitHub: "in sync", "updated to abc1234", "2 behind: local changes" …
   browserTesting: boolean;
   links: string[]; // ids of related repos this floor's agents can read for context
@@ -291,6 +292,7 @@ export interface QaView {
   commentUrl: string | null; // the PR comment with the latest QA report
   mergeNote: string | null; // where auto-merge stands once QA passed, e.g. "waiting for checks: Vercel"
   ceoLooking: boolean; // needs-human, and the CEO has a triage job for it (queued or running) before the manager hears
+  ceoReview: 'waiting' | 'approved' | null; // a passed PR: the CEO has approved its head commit, or the floor waits for the approval (null: no approval due)
   updatedAt: number;
   shots?: QaShotView[]; // QA's screenshots from the latest round (absent: none)
 }

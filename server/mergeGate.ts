@@ -12,6 +12,7 @@ export const RERUN_GRACE_MS = 2 * 60_000;
 /** The parts of a QA record the merge gate reads. */
 export interface MergeRecord {
   passedSha: string | null;
+  ceoApprovedSha: string | null; // the head commit the CEO approved: on floors with it on, merging waits for it
   mergeFixes: number;
   pendingSince: number | null;
   mergeRetryAt: number | null;
@@ -40,7 +41,7 @@ export type MergeStep = { set: MergeBookkeeping } & (
  * Decide the next step toward merging a PR QA has passed. Pure: advanceMerge (swarm.ts) does the talking to GitHub
  * and the office. `detailed` means the PR's mergeability has already been asked for, so UNKNOWN is waited out.
  */
-export function mergeStep(pr: MergePull, rec: MergeRecord, now: number, opts: { base: string; detailed?: boolean }): MergeStep {
+export function mergeStep(pr: MergePull, rec: MergeRecord, now: number, opts: { base: string; detailed?: boolean; ceoReview?: boolean }): MergeStep {
   if (pr.isDraft) return { do: 'wait', note: 'a draft: waiting', set: {} };
   if (!opts.detailed && (pr.mergeable === 'UNKNOWN' || pr.mergeState === 'UNKNOWN')) return { do: 'details', set: {} };
   const set: MergeBookkeeping = {};
@@ -67,6 +68,7 @@ export function mergeStep(pr: MergePull, rec: MergeRecord, now: number, opts: { 
     return { do: 'wait', note: rerun ? `re-running a failed check: ${running}` : `waiting for checks: ${running}`, alert, set };
   }
   set.pendingSince = null;
+  if (opts.ceoReview && rec.ceoApprovedSha !== pr.headSha) return { do: 'wait', note: "waiting for the CEO's code review", set };
   if (pr.mergeable === 'UNKNOWN') return { do: 'wait', note: 'GitHub is checking it can merge', set };
   if (pr.mergeState === 'BEHIND') return { do: 'update-branch', set };
   if (rec.mergeRetryAt && now < rec.mergeRetryAt) return { do: 'wait', set };

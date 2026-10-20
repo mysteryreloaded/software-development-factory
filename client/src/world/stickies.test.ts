@@ -41,6 +41,7 @@ const qaRec = (n: number, status: QaStatus): QaView => ({
   commentUrl: null,
   mergeNote: null,
   ceoLooking: false,
+  ceoReview: null,
   updatedAt: 0,
 });
 const working = (issue = 7): KanbanCard => ({ key: 'a-dev', number: issue, title: 'Fix it', agent: dev, note: 'working' });
