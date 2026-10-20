@@ -371,11 +371,12 @@ process.stdin.on('end', async () => {
 /**
  * OpenCode 2's plugin, as a folder: OpenCode 2 loads a local plugin from a directory (its package.json points at
  * index.js, which default-exports { id, setup } with no imports, because @opencode/plugin is not installed). setup
- * starts the event loop in the background and returns at once (the loader awaits setup, and an open loop would keep
- * the plugin loading). The root session is the first session.created without a parentID; a turn is complete when it
- * (or any session while the root is unknown) goes idle, or when its execution succeeds (a one-shot `run` exits right
- * after, without an idle), and session.error is a failed turn. Each session's server has its own CUBEFARM_NOTIFY_URL,
- * so the post goes to its own office.
+ * starts the event loop in the background and returns a teardown that aborts it when the plugin is unloaded (the
+ * loader awaits setup, and an open loop would keep the plugin loading; a reload must not leave a second loop). The
+ * first session seen on any event is the root (v2 never broadcasts session.created); a turn is complete when the
+ * root goes idle, or when its execution succeeds (a one-shot `run` exits right after, without an idle), and
+ * session.error is a failed turn. Each session's server has its own CUBEFARM_NOTIFY_URL, so the post goes to its
+ * own office.
  */
 export const OPENCODE_PLUGIN_FILES: Record<string, string> = {
   'package.json': String.raw`{"type":"module","exports":{".":"./index.js"}}`,
@@ -391,35 +392,23 @@ function text(msg) {
   return parts.filter((p) => p?.type === 'text').map((p) => p.text).join('\n').trim();
 }
 
-let firstContext;
 async function lastReply(ctx, sessionID) {
-  let raw;
   try {
-    raw = await ctx.session.context({ sessionID });
-    if (raw !== undefined && !firstContext) {
-      firstContext = true;
-      console.error('[cubefarm] opencode context: ' + JSON.stringify(raw).slice(0, 1500));
-    }
+    const raw = await ctx.session.context({ sessionID });
     const messages = raw == null ? [] : Array.isArray(raw) ? raw : raw?.data ?? [];
     return messages.map(text).reverse().find((t) => t !== '') ?? '';
-  } catch (err) {
-    console.error('[cubefarm] opencode context: ' + String(err?.message ?? err));
+  } catch {
     return '';
   }
 }
 
-async function follow(ctx, url) {
+async function follow(ctx, url, ac) {
   let root;
-  let firstEvent;
   const lastTurn = new Map(); // sessionID -> the turn end we last reported ({ at, kind })
-  for await (const event of ctx.event.subscribe({ signal: new AbortController().signal })) {
-    if (!firstEvent) {
-      firstEvent = true;
-      console.error('[cubefarm] opencode event: ' + JSON.stringify(event).slice(0, 2000));
-    }
+  for await (const event of ctx.event.subscribe({ signal: ac.signal })) {
     const d = event?.data ?? {};
-    if (event?.type === 'session.created' && !root && !d.parentID) root = d.sessionID;
     const sessionID = d.sessionID;
+    if (!root && sessionID) root = sessionID; // the first session seen is the root (v2 never broadcasts session.created)
     if ((event?.type === 'session.idle' || event?.type === 'session.execution.succeeded') && (!root || sessionID === root)) {
       const now = Date.now();
       const prev = lastTurn.get(sessionID);
@@ -437,11 +426,14 @@ async function follow(ctx, url) {
   }
 }
 
-async function setup(ctx) {
+function setup(ctx) {
   const url = process.env.CUBEFARM_NOTIFY_URL;
   if (!url) return;
-  // OpenCode awaits setup while loading the plugin, so the event loop must not block it: run it in the background.
-  void follow(ctx, url).catch((err) => console.error('[cubefarm] opencode loop stopped: ' + String(err?.message ?? err)));
+  // OpenCode awaits setup while loading the plugin, so the event loop must not block it: run it in the background,
+  // and return a teardown that aborts the loop when the plugin is unloaded.
+  const ac = new AbortController();
+  void follow(ctx, url, ac).catch(() => {});
+  return () => ac.abort();
 }
 
 export default { id: 'cubefarm', setup };

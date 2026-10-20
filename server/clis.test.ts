@@ -190,7 +190,7 @@ describe('the OpenCode 2 plugin', () => {
     };
     try {
       for (const [name, content] of Object.entries(OPENCODE_PLUGIN_FILES)) fs.writeFileSync(path.join(dir, name), content);
-      const mod = await import(pathToFileURL(path.join(dir, 'index.js')).href) as { default: { setup: (c: unknown) => Promise<void> } };
+      const mod = await import(pathToFileURL(path.join(dir, 'index.js')).href) as { default: { setup: (c: unknown) => unknown } };
       await mod.default.setup(ctx);
       // setup returns at once; the event loop it started in the background runs to the end of the fake stream
       if (subscribed) await done;
@@ -211,12 +211,20 @@ describe('the OpenCode 2 plugin', () => {
     expect(await run(undefined, events, messages)).toEqual([]);
   });
 
-  it('posts a TurnComplete for an idle session before any root session is known', async () => {
+  it('treats the first session seen on any event as the root and posts its turn end', async () => {
     const evs = [
+      { type: 'session.execution.started', data: { sessionID: 'ses_a' } },
       { type: 'session.idle', data: { sessionID: 'ses_a' } },
-      { type: 'session.created', data: { sessionID: 'ses_b', parentID: 'ses_a' } },
     ];
     expect(await run('http://127.0.0.1:1/api/hooks/t', evs, messages)).toEqual([{ hook_event_name: 'TurnComplete', session_id: 'ses_a', last_assistant_message: 'Hi there' }]);
+  });
+
+  it('does not post when a child session goes idle after the root is known', async () => {
+    const evs = [
+      { type: 'session.execution.started', data: { sessionID: 'ses_root' } },
+      { type: 'session.idle', data: { sessionID: 'ses_child' } },
+    ];
+    expect(await run('http://127.0.0.1:1/api/hooks/t', evs, messages)).toEqual([]);
   });
 });
 
