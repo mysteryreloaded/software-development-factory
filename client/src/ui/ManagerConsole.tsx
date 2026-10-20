@@ -135,6 +135,9 @@ function FloorRow({ repo, all }: { repo: RepoView; all: RepoView[] }) {
         <label className="toggle" title="Merge a PR as soon as QA has signed off on its latest commit and GitHub's checks are green">
           <input type="checkbox" checked={repo.autoMerge} onChange={(e) => patch({ autoMerge: e.target.checked })} /> 🔀 Auto-merge
         </label>
+        <label className="toggle" title="After QA passes, the CEO reviews the code. Nothing auto-merges until the CEO approves its latest commit.">
+          <input type="checkbox" checked={repo.ceoReview} onChange={(e) => patch({ ceoReview: e.target.checked })} /> 🧐 CEO code review
+        </label>
         <label className="toggle">
           <input type="checkbox" checked={repo.browserTesting} onChange={(e) => patch({ browserTesting: e.target.checked })} /> 🌐 Browser testing (Playwright MCP)
         </label>

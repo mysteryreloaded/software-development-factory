@@ -225,6 +225,10 @@ export function KanbanView({ repoId, embedded }: { repoId: string; embedded?: bo
           <input type="checkbox" checked={repo.autoMerge} onChange={(e) => void api.updateRepo(repo.id, { autoMerge: e.target.checked }).catch(() => undefined)} />
           🔀 Auto-merge when QA and checks pass
         </label>
+        <label className="toggle" title="After QA passes, the CEO reviews the code. Nothing auto-merges until the CEO approves its latest commit.">
+          <input type="checkbox" checked={repo.ceoReview} onChange={(e) => void api.updateRepo(repo.id, { ceoReview: e.target.checked }).catch(() => undefined)} />
+          🧐 CEO code review
+        </label>
         <span className="spacer" />
         <button className="btn" onClick={() => openOverlay({ kind: 'app', repoId: repo.id })} title="Open this floor's running app">
           🖥️ View app

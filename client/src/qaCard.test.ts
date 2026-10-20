@@ -3,7 +3,13 @@ import type { PullInfo, QaStatus } from '../../shared/types';
 import { elapsedLabel, needsManager, qaCardNote, testingLabel } from './qaCard';
 
 const pr: Pick<PullInfo, 'isDraft' | 'mergeable' | 'checks'> = { isDraft: false, mergeable: 'MERGEABLE', checks: 'passing' };
-const rec = (status: QaStatus, mergeNote: string | null = null, round = 2, ceoLooking = false) => ({ status, round, mergeNote, ceoLooking });
+const rec = (status: QaStatus, mergeNote: string | null = null, round = 2, ceoLooking = false, ceoReview: 'waiting' | 'approved' | null = null) => ({
+  status,
+  round,
+  mergeNote,
+  ceoLooking,
+  ceoReview,
+});
 const STALE = 'the fix was never pushed';
 
 describe('qaCardNote', () => {
@@ -53,6 +59,25 @@ describe('qaCardNote', () => {
   it('an untested PR is amber, a draft says so', () => {
     expect(qaCardNote(undefined, pr, true)).toEqual({ note: 'not tested yet', tone: 'warn' });
     expect(qaCardNote(null, { ...pr, isDraft: true }, true).note).toBe('draft');
+  });
+
+  it('a passed PR waiting for the CEO says so', () => {
+    expect(qaCardNote(rec('passed', null, 2, false, 'waiting'), pr, true)).toEqual({ note: "QA ✓ · 🧐 waiting for the CEO's review", tone: 'good' });
+    expect(qaCardNote(rec('passed', null, 2, false, 'waiting'), { ...pr, mergeable: 'CONFLICTING' }, true).note).toBe('QA ✓ · conflicts');
+    expect(qaCardNote(rec('passed', null, 2, false, 'waiting'), { ...pr, checks: 'failing' }, true).note).toBe('QA ✓ · CI failing');
+  });
+
+  it("a passed PR the CEO approved gets a suffix on whatever note it shows", () => {
+    expect(qaCardNote(rec('passed', null, 2, false, 'approved'), { ...pr, checks: 'pending' }, true).note).toBe('QA ✓ · CEO ✓ · waiting for checks');
+    expect(qaCardNote(rec('passed', null, 2, false, 'approved'), { ...pr, checks: 'pending' }, false).note).toBe('✅ QA passed · CEO ✓');
+  });
+
+  it('a mergeNote still wins over the CEO note', () => {
+    expect(qaCardNote(rec('passed', STALE, 2, false, 'waiting'), pr, true)).toEqual({ note: `QA ✓ · ${STALE}`, tone: 'good' });
+  });
+
+  it('null ceoReview keeps today\'s notes', () => {
+    expect(qaCardNote(rec('passed'), pr, true)).toEqual({ note: '✅ QA passed', tone: 'good' });
   });
 });
 
