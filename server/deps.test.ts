@@ -1,8 +1,9 @@
+import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it, vi } from 'vitest';
-import { createLimiter, depsCurrent, depsHash, depsPromptLine, deskDepsPlan, installDesk, MAX_DESK_INSTALLS, readDeps, writeMarker, type DepsState } from './deps.ts';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { createLimiter, depsCurrent, depsHash, depsPromptLine, deskDepsPlan, installDesk, MAX_DESK_INSTALLS, readDeps, stopTree, writeMarker, type DepsState } from './deps.ts';
 
 const PKG = '{"name":"app","dependencies":{"left-pad":"^1.3.0"}}';
 const LOCK = '{"lockfileVersion":3}';
@@ -168,5 +169,59 @@ describe('depsPromptLine', () => {
     expect(depsPromptLine('agent')).toBe('');
     expect(depsPromptLine('none')).toBe('');
     expect(depsPromptLine(undefined)).toBe('');
+  });
+});
+
+describe('stopTree', () => {
+  const running = new Set<ChildProcess>();
+  afterEach(() => {
+    // The processes in this describe are the only ones spawned here; kill their process groups if still running.
+    for (const c of running) {
+      if (c.pid === undefined || c.exitCode !== null || c.signalCode !== null) continue;
+      try {
+        process.kill(-c.pid, 'SIGKILL');
+      } catch {}
+    }
+    running.clear();
+  });
+  /** Spawned detached, like a preview (previewRunner.ts). */
+  const spawnDetached = (cmd: string) => {
+    const c = spawn('sh', ['-c', cmd], { detached: true, stdio: 'ignore' });
+    running.add(c);
+    return c;
+  };
+  const start = (ms = 400) => new Promise<void>((r) => setTimeout(r, ms));
+  const dead = (c: ChildProcess) => c.exitCode !== null || c.signalCode !== null;
+
+  it.skipIf(process.platform === 'win32')('lets a cleanup trap run: SIGTERM, the trap finishes, well before the grace period', async () => {
+    const file = path.join(ROOT, `bye ${++seq}.txt`);
+    const c = spawnDetached(`F='${file}'; trap 'echo bye > "$F"; exit 0' TERM; while :; do sleep 0.1; done`);
+    await start();
+    const t0 = Date.now();
+    await stopTree(c);
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    expect((await fs.readFile(file, 'utf8')).trim()).toBe('bye');
+    expect(dead(c)).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32')('kills after the grace period when the process ignores SIGTERM', async () => {
+    const c = spawnDetached(`trap '' TERM; while :; do sleep 0.1; done`);
+    await start();
+    const t0 = Date.now();
+    await stopTree(c, 300);
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeGreaterThanOrEqual(280);
+    expect(elapsed).toBeLessThan(5_000);
+    // The SIGKILL lands a tick after stopTree resolves; wait for the process to actually die.
+    await new Promise<void>((r) => (dead(c) ? r() : c.once('exit', () => r())));
+    expect(c.signalCode).toBe('SIGKILL');
+  });
+
+  it.skipIf(process.platform === 'win32')('resolves at once when the process has already exited', async () => {
+    const c = spawnDetached('true');
+    await new Promise<void>((r) => c.once('exit', () => r()));
+    const t0 = Date.now();
+    await stopTree(c);
+    expect(Date.now() - t0).toBeLessThan(250);
   });
 });

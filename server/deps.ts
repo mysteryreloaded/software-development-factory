@@ -102,6 +102,33 @@ export function killTree(child: ChildProcess): Promise<void> {
   return Promise.resolve();
 }
 
+/**
+ * Stop a process and its children gracefully: SIGTERM to the whole process group (spawned detached) so a script's
+ * cleanup trap runs, and SIGKILL only if it is still running after `graceMs`. On Windows a shell tree has no
+ * graceful signal, so kill at once as before.
+ */
+export async function stopTree(child: ChildProcess, graceMs = 30_000): Promise<void> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === 'win32') return killTree(child);
+  try {
+    process.kill(-child.pid, 'SIGTERM'); // the whole process group (spawned detached)
+  } catch {
+    child.kill('SIGTERM');
+  }
+  await new Promise<void>((resolve) => {
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      child.removeListener('exit', onExit);
+      resolve();
+    }, graceMs);
+    child.on('exit', onExit);
+  });
+  await killTree(child); // a no-op when the exit came from the SIGTERM
+}
+
 /** npm ci in a folder (on Windows through cmd.exe); rejects on failure, and kills the tree after `timeoutMs`. */
 export function npmCi(dir: string, timeoutMs = INSTALL_TIMEOUT_MS): Promise<void> {
   const env: Record<string, string> = {};
