@@ -234,7 +234,7 @@ export function PromptPreview({ agent }: { agent: Agent }) {
   const context = useStore((s) => {
     const r = s.repos.find((x) => x.id === agent.repoId);
     const o = s.settings;
-    return JSON.stringify(r ? [r.fullName, r.defaultBranch, r.autoMerge, r.browserTesting, r.links, r.mission, r.summary, r.qaBrief] : [o.companyName, o.managerName, o.sessionLimit, o.maxAgents, o.scaling]);
+    return JSON.stringify(r ? [r.fullName, r.defaultBranch, r.autoMerge, r.ceoReview, r.browserTesting, r.links, r.mission, r.summary, r.qaBrief] : [o.companyName, o.managerName, o.sessionLimit, o.maxAgents, o.scaling]);
   });
   useEffect(() => {
     if (!open) return;

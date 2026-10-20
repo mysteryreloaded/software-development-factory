@@ -68,4 +68,11 @@ describe('what waits on the manager', () => {
     expect(approvalsBadge(w)).toBe(2); // the proposal and #1; the CEO is still on #2
     expect(waitingOnYou([repo(true, pr(3))], { c: qa(3, 'passed') }, []).ready).toEqual([]); // it merges itself
   });
+
+  it("leaves out a passed PR still waiting for the CEO, and lists it once approved", () => {
+    const waiting = { c: qa(3, 'passed', { ceoReview: 'waiting' }) };
+    expect(waitingOnYou([repo(false, pr(3))], waiting, []).ready).toEqual([]);
+    const approved = { c: qa(3, 'passed', { ceoReview: 'approved' }) };
+    expect(waitingOnYou([repo(false, pr(3))], approved, []).ready.map((s) => s.qa.prNumber)).toEqual([3]);
+  });
 });

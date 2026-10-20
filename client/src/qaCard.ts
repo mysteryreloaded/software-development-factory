@@ -14,24 +14,31 @@ export type CardTone = 'warn' | 'bad' | 'good';
  * PR is queued, testing or being fixed.
  */
 export function qaCardNote(
-  rec: Pick<QaView, 'status' | 'round' | 'mergeNote' | 'ceoLooking'> | null | undefined,
+  rec: Pick<QaView, 'status' | 'round' | 'mergeNote' | 'ceoLooking' | 'ceoReview'> | null | undefined,
   pr: Pick<PullInfo, 'isDraft' | 'mergeable' | 'checks'>,
   autoMerge: boolean,
 ): { note: string; tone?: CardTone } {
   switch (rec?.status) {
-    case 'passed':
-      return {
-        note: rec.mergeNote
-          ? `QA ✓ · ${rec.mergeNote}`
-          : pr.mergeable === 'CONFLICTING'
-            ? 'QA ✓ · conflicts'
-            : pr.checks === 'failing'
-              ? 'QA ✓ · CI failing'
-              : autoMerge && pr.checks === 'pending'
-                ? 'QA ✓ · waiting for checks'
-                : '✅ QA passed',
-        tone: pr.mergeable === 'CONFLICTING' || pr.checks === 'failing' ? 'warn' : 'good',
-      };
+    case 'passed': {
+      const conflict = pr.mergeable === 'CONFLICTING';
+      const ciFailing = pr.checks === 'failing';
+      const tone: CardTone = conflict || ciFailing ? 'warn' : 'good';
+      if (rec.mergeNote) return { note: `QA ✓ · ${rec.mergeNote}`, tone };
+      if (rec.ceoReview === 'waiting' && !conflict && !ciFailing) {
+        return { note: "QA ✓ · 🧐 waiting for the CEO's review", tone: 'good' };
+      }
+      const base = conflict
+        ? 'QA ✓ · conflicts'
+        : ciFailing
+          ? 'QA ✓ · CI failing'
+          : autoMerge && pr.checks === 'pending'
+            ? 'QA ✓ · waiting for checks'
+            : '✅ QA passed';
+      if (rec.ceoReview === 'approved') {
+        return { note: base.startsWith('QA ✓') ? base.replace('QA ✓', 'QA ✓ · CEO ✓') : `${base} · CEO ✓`, tone };
+      }
+      return { note: base, tone };
+    }
     case 'needs-human':
       if (rec.ceoLooking) return { note: '🧭 CEO is looking', tone: 'warn' };
       return { note: `⚠️ needs you${rec.mergeNote ? ` · ${rec.mergeNote}` : ''}`, tone: 'bad' };

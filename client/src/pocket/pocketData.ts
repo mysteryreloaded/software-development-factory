@@ -78,7 +78,7 @@ export function waitingOnYou(repos: RepoView[], qa: Record<string, QaView>, requ
     const repo = repos.find((r) => r.id === q.repoId);
     if (!repo || !open(repo, q)) continue;
     if (q.status === 'needs-human') out.stuck.push({ repo, qa: q });
-    else if (q.status === 'passed' && !repo.autoMerge) out.ready.push({ repo, qa: q });
+    else if (q.status === 'passed' && !repo.autoMerge && q.ceoReview !== 'waiting') out.ready.push({ repo, qa: q });
   }
   return out;
 }
