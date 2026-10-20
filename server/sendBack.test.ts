@@ -63,6 +63,25 @@ describe('sendBackPatch', () => {
     for (const s of ['testing', 'fixing', 'queued', 'passed'] as const) expect(status(() => sendBackPatch(108, open, record({ status: s }), 'main'))).toBe(409);
     expect(status(() => sendBackPatch(108, open, undefined, 'main'))).toBe(409);
   });
+
+  it('refuses a passed PR by default: the manager only sends failed or stuck ones back', () => {
+    expect(status(() => sendBackPatch(108, open, record({ status: 'passed', passedSha: 'deadbeef' }), 'main', 'Fix the slider'))).toBe(409);
+  });
+
+  it('takes a passed PR with allowPassed (the CEO\'s request_changes): the note, prefixed by the CEO, is the only fix it gets', () => {
+    expect(sendBackPatch(108, open, record({ status: 'passed', fixInstructions: '', passedSha: 'deadbeef' }), 'main', '  wrap the slider in a container ', 'Morgan, the CEO', { allowPassed: true })).toEqual({
+      status: 'failed',
+      fixReason: 'qa',
+      fixInstructions: 'From Morgan, the CEO: wrap the slider in a container',
+      sessionFailures: 0,
+      retests: 2,
+      mergeNote: null,
+    });
+  });
+
+  it('still refuses a passed PR when allowPassed is off, even with the same note', () => {
+    expect(status(() => sendBackPatch(108, open, record({ status: 'passed', passedSha: 'deadbeef' }), 'main', 'Fix the slider', 'Morgan, the CEO'))).toBe(409);
+  });
 });
 
 describe('parseSendBackNote', () => {

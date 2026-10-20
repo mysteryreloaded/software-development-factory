@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { EAST_DESKS, MAX_DESKS } from '../client/src/world/layout.ts';
 import { FLOOR_SEATS, type QaStatus } from '../shared/types.ts';
 import type { HttpError } from './httpError.ts';
-import { ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, createOfficeTools, floorCapacity, IssueCap, jobLabel, planDependencies, plannedSize, scalePlan, type CeoJob, type DependsRequest, type TeamNow } from './ceo.ts';
+import { ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, createOfficeTools, floorCapacity, IssueCap, jobLabel, planDependencies, plannedSize, scalePlan, type CeoJob, type CodeReviewPr, type DependsRequest, type TeamNow } from './ceo.ts';
 
 describe('seats', () => {
   it('match the desks the client draws', () => {
@@ -87,6 +87,10 @@ describe('jobLabel', () => {
   it('names the PR for a triage', () => {
     expect(jobLabel({ kind: 'triage', repoId: 'r1', prNumber: 108, at: 0 }, floor)).toBe('Triaging PR #108 · floor 3 · office-swarm');
   });
+
+  it('names the PR for a code review', () => {
+    expect(jobLabel({ kind: 'code-review', repoId: 'r1', prNumber: 108, at: 0 }, floor)).toBe('Reviewing PR #108 · floor 3 · office-swarm');
+  });
 });
 
 // The CEO only sees the office tools if the whole list converts to JSON Schema: one schema the SDK can't handle
@@ -108,6 +112,8 @@ describe('office tools', () => {
       rerunChecks: async () => '',
       closePull: async () => '',
       escalate: async () => '',
+      approvePull: async () => '',
+      requestChanges: async () => '',
     });
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
     await office.server.instance.connect(serverSide);
@@ -121,12 +127,14 @@ describe('office tools', () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'agent_detail',
+      'approve_pull',
       'close_issue',
       'close_pull',
       'company_status',
       'configure_agent',
       'escalate',
       'file_issue',
+      'request_changes',
       'rerun_checks',
       'retry_qa',
       'scale_team',
@@ -321,6 +329,47 @@ describe('triage', () => {
     expect(system).toContain('Triage jobs:');
     expect(system).toContain('They are read-only to you. You cannot run shell commands.');
     expect(system).toContain('Change things only through the mcp__office__ tools.');
+  });
+});
+
+describe('code review', () => {
+  const floor = { floor: 2, fullName: 'acme/app', clone: '/clones/app', mission: '', backlog: 3 };
+  const job: CeoJob = { kind: 'code-review', repoId: 'r1', prNumber: 108, at: 0 };
+  const pr: CodeReviewPr = {
+    number: 108,
+    title: 'Jukebox volume',
+    url: 'https://github.com/acme/app/pull/108',
+    passedSha: 'deadbeef',
+    summary: 'All checks pass; the slider works on phones.',
+    diffPath: '/home/ceo/reviews/acme__app-108.diff',
+    diffCut: false,
+  };
+
+  it("points at QA's sign-off, the diff file and the two verdict tools", () => {
+    const prompt = ceoJobPrompt(job, floor, pr);
+    for (const fact of [
+      'pull request #108',
+      'Jukebox volume',
+      'passed QA',
+      'QA passed commit deadbeef',
+      pr.summary,
+      `The PR's diff is at /home/ceo/reviews/acme__app-108.diff.`,
+      'approve_pull or request_changes',
+    ]) {
+      expect(prompt).toContain(fact);
+    }
+  });
+
+  it('says so when the diff was cut at the cap', () => {
+    expect(ceoJobPrompt(job, floor, { ...pr, diffCut: true })).toContain('cut to the first 400 KB');
+  });
+
+  it('ends without a verdict when the office could not fetch the diff', () => {
+    expect(ceoJobPrompt(job, floor, { ...pr, diffPath: null })).toContain("The office could not fetch the PR's diff");
+  });
+
+  it('has nothing to do once the PR is no longer awaiting a review', () => {
+    expect(ceoJobPrompt(job, floor, null)).toBe('Pull request #108 no longer needs a code review. Reply "Nothing to do."');
   });
 });
 

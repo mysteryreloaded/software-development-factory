@@ -303,6 +303,14 @@ export async function commentPull(fullName: string, number: number, body: string
   return out.match(/https:\/\/github\.com\/\S+/)?.[0] ?? '';
 }
 
+/** The CEO has no shell, so the office reads the PR's diff itself; longer diffs are cut here. */
+export const MAX_PR_DIFF = 400_000;
+
+/** The PR's diff as `gh pr diff` prints it, capped at MAX_PR_DIFF (a cut diff is exactly that long). */
+export async function prDiff(fullName: string, number: number): Promise<string> {
+  return (await gh(['pr', 'diff', String(number), '-R', fullName], { timeoutMs: 120_000 })).slice(0, MAX_PR_DIFF);
+}
+
 // QA screenshots live on an orphan branch so evidence never lands in the default branch when a PR is merged.
 export const EVIDENCE_BRANCH = 'swarm-qa-evidence';
 const evidenceReady = new Set<string>();
