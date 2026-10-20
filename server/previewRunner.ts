@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
-import { depsCurrent, INSTALL_TIMEOUT_MS, killTree, readDeps, writeMarker } from './deps.ts';
+import { depsCurrent, INSTALL_TIMEOUT_MS, killTree, readDeps, stopTree, writeMarker } from './deps.ts';
 import { git } from './exec.ts';
 import * as workspace from './workspace.ts';
 
@@ -125,9 +125,10 @@ class RealPreview implements PreviewHandle {
     });
   }
 
+  /** SIGTERM the preview's process group first, so its own cleanup runs; SIGKILL only after the grace period. */
   async stop() {
     this.stopped = true;
-    if (this.child) await killTree(this.child);
+    if (this.child) await stopTree(this.child);
   }
 
   private check() {
