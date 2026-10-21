@@ -89,8 +89,16 @@ describe('the doors on your floor', () => {
 
   it("blocks nothing once the floor's gone", () => {
     resetDoors('lobby', 0);
-    expect(shutDoorways()).toHaveLength(2);
+    expect(shutDoorways()).toHaveLength(1); // only the east side slides; the west revolving door never blocks
     resetDoors('lobby', 0, false);
     expect(shutDoorways()).toEqual([]);
+  });
+
+  it("never blocks the lobby's west side: it's a revolving door, not a sliding one (#41)", () => {
+    resetDoors('lobby', 0);
+    const lobbyWest = SIDE_OPENINGS.lobby.west.door;
+    for (let i = 0; i < 120; i++) tickDoors(-HALF_W - 10, lobbyWest, DT, () => {});
+    expect(shutDoorways().some((r) => r === sideDoorway('lobby', 'west'))).toBe(false);
+    expect(doorOpen('west')).toBe(0); // never opens either: there's nothing to slide
   });
 });

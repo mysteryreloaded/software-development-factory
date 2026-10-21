@@ -283,6 +283,8 @@ describe('surfaceAt', () => {
 describe('outside: side doors, windows and balconies', () => {
   const KINDS = ['office', 'lobby'] as const;
   const all = (kind: (typeof KINDS)[number]) => (kind === 'office' ? officeColliders() : lobbyColliders());
+  // The lobby's west side has no balcony or patio any more (#41): a revolving door leads straight out to the grounds.
+  const balconySides = (kind: (typeof KINDS)[number]) => SIDES.filter((side) => !(kind === 'lobby' && side === 'west'));
   const contains = (b: Rect, c: Rect) => c.minX >= b.minX - 1e-9 && c.maxX <= b.maxX + 1e-9 && c.minZ >= b.minZ - 1e-9 && c.maxZ <= b.maxZ + 1e-9;
   const touches = (b: Rect, c: Rect) => b.minX < c.maxX && b.maxX > c.minX && b.minZ < c.maxZ && b.maxZ > c.minZ;
 
@@ -341,7 +343,7 @@ describe('outside: side doors, windows and balconies', () => {
 
   it.each(KINDS)('lets you walk from the %s floor straight out of each door to the railing, and back', (kind) => {
     const rects = all(kind);
-    for (const side of SIDES) {
+    for (const side of balconySides(kind)) {
       const s = sideSign(side);
       const z = SIDE_OPENINGS[kind][side].door;
       const inside = { x: s * (HALF_W - 2), z };
@@ -378,7 +380,7 @@ describe('outside: side doors, windows and balconies', () => {
   });
 
   it.each(KINDS)('builds each %s balcony: a railing round it toys never fly over, planters and a bench out of the way', (kind) => {
-    for (const side of SIDES) {
+    for (const side of balconySides(kind)) {
       const s = sideSign(side);
       const floor = balconyFloor(side);
       expect(floor.maxX - floor.minX).toBeCloseTo(BALCONY.depth + WALL_T);
@@ -400,6 +402,20 @@ describe('outside: side doors, windows and balconies', () => {
       expect(outsideColliders(kind)).toEqual(expect.arrayContaining([...rail, ...planters, bench]));
     }
     expect(all(kind)).toEqual(expect.arrayContaining(outsideColliders(kind)));
+  });
+
+  it("drops the lobby's west patio (rail, planters, bench) for the revolving door's grounds, but keeps every office's (#41)", () => {
+    const west = balconyFurniture('lobby', 'west');
+    const lobbyWestStuff = [...balconyRailing('west'), ...west.planters, west.bench];
+    expect(outsideColliders('lobby')).toEqual(expect.not.arrayContaining(lobbyWestStuff));
+    expect(lobbyColliders()).toEqual(expect.not.arrayContaining(lobbyWestStuff));
+
+    const officeWest = balconyFurniture('office', 'west');
+    const officeWestStuff = [...balconyRailing('west'), ...officeWest.planters, officeWest.bench];
+    expect(outsideColliders('office')).toEqual(expect.arrayContaining(officeWestStuff));
+    // the lobby's east patio (candidates use it) is untouched
+    const east = balconyFurniture('lobby', 'east');
+    expect(outsideColliders('lobby')).toEqual(expect.arrayContaining([...balconyRailing('east'), ...east.planters, east.bench]));
   });
 
   it('hangs the balcony lamps along the middle of each balcony, under the balcony above', () => {

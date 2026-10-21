@@ -111,9 +111,11 @@ export function balconyFurniture(kind: FloorKind, side: Side): { planters: Rect[
   };
 }
 
-/** Both balconies' railings, planters and benches. */
+/** Both balconies' railings, planters and benches. The lobby's west patio is gone (#41): a revolving door leads
+ * straight out to the grounds there, so only its east side keeps a railed patio. */
 export function outsideColliders(kind: FloorKind): Rect[] {
-  return SIDES.flatMap((side) => {
+  const sides = kind === 'lobby' ? (['east'] as const satisfies readonly Side[]) : SIDES;
+  return sides.flatMap((side) => {
     const { planters, bench } = balconyFurniture(kind, side);
     return [...balconyRailing(side), ...planters, bench];
   });

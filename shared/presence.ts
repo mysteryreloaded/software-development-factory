@@ -28,8 +28,9 @@ export const EMOTES: readonly EmoteId[] = ['wave', 'thumbs', 'clap', 'point', 'l
 export const EMOTE_EMOJI: Record<EmoteId, string> = { wave: '👋', thumbs: '👍', clap: '👏', point: '👉', laugh: '😂' };
 export const EMOTE_LABEL: Record<EmoteId, string> = { wave: 'Wave', thumbs: 'Thumbs up', clap: 'Clap', point: 'Point', laugh: 'Laugh' };
 
-/** Where anyone can be: a floor, its balconies and the elevator cabin, with room to spare. Floor -1 is the roof. */
-export const BOUNDS = { x: 24, zMin: -16, zMax: 18, yMin: -1, yMax: 5, floorMin: -1, floorMax: 200 };
+/** Where anyone can be: a floor, its balconies and the elevator cabin, with room to spare. Floor -1 is the roof.
+ * x is wide enough for the lobby's grounds (#41) too, out past the park at x -82, so a pose there relays unclamped. */
+export const BOUNDS = { x: 84, zMin: -26, zMax: 26, yMin: -1, yMax: 5, floorMin: -1, floorMax: 200 };
 
 const HELD_KINDS: readonly VisitorHeld['k'][] = ['ball', 'mug', 'blaster'];
 

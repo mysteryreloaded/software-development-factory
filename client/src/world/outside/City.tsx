@@ -7,13 +7,45 @@ import { markBloom } from '../gfx/bloomMarks';
 import { dayTime, useSkyFrame } from '../sky/useDayTime';
 import { skyAt, sunDirection, type SkyPalette } from '../sky/time';
 import { viewElevation } from '../layout';
+import { toon } from '../materials';
+import { boxesGeometry, type BoxSpec } from '../shapes';
 import { hazeRange, weatherSky } from '../weather/weatherRules';
 import { weather } from '../weather/weatherState';
 import { carPose, carRoutes, CITY, cityLayout, CORRIDOR_HALF, MAX_CARS, waterTowers, type CityBox } from './cityLayout';
+import { PAVED_STREET, parkFenceLines } from './grounds';
 
-// The city around the building (cityLayout.ts says where everything is). Six draw calls: the buildings (one
+// ---------- the park fence (#41) ----------
+
+const FENCE = { postH: 1.2, postW: 0.08, rail: 0.06, gap: 2.4 };
+
+/** Posts and two rails along the park's fenced edges (north, west, south; never east), solid for the player. */
+function fenceGeometry() {
+  const posts: BoxSpec[] = [];
+  const rails: BoxSpec[] = [];
+  for (const f of parkFenceLines()) {
+    const n = Math.max(2, Math.round((f.to - f.from) / FENCE.gap));
+    for (let i = 0; i <= n; i++) {
+      const at = f.from + ((f.to - f.from) * i) / n;
+      posts.push(f.axis === 'x' ? { size: [FENCE.postW, FENCE.postH, FENCE.postW], at: [at, FENCE.postH / 2, f.at] } : { size: [FENCE.postW, FENCE.postH, FENCE.postW], at: [f.at, FENCE.postH / 2, at] });
+    }
+    const len = f.to - f.from;
+    for (const y of [FENCE.postH - 0.18, FENCE.postH * 0.45]) {
+      rails.push(f.axis === 'x' ? { size: [len, FENCE.rail, FENCE.rail], at: [(f.from + f.to) / 2, y, f.at] } : { size: [FENCE.rail, FENCE.rail, len], at: [f.at, y, (f.from + f.to) / 2] });
+    }
+  }
+  return boxesGeometry([...posts, ...rails]);
+}
+
+function ParkFence() {
+  const geo = useMemo(fenceGeometry, []);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return <mesh geometry={geo} material={toon('#6b5a46')} renderOrder={1} />;
+}
+
+// The city around the building (cityLayout.ts says where everything is). Seven draw calls: the buildings (one
 // InstancedMesh with a shared window texture), roof bits as instanced boxes, cylinders and cones, the ground
-// (streets, pavements, crossings, street lamps and headlight pools drawn in one shader) and the cars. All of it
+// (streets, pavements, crossings, street lamps and headlight pools drawn in one shader), the cars, and the park's
+// fence (#41). All of it
 // lights itself from the time of day (time.ts), not from the office's lights, and fades into the horizon colour
 // with distance. The windows, lamps and headlights come on through one shared uniform (cityLights), so the
 // evening costs nothing. Drawn after the office (renderOrder 1), so indoors the walls hide it before it shades.
@@ -249,6 +281,8 @@ uniform float uRings;
 uniform float uRoadHalf;
 uniform float uCorridor;
 uniform vec4 uCars[${MAX_CARS}];
+uniform vec2 uPavedX;
+uniform vec2 uPavedZ;
 varying vec2 vPos;
 
 // Distance to the nearest street centreline on one axis.
@@ -268,29 +302,33 @@ void main() {
     float dz = streetDist(p.y, uFirstLine.y); // from a road running along x
     bool roadZ = dx < uRoadHalf;
     bool roadX = dz < uRoadHalf;
+    // the west street, paved over for the lobby's grounds (#41): plaza tiles, no road, kerb, paint or lamp glow
+    bool paved = p.x > uPavedX.x && p.x < uPavedX.y && p.y > uPavedZ.x && p.y < uPavedZ.y;
     col = vec3(0.7, 0.67, 0.62);
-    if (abs(p.x) < uHomeHalf.x && abs(p.y) < uHomeHalf.y) {
+    if (paved || (abs(p.x) < uHomeHalf.x && abs(p.y) < uHomeHalf.y)) {
       vec2 f = abs(fract(p * 0.5) - 0.5);
       col = mix(vec3(0.85, 0.79, 0.68), vec3(0.76, 0.7, 0.6), step(0.46, max(f.x, f.y)) * detail);
     }
     float d = min(dx, dz);
-    if (d < uCorridor) col = abs(d - uRoadHalf) < 0.2 ? vec3(0.58, 0.56, 0.54) : vec3(0.8, 0.77, 0.72);
-    if (roadZ || roadX) col = vec3(0.3, 0.32, 0.37);
+    if (d < uCorridor && !paved) col = abs(d - uRoadHalf) < 0.2 ? vec3(0.58, 0.56, 0.54) : vec3(0.8, 0.77, 0.72);
+    if ((roadZ || roadX) && !paved) col = vec3(0.3, 0.32, 0.37);
     float paint = 0.0;
-    if (roadZ && dz > uCorridor) paint += step(dx, 0.12) * step(fract(p.y / 6.0), 0.5);
-    if (roadX && dx > uCorridor) paint += step(dz, 0.12) * step(fract(p.x / 6.0), 0.5);
-    if (roadZ && dz >= uRoadHalf && dz < uCorridor) paint += step(fract(p.x), 0.5);
-    if (roadX && dx >= uRoadHalf && dx < uCorridor) paint += step(fract(p.y), 0.5);
+    if (!paved) {
+      if (roadZ && dz > uCorridor) paint += step(dx, 0.12) * step(fract(p.y / 6.0), 0.5);
+      if (roadX && dx > uCorridor) paint += step(dz, 0.12) * step(fract(p.x / 6.0), 0.5);
+      if (roadZ && dz >= uRoadHalf && dz < uCorridor) paint += step(fract(p.x), 0.5);
+      if (roadX && dx >= uRoadHalf && dx < uCorridor) paint += step(fract(p.y), 0.5);
+    }
     col = mix(col, vec3(0.93, 0.92, 0.86), min(paint, 1.0) * detail);
 
-    // street lamps on both pavements every 18 m, out of the crossings
+    // street lamps on both pavements every 18 m, out of the crossings (none over the paved stretch)
     float lamp = 0.0;
     float la = dx - (uRoadHalf + 1.0);
     float lb = (fract(p.y / 18.0) - 0.5) * 18.0;
-    if (dz > uCorridor) lamp += exp(-(la * la + lb * lb) / 14.0) + exp(-(la * la + lb * lb) / 0.12);
+    if (dz > uCorridor && !paved) lamp += exp(-(la * la + lb * lb) / 14.0) + exp(-(la * la + lb * lb) / 0.12);
     la = dz - (uRoadHalf + 1.0);
     lb = (fract(p.x / 18.0) - 0.5) * 18.0;
-    if (dx > uCorridor) lamp += exp(-(la * la + lb * lb) / 14.0) + exp(-(la * la + lb * lb) / 0.12);
+    if (dx > uCorridor && !paved) lamp += exp(-(la * la + lb * lb) / 14.0) + exp(-(la * la + lb * lb) / 0.12);
     glow += vec3(1.0, 0.76, 0.42) * lamp * 0.55;
 
     // headlight pools ahead of each car: xy = its front, zw = its heading
@@ -427,6 +465,8 @@ function buildCity() {
       uRoadHalf: { value: CITY.roadHalf },
       uCorridor: { value: CORRIDOR_HALF },
       uCars: { value: [...cars, ...Array.from({ length: MAX_CARS - cars.length }, () => new THREE.Vector4(0, 1e5, 0, 1))] },
+      uPavedX: { value: new THREE.Vector2(PAVED_STREET.minX, PAVED_STREET.maxX) },
+      uPavedZ: { value: new THREE.Vector2(PAVED_STREET.minZ, PAVED_STREET.maxZ) },
     }),
   );
   markBloom(ground.material, 'night');
@@ -539,6 +579,7 @@ export function City() {
       {city.meshes.map((m) => (
         <primitive key={m.uuid} object={m} />
       ))}
+      <ParkFence />
     </group>
   );
 }
@@ -582,7 +623,7 @@ export function setTowerDown(i: number, down: boolean) {
 // For QA: __swarmCity tells what the city holds and how far below you the street is.
 if (typeof window !== 'undefined' && !Object.getOwnPropertyDescriptor(window, '__swarmCity')) {
   Object.defineProperty(window, '__swarmCity', {
-    get: () => ({ ...probe, drawCalls: 6, lights: shared.uLights.value, towersDown: [...towersDown] }),
+    get: () => ({ ...probe, drawCalls: 7, lights: shared.uLights.value, towersDown: [...towersDown] }),
     enumerable: false,
     configurable: false,
   });

@@ -4,16 +4,18 @@ import { Outlines } from './Outlines';
 import * as THREE from 'three';
 import { doorSlide } from '../ui/sfx';
 import { playerAt } from './camera/rig';
-import { doorOpen, resetDoors, tickDoors } from './doors';
+import { doorOpen, nearDoor, resetDoors, tickDoors } from './doors';
 import { drawFacade } from './draw';
 import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BENCH, FLOOR_HEIGHT, HALF_D, HALF_W, PLANTER, SIDE_DOOR, SIDE_OPENINGS, SIDES, WALL_H, WALL_T, WINDOW, balconyFurniture, floorElevation, sideSign, type Side } from './layout';
 import { toon, toonMap } from './materials';
 import { OutsideSounds } from './OutsideSounds';
 import { doorWalkers } from './hiringState';
 import { bodyState } from './people';
+import { walk } from './toys/hands';
 import { boxesGeometry, merged, type BoxSpec } from './shapes';
 import { paneMaterial } from './Shell';
 import { LampHalos, balconyBulb } from './sky/lamps';
+import { DRUM_RADIUS, tickLiveDoor, wingAngle, WINGS } from './revolvingDoor';
 
 // Outside the side walls: the sliding glass doors, the balconies (the lobby's is a patio on the ground), and the rest
 // of the building round you: its walls above and below your floor and every floor's balcony (the city, outside/City.tsx,
@@ -42,8 +44,10 @@ function leafFrame(meet: number) {
   ]);
 }
 
-/** The glass doors: two leaves each that slide apart into the wall while you're near and shut behind you, with a whoosh. */
+/** The glass doors: two leaves each that slide apart into the wall while you're near and shut behind you, with a whoosh.
+ * The lobby's west side has a revolving door instead (#41, below), so it draws no leaves there and never slides. */
 function SideDoors({ kind, floor }: { kind: FloorKind; floor: number }) {
+  const slides = kind === 'lobby' ? (['east'] as const) : SIDES;
   const geo = useMemo(
     () => ({
       glass: new THREE.PlaneGeometry(LEAF_W - 0.1, LEAF_H - 0.2).rotateY(Math.PI / 2).translate(0, 0.14 + (LEAF_H - 0.2) / 2, 0),
@@ -72,6 +76,7 @@ function SideDoors({ kind, floor }: { kind: FloorKind; floor: number }) {
       const g = leaves.current[i];
       if (!g) continue;
       const side = SIDES[i >> 1];
+      if (!slides.includes(side)) continue;
       const dir = i & 1 ? 1 : -1;
       const z = SIDE_OPENINGS[kind][side].door + dir * (LEAF_W / 2 - 0.02 + doorOpen(side) * SLIDE);
       if (g.position.z !== z) g.position.z = z;
@@ -82,6 +87,7 @@ function SideDoors({ kind, floor }: { kind: FloorKind; floor: number }) {
     <group>
       {LEAVES.map((i) => {
         const side = SIDES[i >> 1];
+        if (!slides.includes(side)) return null;
         const dir = i & 1 ? 1 : -1;
         return (
           <group key={i} ref={(g) => void (leaves.current[i] = g)} position={[wallX(side), 0, SIDE_OPENINGS[kind][side].door + dir * (LEAF_W / 2 - 0.02)]}>
@@ -90,6 +96,50 @@ function SideDoors({ kind, floor }: { kind: FloorKind; floor: number }) {
           </group>
         );
       })}
+    </group>
+  );
+}
+
+// ---------- the lobby's revolving door (#41) ----------
+
+const WING_H = SIDE_DOOR.h - 0.1;
+
+/** The drum: a post with WINGS glass wings turning inside two curved glass side walls (drumColliders() matches
+ * the sides). It never blocks: only the sides (built into Facade/shellColliders' doorway cut) are solid for the
+ * player, and nothing here is solid for them at all. The wings follow your speed while you're in the drum and
+ * coast to a stop once you've left (revolvingDoor.ts). */
+function RevolvingDoor() {
+  const z = SIDE_OPENINGS.lobby.west.door;
+  const x = wallX('west');
+  const geo = useMemo(() => {
+    // a wing sweeps the drum's full diameter through the post, so WINGS of them 90° apart make its four blades
+    const wing = new THREE.PlaneGeometry(DRUM_RADIUS * 2 - 0.08, WING_H).rotateX(-Math.PI / 2).rotateZ(Math.PI / 2).translate(0, WING_H / 2 + 0.05, 0);
+    const post = new THREE.CylinderGeometry(0.06, 0.06, WING_H, 10).translate(0, WING_H / 2 + 0.05, 0);
+    // the drum's two solid sides, flanking the walked-through middle (matches drumColliders())
+    const side = new THREE.PlaneGeometry(DRUM_RADIUS * 2, WING_H).rotateY(Math.PI / 2).translate(0, WING_H / 2 + 0.05, 0);
+    return { wing, post, side };
+  }, []);
+  useEffect(() => () => Object.values(geo).forEach((g) => g.dispose()), [geo]);
+  const wings = useRef<(THREE.Mesh | null)[]>([]);
+  useFrame((_, dt) => {
+    // Player.tsx's own walk.x/z (its velocity after collision) is what actually moves you, so the wings read
+    // that directly rather than re-deriving speed from position deltas (which chase every frame's floating jitter).
+    const near = nearDoor('lobby', 'west', playerAt.x, playerAt.z);
+    const speed = near ? Math.hypot(walk.x, walk.z) : 0;
+    const state = tickLiveDoor(speed, Math.min(dt, 0.05));
+    for (let i = 0; i < WINGS; i++) {
+      const w = wings.current[i];
+      if (w) w.rotation.y = wingAngle(state, i);
+    }
+  });
+  return (
+    <group position={[x, 0, z]}>
+      <mesh geometry={geo.side} material={paneMaterial()} position={[0, 0, -DRUM_RADIUS * 0.65]} renderOrder={1} />
+      <mesh geometry={geo.side} material={paneMaterial()} position={[0, 0, DRUM_RADIUS * 0.65]} renderOrder={1} />
+      <mesh geometry={geo.post} material={toon('#8d8f96')} />
+      {Array.from({ length: WINGS }, (_, i) => (
+        <mesh key={i} ref={(m) => void (wings.current[i] = m)} geometry={geo.wing} material={paneMaterial()} renderOrder={1} />
+      ))}
     </group>
   );
 }
@@ -265,6 +315,7 @@ export function Outside({ kind, floor, top }: { kind: FloorKind; floor: number; 
   return (
     <group>
       <SideDoors kind={kind} floor={floor} />
+      {kind === 'lobby' && <RevolvingDoor />}
       <OutsideSounds kind={kind} />
       <Balconies kind={kind} floor={floor} top={Math.max(top, floor)} />
       <Facade floor={floor} top={Math.max(top, floor)} />
