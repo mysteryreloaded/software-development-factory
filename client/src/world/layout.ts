@@ -236,6 +236,26 @@ export const PONG_TABLE = { x: -6.6, z: 8.2, len: 2.74, wid: 1.525, top: 0.76, s
 export const pongTableRect = (): Rect => rect(PONG_TABLE.x, PONG_TABLE.z, PONG_TABLE.len, PONG_TABLE.wid, PONG_TABLE.top);
 export const PONG_BOARD = { x: -8.4, y: 1.95, w: 1.5, h: 1.3 };
 
+// The manager's kiosk (#29): a free-standing post beside the elevator on every office floor, so the manager's
+// console is one E away wherever you are, not just in the lobby. West of the entry path, the first thing you see
+// stepping out and the last thing you pass on the way back in; its front screen is turned to face the elevator
+// doors (south-east), the back one faces the room. w x d is the bezel's footprint (on local x/z, before rotY); it
+// stands on a post postH tall, with the bezel bodyH more on top (kept well under the lobby's clock height).
+const KIOSK_X = -2.5;
+const KIOSK_Z = 10.65;
+/** The angle (about y) that turns local +z to face the elevator doorway's middle from the kiosk's spot. */
+const KIOSK_ROT_Y = Math.atan2(0 - KIOSK_X, HALF_D - KIOSK_Z);
+export const MANAGER_KIOSK = { x: KIOSK_X, z: KIOSK_Z, rotY: KIOSK_ROT_Y, w: 1.1, d: 0.5, postH: 1.0, bodyH: 0.8 };
+/** The kiosk's solid: the bezel box's axis-aligned bound, rotated by rotY. */
+export function managerKioskRect(): Rect {
+  const { x, z, rotY, w, d, postH, bodyH } = MANAGER_KIOSK;
+  const halfX = (w / 2) * Math.abs(Math.cos(rotY)) + (d / 2) * Math.abs(Math.sin(rotY));
+  const halfZ = (w / 2) * Math.abs(Math.sin(rotY)) + (d / 2) * Math.abs(Math.cos(rotY));
+  return { minX: x - halfX, maxX: x + halfX, minZ: z - halfZ, maxZ: z + halfZ, h: postH + bodyH };
+}
+/** Where you stand to read the kiosk's front screen and press E: a step out along the way it faces, towards the elevator. */
+export const MANAGER_KIOSK_SPOT = { x: KIOSK_X + Math.sin(KIOSK_ROT_Y) * 1.6, z: KIOSK_Z + Math.cos(KIOSK_ROT_Y) * 1.6 };
+
 // ---------- decorations (#210) ----------
 
 /**
@@ -302,6 +322,7 @@ export function officeColliders(): Rect[] {
   out.push(jukeboxRect(JUKEBOX.officeX));
   out.push(gongRect());
   out.push(pongTableRect());
+  out.push(managerKioskRect());
   out.push(rect(HALF_W - 0.45, 7.4, 0.9, 5, SOLID_H.kitchen)); // kitchenette counter + fridge
   out.push(rect(HALF_W - 0.5, -9.5, 0.7, 0.7, SOLID_H.cooler)); // water cooler
   out.push(decorBoxRect());

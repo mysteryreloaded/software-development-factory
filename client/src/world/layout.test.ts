@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { FLOOR_SEATS } from '../../../shared/types';
 import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BALCONY_TOP, BENCH, FLOOR_HEIGHT, HALF_W, PLANTER, SIDE_DOOR, SIDE_OPENINGS, SIDES, WALL_H, WALL_T, WINDOW, balconyFloor, balconyFurniture, balconyRailing, floorElevation, inBuilding, outsideAt, outsideColliders, sideDoorway, sideSign, toyOnlyAt } from './layout.ts';
-import { APP_SCREEN, BOARD, CEO_DESK, CEO_ROOM, COFFEE_CORNER, coffeeCorner, collide, DESK_RUGS, ELEVATOR, GONG, GONG_SPOT, gongRect, HALF_D, LOBBY_RUG, lobbyColliders, MANAGER_DESK, MANAGER_ROOM, MISSION, missionColumn, missionRects, officeColliders, PLAYER_RADIUS, RECEPTION, rect, shellColliders, SPAWN, surfaceAt, WAITING, WAITING_TABLE, type Rect } from './layout.ts';
+import { APP_SCREEN, BOARD, CEO_DESK, CEO_ROOM, COFFEE_CORNER, coffeeCorner, collide, decorSlots, DESK_RUGS, ELEVATOR, elevatorDoorway, GONG, GONG_SPOT, gongRect, HALF_D, LOBBY_RUG, lobbyColliders, MANAGER_DESK, MANAGER_KIOSK, MANAGER_KIOSK_SPOT, managerKioskRect, MANAGER_ROOM, MISSION, missionColumn, missionRects, officeColliders, PLAYER_RADIUS, RECEPTION, rect, shellColliders, SPAWN, surfaceAt, WAITING, WAITING_TABLE, type Rect } from './layout.ts';
 import { DESK, DESK_ROWS, EAST_DESKS, EAST_ROTATION, MAX_DESKS, SEATS, deskPosition, deskRotation, isEastDesk } from './layout.ts';
+import { spot, walkways } from './walkways.ts';
 
 const R = 0.3;
 const box: Rect = { minX: 0, maxX: 2, minZ: 0, maxZ: 2 };
@@ -169,6 +170,31 @@ describe('collide', () => {
     expect(Math.min(...backRow.map((b) => b.minZ)) - g.maxZ).toBeGreaterThan(3);
     expect(collide(GONG_SPOT.x, GONG_SPOT.z, office)).toEqual(GONG_SPOT);
     expect(GONG_SPOT.z - g.maxZ).toBeLessThan(1.2); // close enough to reach the disc
+  });
+
+  it('stands the manager\'s kiosk beside the elevator on every office floor, clear of everything', () => {
+    const k = managerKioskRect();
+    const office = officeColliders();
+    expect(office).toContainEqual(k);
+    expect(k.h).toBeLessThan(2.1);
+    const shell = shellColliders();
+    const same = (b: Rect, c: Rect) => b.minX === c.minX && b.maxX === c.maxX && b.minZ === c.minZ && b.maxZ === c.maxZ;
+    const touches = (b: Rect, c: Rect) => b.minX < c.maxX && b.maxX > c.minX && b.minZ < c.maxZ && b.maxZ > c.minZ;
+    const furniture = office.filter((b) => !same(b, k) && !shell.some((w) => same(w, b)));
+    expect(furniture.filter((b) => touches(b, k))).toEqual([]);
+    // clear of the elevator doorway and the entry path (|x| < 1.6 from the doors to z 7.7)
+    const door = elevatorDoorway();
+    expect(k.minX < door.maxX && k.maxX > door.minX && k.minZ < door.maxZ && k.maxZ > door.minZ).toBe(false);
+    expect(k.maxX).toBeLessThanOrEqual(-1.6); // the whole box sits west of the entry path
+    // SPAWN, the 'elevator' walk spot and the 'elevator-w' decor slot are still free
+    expect(collide(SPAWN.x, SPAWN.z, office)).toEqual({ x: SPAWN.x, z: SPAWN.z });
+    const elevatorSpot = spot(walkways('office'), 'elevator')!;
+    expect(collide(elevatorSpot.x, elevatorSpot.z, office)).toEqual({ x: elevatorSpot.x, z: elevatorSpot.z });
+    const slot = decorSlots('office').find((s) => s.id === 'elevator-w')!;
+    expect(touches(k, rect(slot.x, slot.z, 0.01, 0.01))).toBe(false);
+    // a free spot in front of the screen, towards the elevator doors it faces
+    expect(collide(MANAGER_KIOSK_SPOT.x, MANAGER_KIOSK_SPOT.z, office)).toEqual(MANAGER_KIOSK_SPOT);
+    expect(MANAGER_KIOSK.x).toBeLessThan(0); // west of the elevator, as the issue asks
   });
 });
 
