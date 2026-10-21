@@ -17,6 +17,8 @@ import { useCanvasTexture, useInteractable } from './interact';
 import { PaintedTexture } from './paint/painter';
 import { BLOOM } from './gfx/bloomMarks';
 import { DeskGlow } from './gfx/ScreenGlow';
+import { DeskLamp } from './DeskLamp';
+import { deskLampLit } from './deskLamp';
 import { shade, toon } from './materials';
 import { deskMug, subscribeMugs } from './people';
 import { MUG_SIZE, MugLook, mugColor } from './toys/mugLook';
@@ -304,6 +306,7 @@ function Envelope({ requestId, name }: { requestId: string; name: string }) {
  * an empty desk past what a team may use (Settings → Most agents per floor), just the furniture: no screen to ask for.
  */
 export const Desk = memo(function Desk({
+  slot,
   agent,
   accent,
   repoId,
@@ -312,6 +315,7 @@ export const Desk = memo(function Desk({
   full = 0,
   spare = false,
 }: {
+  slot: number;
   agent: Agent | null;
   accent: string;
   repoId: string;
@@ -372,6 +376,8 @@ export const Desk = memo(function Desk({
         !spare && <VacantMonitor accent={accent} full={full} />
       )}
       {!spare && <DeskGlow color={accent} />}
+      {/* the lobby's CEO desk gets no lamp (#52) */}
+      {agent?.role !== 'ceo' && <DeskLamp slot={slot} lit={deskLampLit(agent?.status)} />}
       {(!agent || agent.role === 'ceo') && (
         // a team member's plant grows with them (desk/DeskStory.tsx)
         <>

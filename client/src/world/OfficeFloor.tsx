@@ -1,4 +1,4 @@
-import { memo, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { RepoView } from '../../../shared/types';
 import { EMPTY_NUMBERS, signLine } from '../ops';
@@ -8,6 +8,8 @@ import { ActivityIcon } from './ActivityIcon';
 import { ActivityTicker } from './ActivityTicker';
 import { AppMonitor } from './AppMonitor';
 import { Desk } from './Desk';
+import { deskLampLit } from './deskLamp';
+import { setDeskLampBusy } from './DeskLamp';
 import { drawSign } from './draw';
 import { Elevator } from './Elevator';
 import { ErrandDirector } from './ErrandDirector';
@@ -65,7 +67,11 @@ export const OfficeFloor = memo(function OfficeFloor({ repo }: { repo: RepoView 
   const maxAgents = useStore((s) => s.settings.maxAgents);
   const full = bySlot.size >= maxAgents ? maxAgents : 0;
   const { leavers, gone } = useLeavers(agents);
-  const working = agents.filter((a) => a.status === 'working' || a.status === 'preparing').length;
+  const working = agents.filter((a) => deskLampLit(a.status)).length;
+  useEffect(() => {
+    setDeskLampBusy(working);
+    return () => setDeskLampBusy(0);
+  }, [working]);
   const { inQa, ready } = useStore(useShallow((s) => floorPrCounts(repo, s.qa)));
   // Mission control's numbers for this floor, compact, on its team sign; the beacon on top spins while something here needs you.
   const ops = useStore((s) => signLine(s.ops.floors.find((f) => f.repoId === repo.id) ?? EMPTY_NUMBERS));
@@ -85,6 +91,7 @@ export const OfficeFloor = memo(function OfficeFloor({ repo }: { repo: RepoView 
       {DESKS.map((position, slot) => (
         <Desk
           key={slot}
+          slot={slot}
           agent={bySlot.get(slot) ?? null}
           accent={repo.color}
           repoId={repo.id}
