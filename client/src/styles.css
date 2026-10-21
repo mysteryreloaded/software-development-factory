@@ -2991,6 +2991,7 @@ input.inline:focus {
   }
 }
 .phone-overlay {
+  grid-template-columns: minmax(0, 1fr);
   place-items: end end;
   padding: 16px 24px;
   background: rgba(21, 21, 31, 0.28);
