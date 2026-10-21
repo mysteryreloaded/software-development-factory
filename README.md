@@ -82,7 +82,7 @@ More in [How it works](docs/how-it-works.md#agents-terminals).
 
 ### Around the office
 
-- **Visitors**: anyone else with the office open (another tab, a colleague) walks around in it as a visitor, and you see them. Hold `T` to emote and press `X` (or middle-click) to point something out. Your name, colour and whether others see you are in Settings → Profile.
+- **Visitors**: anyone else with the office open (another tab, a colleague) walks around in it as a visitor, and you see them. Hold `T` to emote and press `X` to point something out. Your name, colour and whether others see you are in Settings → Profile.
 - **Voice**: hear the CEO's messages read aloud (your browser's voice, or ElevenLabs with your own key), and talk instead of typing: hold the 🎙️ or `V` in any message box. See [Voice messages](docs/voice.md).
 - **Pocket mode**: on a phone, the office opens as a 2D app with the pipeline, the CEO chat, the Kanban, the team and approvals. It installs on your home screen and can notify you when something needs you. See [The office in your pocket](docs/pocket.md).
 - **Time-lapse**: watch the day (or just what happened while you were away) replay in the office at up to 600×, from the manager's console or the screen in the lobby.
@@ -106,10 +106,10 @@ More in [How it works](docs/how-it-works.md#agents-terminals).
 | `R` | reload a blaster |
 | `-` / `+` | the jukebox softer or louder |
 | `T` (hold) | the emote wheel: wave, thumbs up, clap, point, laugh |
-| `X` / middle click | ping where you aim, for everyone on the floor |
+| `X` | ping where you aim, for everyone on the floor |
 | `V` (hold, in a message box) | talk instead of typing |
 | `P` | your phone |
-| `Tab` | the overview: the whole floor from above, dollhouse style (drag to pan, scroll to zoom, `Q` / `E` to turn, click someone to open their panel); `Tab` again flies you back, twice quickly shows the whole building |
+| `Tab` / middle click | the overview: the whole floor from above, dollhouse style (drag to pan, scroll to zoom, `Q` / `E` to turn, click someone to open their panel); again flies you back, twice quickly shows the whole building |
 | `L` | show or hide who's working |
 | `K` | photo mode: freeze the office, fly a camera, filters, shots and clips |
 | `I` | save the last 15 seconds (once instant replay is on, in photo mode or help) |

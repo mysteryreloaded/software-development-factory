@@ -1,6 +1,6 @@
 // Run with `npm test` (Vitest).
 import { describe, expect, it } from 'vitest';
-import { shouldGrabLook, viewUncovered, type Covering } from './lookLockRules';
+import { shouldGrabLook, shouldReleaseLock, viewUncovered, type Covering } from './lookLockRules';
 
 const c = (overlay: boolean, confirm = false): Covering => ({ overlay, confirm });
 const on = { started: true, enabled: true };
@@ -50,5 +50,24 @@ describe('shouldGrabLook', () => {
   it('never grabs when nothing closed', () => {
     expect(shouldGrabLook(c(false), c(true), on)).toBe(false);
     expect(shouldGrabLook(c(true, true), c(true), on)).toBe(false);
+  });
+});
+
+describe('shouldReleaseLock', () => {
+  it('keeps a lock held in first person with no arrival', () => {
+    expect(shouldReleaseLock(true, true)).toBe(false);
+  });
+
+  it('releases a lock in the overview, the building view or the follow cam', () => {
+    expect(shouldReleaseLock(true, false)).toBe(true);
+  });
+
+  it('releases a lock that landed mid-arrival (first person, but not yet allowed)', () => {
+    expect(shouldReleaseLock(true, false)).toBe(true);
+  });
+
+  it('does nothing when there is no lock to release', () => {
+    expect(shouldReleaseLock(false, true)).toBe(false);
+    expect(shouldReleaseLock(false, false)).toBe(false);
   });
 });

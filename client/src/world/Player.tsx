@@ -15,6 +15,7 @@ import { getA11y, reduceMotion } from '../ui/a11y';
 import { footstepsFollow } from '../ui/footsteps';
 import { dropHeld, startCharge, throwHeld, walk } from './toys/hands';
 import { watchLookLock } from './lookLock';
+import { shouldReleaseLock } from './lookLockRules';
 import { pokeToy } from './toys/poke';
 import { isBlasterId } from './toys/darts';
 import { reloadHeld, takeBlaster } from './toys/gun';
@@ -327,6 +328,16 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       throwHeld();
       releaseBoard((f) => runFocusAction(f, 'click'));
     };
+    // Middle button: the same overview action as Tab (one click out, a quick second to the building), sharing its
+    // double-tap timer. Never a ping (presence/Presence.tsx has that, on the ping key only).
+    const onMiddleDown = (e: MouseEvent) => {
+      if (e.button !== 1) return;
+      e.preventDefault(); // no autoscroll
+      const s = useStore.getState();
+      if (s.overlay || !s.started || isConfirmOpen() || photoActive()) return;
+      tapView(e.timeStamp);
+      if (cameraMode() === 'first' && useLookPrefs.getState().grabOnClose) requestLook();
+    };
     const onQuietMouse = (e: MouseEvent) => {
       if (performance.now() >= quietUntil) return;
       e.stopPropagation();
@@ -337,6 +348,9 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       const locked = document.pointerLockElement === gl.domElement;
       if (!locked && !photoOwnsLock()) dropHeld(); // Esc: you've stepped away, so let go rather than leave it hanging in the air
       useStore.getState().setLocked(locked);
+      // A lock that landed (or still holds) outside first person hides the cursor with no way to pick a floor:
+      // release it at once (the overview, the building view, the follow cam, or mid-arrival to one of them).
+      if (shouldReleaseLock(locked, lookAllowed())) document.exitPointerLock();
     };
     const onMove = (e: MouseEvent) => {
       if (document.pointerLockElement !== gl.domElement || !document.hasFocus() || photoActive()) return;
@@ -419,6 +433,7 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       useStore.getState().setCharge(null); // the button's release would be missed
     };
     gl.domElement.addEventListener('mousedown', onMouseDown);
+    gl.domElement.addEventListener('mousedown', onMiddleDown);
     gl.domElement.addEventListener('pointerdown', onTouchStart);
     window.addEventListener('pointermove', onTouchMove);
     window.addEventListener('pointerup', onTouchEnd);
@@ -439,6 +454,7 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       stopLookLock();
       stopPads();
       gl.domElement.removeEventListener('mousedown', onMouseDown);
+      gl.domElement.removeEventListener('mousedown', onMiddleDown);
       gl.domElement.removeEventListener('pointerdown', onTouchStart);
       window.removeEventListener('pointermove', onTouchMove);
       window.removeEventListener('pointerup', onTouchEnd);

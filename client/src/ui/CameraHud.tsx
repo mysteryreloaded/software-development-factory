@@ -25,7 +25,7 @@ export function OverviewButton() {
   return (
     <button
       className="cam-btn"
-      title={`See the whole floor from above (${keyName('overview')}; twice for the building)`}
+      title={`See the whole floor from above (${keyName('overview')} or middle-click; twice for the building)`}
       onClick={(e) => {
         e.currentTarget.blur();
         enterOverview();

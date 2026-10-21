@@ -28,6 +28,39 @@ const settled = (page: Page, mode: CameraState['mode']) =>
 // Floor 1, on the open wood floor between the front desk row and the elevator, facing north.
 const SPOT: SavedView = { floor: 1, x: -4, z: 8.5, yaw: 0, pitch: -0.1 };
 
+/**
+ * Headless Chromium can't actually lock the pointer, so this fakes requestPointerLock/exitPointerLock: the lock
+ * lands about 150ms after it's requested (pointerlockchange fires then, as a real one would arrive asynchronously),
+ * and exiting clears it at once. Lets the middle-click and cursor-guard tests below exercise the real lock-driven
+ * code (Player.tsx's onLockChange) instead of skipping it.
+ */
+async function fakePointerLock(page: Page) {
+  await page.addInitScript(() => {
+    let locked: Element | null = null;
+    Object.defineProperty(document, 'pointerLockElement', { configurable: true, get: () => locked });
+    HTMLElement.prototype.requestPointerLock = function (this: HTMLElement) {
+      setTimeout(() => {
+        locked = this;
+        document.dispatchEvent(new Event('pointerlockchange'));
+      }, 150);
+      return undefined as unknown as Promise<void>;
+    };
+    document.exitPointerLock = () => {
+      locked = null;
+      document.dispatchEvent(new Event('pointerlockchange'));
+    };
+  });
+}
+
+const pings = (page: Page) => page.evaluate(() => (window as unknown as { __swarmPresence: { pings: () => unknown[] } }).__swarmPresence.pings());
+const locked = (page: Page) => page.evaluate(() => document.pointerLockElement !== null);
+
+async function viewCenter(page: Page) {
+  const box = await page.locator('canvas').first().boundingBox();
+  if (!box) throw new Error('no canvas');
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
 test('Tab flies up to the overview, a click on someone opens their panel, and Tab flies back to the same spot', async ({ page }) => {
   await startAt(page, SPOT);
   await enterOffice(page);
@@ -70,6 +103,69 @@ test('Tab twice shows every floor, and a click on one goes there', async ({ page
   await page.keyboard.press('Tab');
   await expect.poll(async () => (await camera(page)).owns, { timeout: 60_000 }).toBe(false);
   expect((await savedView(page))?.floor).toBe(2);
+});
+
+test('middle-click opens the overview like Tab, twice the building, and never pings', async ({ page }) => {
+  await fakePointerLock(page);
+  await startAt(page, SPOT);
+  await enterOffice(page);
+  const at = await viewCenter(page);
+  await page.mouse.click(at.x, at.y, { button: 'middle' });
+  await settled(page, 'overview');
+  await page.waitForTimeout(600); // past the double-tap window
+  await page.mouse.click(at.x, at.y, { button: 'middle' });
+  await settled(page, 'first');
+  await expect.poll(() => pings(page)).toEqual([]);
+});
+
+test('a middle double click shows the building, a click on a floor slice goes there, and the cursor stays free throughout', async ({ page }) => {
+  await fakePointerLock(page);
+  await startAt(page, SPOT);
+  await enterOffice(page);
+  const at = await viewCenter(page);
+  await page.mouse.click(at.x, at.y, { button: 'middle', clickCount: 2 });
+  await settled(page, 'building');
+  await page.waitForTimeout(400);
+  expect(await locked(page)).toBe(false);
+  // floor 2's slice, against the south face: y is relative to the floor you're on
+  const slice = (await call(page, '__swarmCamera', 'screenOf', 0, 4.2 + 1.8, 12.33)) as { x: number; y: number } | null;
+  expect(slice).not.toBeNull();
+  await page.mouse.click(slice!.x, slice!.y, { delay: 80 });
+  await expect(page.locator('.floor-num')).toHaveText('2', { timeout: 60_000 });
+  await settled(page, 'overview'); // you land looking over the floor you picked
+  await page.waitForTimeout(400);
+  expect(await locked(page)).toBe(false); // the floor's own overview has no lock either
+});
+
+test('a lock that lands mid-double-tap from Tab is released', async ({ page }) => {
+  await fakePointerLock(page);
+  await startAt(page, SPOT);
+  await enterOffice(page);
+  await page.keyboard.press('Tab');
+  await settled(page, 'overview');
+  // Two quick taps, dispatched like the "Tab twice" test above: the first flies back to first person and grabs the
+  // mouse, the second lands in the building before that lock has landed.
+  await page.evaluate(() => {
+    const taps = [0, 1].map(() => new KeyboardEvent('keydown', { code: 'Tab', key: 'Tab', bubbles: true }));
+    for (const e of taps) window.dispatchEvent(e);
+  });
+  await settled(page, 'building');
+  await page.waitForTimeout(400);
+  expect(await locked(page)).toBe(false);
+});
+
+test('the same race, driven by a middle-click double tap instead of Tab', async ({ page }) => {
+  await fakePointerLock(page);
+  await startAt(page, SPOT);
+  await enterOffice(page);
+  const at = await viewCenter(page);
+  await page.mouse.click(at.x, at.y, { button: 'middle' });
+  await settled(page, 'overview');
+  await page.waitForTimeout(600); // past the double-tap window, so this pair starts its own
+  await page.mouse.click(at.x, at.y, { button: 'middle', clickCount: 2 });
+  await settled(page, 'building');
+  await page.waitForTimeout(400);
+  expect(await locked(page)).toBe(false);
 });
 
 test('Follow trails someone on an errand, and W takes over again', async ({ page }) => {
