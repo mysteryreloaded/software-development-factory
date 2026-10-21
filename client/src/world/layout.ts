@@ -393,7 +393,7 @@ export function missionRects(): Rect[] {
 export function lobbyColliders(): Rect[] {
   const out = [...shellColliders('lobby'), ...outsideColliders('lobby')];
   // the west revolving door's drum (#41): its curved sides are the only solid part (revolvingDoor.ts)
-  out.push(...drumColliders(sideSign('west') * (HALF_W + WALL_T / 2), SIDE_OPENINGS.lobby.west.door, -1));
+  out.push(...drumColliders(sideSign('west') * (HALF_W + WALL_T / 2), SIDE_OPENINGS.lobby.west.door));
   const m = MANAGER_ROOM;
   const t = 0.12;
   out.push({ minX: m.maxX - t, maxX: m.maxX + t, minZ: m.minZ, maxZ: m.maxZ, h: SOLID_H.glass }); // glass east wall

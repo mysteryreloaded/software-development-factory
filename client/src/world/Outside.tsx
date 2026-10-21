@@ -4,7 +4,7 @@ import { Outlines } from './Outlines';
 import * as THREE from 'three';
 import { doorSlide } from '../ui/sfx';
 import { playerAt } from './camera/rig';
-import { doorOpen, nearDoor, resetDoors, tickDoors } from './doors';
+import { doorOpen, resetDoors, tickDoors } from './doors';
 import { drawFacade } from './draw';
 import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BENCH, FLOOR_HEIGHT, HALF_D, HALF_W, PLANTER, SIDE_DOOR, SIDE_OPENINGS, SIDES, WALL_H, WALL_T, WINDOW, balconyFurniture, floorElevation, sideSign, type Side } from './layout';
 import { toon, toonMap } from './materials';
@@ -15,7 +15,7 @@ import { walk } from './toys/hands';
 import { boxesGeometry, merged, type BoxSpec } from './shapes';
 import { paneMaterial } from './Shell';
 import { LampHalos, balconyBulb } from './sky/lamps';
-import { DRUM_RADIUS, drumColliders, tickLiveDoor, wingAngle, WINGS } from './revolvingDoor';
+import { DRUM_RADIUS, tickLiveDoor, wingAngle, WINGS } from './revolvingDoor';
 
 // Outside the side walls: the sliding glass doors, the balconies (the lobby's is a patio on the ground), and the rest
 // of the building round you: its walls above and below your floor and every floor's balcony (the city, outside/City.tsx,
@@ -106,31 +106,35 @@ const WING_H = SIDE_DOOR.h - 0.1;
 // A wing spans the drum's full diameter through the post, so it's really two opposite wings at once: WINGS of
 // them 90° apart need only WINGS / 2 meshes, each doubling as the blade on its far side too.
 const DRAWN_WINGS = WINGS / 2;
+const QUARTER = Math.PI / 2;
+// The two curved sides are quarter-circles centred on north and south, leaving the east (into the building) and
+// west (out to the grounds) quarters open to walk through (drumColliders() bounds the same two arcs).
+const ARC_SEGMENTS = 16;
 
-/** The drum: a post with WINGS glass wings turning inside two curved glass side walls (drumColliders() matches
- * the sides, which Player.tsx's collide() also uses). It never blocks: only the sides are solid for the player,
- * and nothing here is solid for them at all. The wings follow your speed while you're in the drum and coast to
- * a stop once you've left (revolvingDoor.ts). */
+/** The drum: a post with WINGS glass wings turning inside two curved glass side walls, centred on the post (not
+ * offset into the wall). It never blocks: only the sides are solid for the player (drumColliders(), which
+ * Player.tsx's collide() also uses), and nothing here is solid for them at all. The wings are phased to your
+ * progress across the drum and coast to the next quarter turn once you've left (revolvingDoor.ts). */
 function RevolvingDoor() {
   const z = SIDE_OPENINGS.lobby.west.door;
   const x = wallX('west');
   const geo = useMemo(() => {
     const wing = new THREE.PlaneGeometry(DRUM_RADIUS * 2 - 0.08, WING_H).rotateX(-Math.PI / 2).rotateZ(Math.PI / 2).translate(0, WING_H / 2 + 0.05, 0);
     const post = new THREE.CylinderGeometry(0.06, 0.06, WING_H, 10).translate(0, WING_H / 2 + 0.05, 0);
-    // the drum's two solid sides, flanking the walked-through middle, exactly where drumColliders() puts them
-    const [near, far] = drumColliders(0, 0, -1);
-    const sideW = near.maxZ - near.minZ;
-    const side = new THREE.PlaneGeometry(sideW, WING_H).rotateY(Math.PI / 2).translate(0, WING_H / 2 + 0.05, 0);
-    return { wing, post, side, sideZ: [(near.minZ + near.maxZ) / 2, (far.minZ + far.maxZ) / 2] };
+    const arc = (thetaStart: number) => new THREE.CylinderGeometry(DRUM_RADIUS, DRUM_RADIUS, WING_H, ARC_SEGMENTS, 1, true, thetaStart, QUARTER).translate(0, WING_H / 2 + 0.05, 0);
+    const north = arc(Math.PI - QUARTER / 2);
+    const south = arc(-QUARTER / 2);
+    return { wing, post, north, south };
   }, []);
-  useEffect(() => () => [geo.wing, geo.post, geo.side].forEach((g) => g.dispose()), [geo]);
+  useEffect(() => () => [geo.wing, geo.post, geo.north, geo.south].forEach((g) => g.dispose()), [geo]);
   const wings = useRef<(THREE.Mesh | null)[]>([]);
   useFrame((_, dt) => {
-    // Player.tsx's own walk.x/z (its velocity after collision) is what actually moves you, so the wings read
-    // that directly rather than re-deriving speed from position deltas (which chase every frame's floating jitter).
-    const near = nearDoor('lobby', 'west', playerAt.x, playerAt.z);
-    const speed = near ? Math.hypot(walk.x, walk.z) : 0;
-    const state = tickLiveDoor(speed, Math.min(dt, 0.05));
+    // Player.tsx's own walk.x (its velocity after collision) is what actually moves you through the wall, so the
+    // wings read that directly rather than re-deriving speed from position deltas (which chase floating jitter).
+    const dx = playerAt.x - x;
+    const dz = playerAt.z - z;
+    const inside = dx * dx + dz * dz <= DRUM_RADIUS * DRUM_RADIUS;
+    const state = tickLiveDoor(inside ? Math.abs(walk.x) : 0, inside, Math.min(dt, 0.05));
     for (let i = 0; i < DRAWN_WINGS; i++) {
       const w = wings.current[i];
       if (w) w.rotation.y = wingAngle(state, i);
@@ -138,8 +142,8 @@ function RevolvingDoor() {
   });
   return (
     <group position={[x, 0, z]}>
-      <mesh geometry={geo.side} material={paneMaterial()} position={[0, 0, geo.sideZ[0]]} renderOrder={1} />
-      <mesh geometry={geo.side} material={paneMaterial()} position={[0, 0, geo.sideZ[1]]} renderOrder={1} />
+      <mesh geometry={geo.north} material={paneMaterial()} renderOrder={1} />
+      <mesh geometry={geo.south} material={paneMaterial()} renderOrder={1} />
       <mesh geometry={geo.post} material={toon('#8d8f96')} />
       {Array.from({ length: DRAWN_WINGS }, (_, i) => (
         <mesh key={i} ref={(m) => void (wings.current[i] = m)} geometry={geo.wing} material={paneMaterial()} renderOrder={1} />

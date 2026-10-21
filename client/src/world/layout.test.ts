@@ -369,8 +369,11 @@ describe('outside: side doors, windows and balconies', () => {
   it.each(KINDS)("keeps the room's furniture out of the way of the %s doors", (kind) => {
     const shell = shellColliders(kind);
     const outside = outsideColliders(kind);
+    // the lobby's west revolving door (#41) is centred on the post, so half its drum sits in the doorway's own
+    // space: it's part of the doorway, like the shell wall, not furniture placed too close to it
+    const drum = kind === 'lobby' ? drumColliders(sideSign('west') * (HALF_W + WALL_T / 2), SIDE_OPENINGS.lobby.west.door) : [];
     const same = (b: Rect, c: Rect) => b.minX === c.minX && b.maxX === c.maxX && b.minZ === c.minZ && b.maxZ === c.maxZ;
-    const furniture = all(kind).filter((b) => !shell.some((w) => same(w, b)) && !outside.some((o) => same(o, b)));
+    const furniture = all(kind).filter((b) => !shell.some((w) => same(w, b)) && !outside.some((o) => same(o, b)) && !drum.some((d) => same(d, b)));
     for (const side of SIDES) {
       const s = sideSign(side);
       const z = SIDE_OPENINGS[kind][side].door;
@@ -422,9 +425,14 @@ describe('outside: side doors, windows and balconies', () => {
   it("solid on the revolving door's drum sides, so the player can't walk through its glass (#41)", () => {
     const x = sideSign('west') * (HALF_W + WALL_T / 2);
     const z = SIDE_OPENINGS.lobby.west.door;
-    const drum = drumColliders(x, z, -1);
+    const drum = drumColliders(x, z);
     expect(drum).toHaveLength(2);
     expect(lobbyColliders()).toEqual(expect.arrayContaining(drum));
+    // centred on the post, not stuck out onto the plaza past anything drawn (#41 round 3)
+    for (const r of drum) {
+      expect(r.minX).toBeGreaterThan(x - DRUM_RADIUS);
+      expect(r.maxX).toBeLessThan(x + DRUM_RADIUS);
+    }
     // stepping into one of the drum's solid sides pushes the player back out of it
     const side = drum[0];
     const px = (side.minX + side.maxX) / 2;
