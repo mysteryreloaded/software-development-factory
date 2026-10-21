@@ -224,4 +224,46 @@ describe('stopTree', () => {
     await stopTree(c);
     expect(Date.now() - t0).toBeLessThan(250);
   });
+
+  it.skipIf(process.platform === 'win32')('kills a straggler child that outlives the leader', async () => {
+    const file = path.join(ROOT, `child-pid ${++seq}.txt`);
+    const c = spawnDetached(`(trap '' TERM; while :; do sleep 0.1; done) & echo $! > '${file}'; trap 'exit 0' TERM; wait`);
+    await start();
+    let childPid = -1;
+    try {
+      await stopTree(c, 300);
+      childPid = Number((await fs.readFile(file, 'utf8')).trim());
+      const childDead = async () => {
+        try {
+          process.kill(childPid, 0);
+          return false;
+        } catch {
+          return true;
+        }
+      };
+      const deadline = Date.now() + 2_000;
+      let isDead = await childDead();
+      while (!isDead && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+        isDead = await childDead();
+      }
+      expect(isDead).toBe(true);
+    } finally {
+      if (childPid > 0) {
+        try {
+          process.kill(childPid, 'SIGKILL');
+        } catch {}
+      }
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('gives a child that outlives the leader its own time to clean up', async () => {
+    const file = path.join(ROOT, `slow-bye ${++seq}.txt`);
+    const c = spawnDetached(`(trap 'sleep 0.5; echo bye > "${file}"; exit 0' TERM; while :; do sleep 0.1; done) & trap 'exit 0' TERM; wait`);
+    await start();
+    const t0 = Date.now();
+    await stopTree(c, 5_000);
+    expect(Date.now() - t0).toBeLessThan(5_000);
+    expect((await fs.readFile(file, 'utf8')).trim()).toBe('bye');
+  });
 });
