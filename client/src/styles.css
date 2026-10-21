@@ -335,7 +335,18 @@ input.inline:focus {
 .hud-top {
   pointer-events: none;
 }
+/* .hud-top > * is .hud-top-scroll/.hud-top-lower now (issue #44's round 2), not the boxes/toasts themselves
+   (further nested): leave the wrappers none, so their own gaps — stretched to the column's full width on a
+   phone, including .aim-cards' when nothing's aimed at — don't swallow swipes meant for the canvas behind them
+   (round 5), and enable pointer-events on the actual interactive pieces below instead. */
 .hud-top > * {
+  pointer-events: none;
+}
+.hud-floor,
+.hud-status,
+.hud-chips,
+.hud-banner,
+.toast {
   pointer-events: auto;
 }
 .hud-floor {
@@ -558,19 +569,31 @@ input.inline:focus {
     white-space: normal;
     text-align: left;
   }
-  /* The roof's own hints: clear .hud-help below (same reasoning as that one clearing the joystick), centred the
-     way they are on desktop instead of .aim-cards' left-aligned flow, since there's nothing else up there to flow
-     after on the roof. Higher specificity than .roof-scope-hint's own bottom: 5% (a single class), so this wins
-     for the telescope's hint too without needing !important. */
+  /* The roof's own hints: clear .hud-help below (same reasoning as that one clearing the joystick) and .hud-top's
+     own scrollable band above (.hud-top-scroll in landscape, .hud-top itself in portrait — shrunk below, so a
+     full top column can't land on this either: round 5 found 184px sitting exactly on its edge). Centred the way
+     they are on desktop instead of .aim-cards' left-aligned flow, since there's nothing else up there to flow
+     after on the roof. transform: none, not base .hud-hint's translateX(-50%): that halved left/right into a
+     centring margin already (round 5 found the two together pushing it half off the left edge). Higher
+     specificity than .roof-scope-hint's own bottom: 5% (a single class), so this wins for the telescope's hint
+     too without needing !important. */
   .hud > .hud-hint {
-    bottom: calc(184px + env(safe-area-inset-bottom));
+    bottom: calc(183px + env(safe-area-inset-bottom));
     left: max(16px, env(safe-area-inset-left));
     right: max(16px, env(safe-area-inset-right));
+    transform: none;
     max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
     width: fit-content;
     margin: 0 auto;
     white-space: normal;
     text-align: center;
+  }
+  /* Shrink .hud-top's scrollable band (whichever one actually clips on this orientation) so it can't reach the
+     roof hint's own band above, whatever's in it — the lobby/floor-1 worst case (long text, every pill) can
+     otherwise fill it right up to the edge .hud > .hud-hint now clears by design. */
+  .hud:has(> .hud-hint) .hud-top,
+  .hud:has(> .hud-hint) .hud-top-scroll {
+    max-height: calc(100vh - 260px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   }
 }
 /* The cards for whoever you're looking at (ui/AgentCard.tsx, then the career peek in ui/CareerCard.tsx): docked at

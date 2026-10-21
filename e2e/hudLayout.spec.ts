@@ -343,3 +343,31 @@ test.describe('phone HUD layout round 4: desktop stays unaffected', () => {
     }
   });
 });
+
+// Issue #44 round 5: the roof (in scope since the issue's "every floor kind (lobby, an office floor, the roof)")
+// has its own .hud-hint, a direct child of .hud rather than nested in .aim-cards — the spec never put one of
+// those on screen on a phone before. Sitting in a deck chair shows "🪑 Sitting back · …", testing .hud > .hud-hint
+// (styles.css) the same way the lobby/floor-1 worst case above tests .hud-top: with every pill and a long floor
+// name/sub-line on screen too (the deck chairs aren't on a repo floor, but the HUD doesn't know that).
+test.describe('phone HUD layout round 5: the roof’s own hints', () => {
+  test.use(S23);
+
+  // Deck chair 0's front spot (layout.ts's deckChairFront(0)), facing it.
+  const DECK_CHAIR_FRONT: SavedView = { floor: -1, x: 4.4, z: -3.6, yaw: 0, pitch: -0.15 };
+
+  for (const [name, viewport] of TWO_VIEWPORTS) {
+    test(`sitting in a deck chair (${name})`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await startAt(page, DECK_CHAIR_FRONT);
+      await page.goto('/?pocket=0');
+      await enterOffice(page, { loaded: true });
+      await skipTour(page);
+      const use = page.locator('.touch-btn-use');
+      await expect(use).toHaveText('Sit back in the deck chair', { timeout: 15_000 });
+      await use.click(); // a real touch device taps the on-screen button, not a keyboard that isn't there
+      await expect(page.locator('.hud-hint', { hasText: 'Sitting back' })).toBeVisible();
+      await setWorstCase(page, { longText: true });
+      await assertNoOverlapOnScreen(page, viewport);
+    });
+  }
+});
