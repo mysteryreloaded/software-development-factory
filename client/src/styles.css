@@ -3861,6 +3861,7 @@ input.inline:focus {
   border-radius: 999px;
   background: #eef0f6;
   overflow: hidden;
+  margin-top: 6px;
 }
 .usage-gauge > div {
   height: 100%;

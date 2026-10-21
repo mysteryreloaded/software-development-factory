@@ -245,7 +245,7 @@ export const useStore = create<State>((set, get) => ({
   messages: [],
   phoneReadAt: 0,
   ceoDraft: '',
-  usage: { state: 'normal', until: null, warning: null },
+  usage: { state: 'normal', until: null, warning: null, limits: [] },
   ops: EMPTY_OPS,
   doctor: [],
   voiceKeySet: false,

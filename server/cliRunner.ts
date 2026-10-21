@@ -26,6 +26,7 @@ import {
 import type { OfficeTools } from './ceo.ts';
 import type { AgentTerminal } from './terminal.ts';
 import type { AgentCli } from '../shared/types.ts';
+import { parseRateLimits } from '../shared/usage.ts';
 
 // One agent session as the real CLI in a pseudo-terminal: the same contract as the Agent SDK runner (log lines, the
 // current tool, the final text, finished), so the rest of the office doesn't care which runtime an agent uses.
@@ -46,8 +47,6 @@ const BIN_DIR = path.join(HOME_DIR, 'bin');
 const FINISH_GRACE_MS = 3000;
 /** Starting up: how long before the office says the CLI seems to be waiting on something. */
 const BOOT_MS = 60_000;
-/** Claude's usage warning, the way the SDK's allowed_warning is used: pace new work from here. */
-const USAGE_WARN_PCT = 90;
 /** Prompts longer than this go in a file: Windows caps a command line at 32K characters. */
 const INLINE_PROMPT_MAX = 8000;
 
@@ -447,16 +446,12 @@ export function startCliSession(opts: SessionOptions, callbacks: SessionCallback
     const cost = Number((b.cost as { total_cost_usd?: unknown } | undefined)?.total_cost_usd);
     if (Number.isFinite(cost)) costUsd = cost;
     const limits = (b.rate_limits ?? {}) as Record<string, { used_percentage?: unknown; resets_at?: unknown } | null>;
-    for (const [type, l] of Object.entries(limits)) {
-      const used = Number(l?.used_percentage);
-      if (!Number.isFinite(used)) continue;
-      const resetsAt = Number(l?.resets_at) > 0 ? Number(l?.resets_at) * 1000 : null;
-      usageResets.set(type, used >= 100 ? resetsAt : null);
-      if (used >= USAGE_WARN_PCT && used < 100 && !warned.has(type)) {
-        warned.add(type);
-        cb.usageWarning?.({ resetsAt, rateLimitType: type, utilization: used / 100 });
-      }
+    const { readings, warnings } = parseRateLimits(limits, warned);
+    for (const r of readings) {
+      usageResets.set(r.type, r.maxedOut ? r.resetsAt : null);
+      if (r.type === 'five_hour' || r.type === 'seven_day') cb.usageReading?.({ type: r.type, pct: r.pct, resetsAt: r.resetsAt });
     }
+    for (const w of warnings) cb.usageWarning?.(w);
     return { statusLine };
   };
 

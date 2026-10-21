@@ -36,17 +36,25 @@ describe('mayStart', () => {
 
 describe('usageView and usageLabel', () => {
   it('is normal, pacing or paused, with the pause first', () => {
-    expect(usageView({ now: NOW, pausedUntil: 0, pacingUntil: 0 })).toEqual({ state: 'normal', until: null, warning: null });
-    expect(usageView({ now: NOW, pausedUntil: 0, pacingUntil: NOW + HOUR })).toEqual({ state: 'pacing', until: NOW + HOUR, warning: null });
-    expect(usageView({ now: NOW, pausedUntil: NOW + HOUR, pacingUntil: NOW + 2 * HOUR })).toEqual({ state: 'paused', until: NOW + HOUR, warning: null });
-    expect(usageView({ now: NOW, pausedUntil: NOW, pacingUntil: NOW })).toEqual({ state: 'normal', until: null, warning: null });
+    expect(usageView({ now: NOW, pausedUntil: 0, pacingUntil: 0 })).toEqual({ state: 'normal', until: null, warning: null, limits: [] });
+    expect(usageView({ now: NOW, pausedUntil: 0, pacingUntil: NOW + HOUR })).toEqual({ state: 'pacing', until: NOW + HOUR, warning: null, limits: [] });
+    expect(usageView({ now: NOW, pausedUntil: NOW + HOUR, pacingUntil: NOW + 2 * HOUR })).toEqual({ state: 'paused', until: NOW + HOUR, warning: null, limits: [] });
+    expect(usageView({ now: NOW, pausedUntil: NOW, pacingUntil: NOW })).toEqual({ state: 'normal', until: null, warning: null, limits: [] });
   });
 
   it("carries the last warning's limit, fill and reset for the usage meter", () => {
     const warning = warningView({ resetsAt: NOW + HOUR, rateLimitType: 'seven_day', utilization: 0.91 }, NOW);
     expect(warning).toEqual({ limit: 'weekly limit', pct: 91, resetsAt: NOW + HOUR, at: NOW });
-    expect(usageView({ now: NOW, pausedUntil: 0, pacingUntil: NOW + HOUR }, warning)).toEqual({ state: 'pacing', until: NOW + HOUR, warning });
+    expect(usageView({ now: NOW, pausedUntil: 0, pacingUntil: NOW + HOUR }, warning)).toEqual({ state: 'pacing', until: NOW + HOUR, warning, limits: [] });
     expect(warningView({ resetsAt: null, rateLimitType: null, utilization: null }, NOW)).toEqual({ limit: null, pct: null, resetsAt: null, at: NOW });
+  });
+
+  it('orders live readings 5-hour then weekly, and ignores other limit types', () => {
+    const fiveHour = { type: 'five_hour' as const, pct: 40, resetsAt: NOW + HOUR, at: NOW };
+    const weekly = { type: 'seven_day' as const, pct: 70, resetsAt: NOW + 2 * HOUR, at: NOW };
+    expect(usageView({ now: NOW, pausedUntil: 0, pacingUntil: 0 }, null, { seven_day: weekly, five_hour: fiveHour }).limits).toEqual([fiveHour, weekly]);
+    expect(usageView({ now: NOW, pausedUntil: 0, pacingUntil: 0 }, null, { five_hour: fiveHour }).limits).toEqual([fiveHour]);
+    expect(usageView({ now: NOW, pausedUntil: 0, pacingUntil: 0 }, null, {}).limits).toEqual([]);
   });
 
   it('reads as the CEO sees it in company_status', () => {

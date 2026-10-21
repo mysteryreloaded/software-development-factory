@@ -126,7 +126,7 @@ function qa(patch: Partial<QaView> = {}): QaView {
 
 /** A keyframe as the journal writes it: slimmed by journalFrame. */
 function frame(patch: Partial<JournalFrame> = {}): JournalFrame {
-  const f = { repos: [repo()], agents: [agent()], qa: [], requests: [], ceo: { queue: [], job: null, lastReviewAt: null, nextReviewAt: null }, messages: [], usage: { state: 'normal' as const, until: null, warning: null }, ...patch };
+  const f = { repos: [repo()], agents: [agent()], qa: [], requests: [], ceo: { queue: [], job: null, lastReviewAt: null, nextReviewAt: null }, messages: [], usage: { state: 'normal' as const, until: null, warning: null, limits: [] }, ...patch };
   return journalFrame({ ...f, agents: f.agents.map((a) => ({ ...a, log: [] })) });
 }
 
@@ -247,7 +247,7 @@ describe('journalFrame', () => {
       requests: [],
       ceo: { queue: [], job: null, lastReviewAt: null, nextReviewAt: null },
       messages: Array.from({ length: 50 }, (_, i) => ({ id: i, from: 'ceo' as const, text: `m${i}`, at: i })),
-      usage: { state: 'normal' as const, until: null, warning: null },
+      usage: { state: 'normal' as const, until: null, warning: null, limits: [] },
     };
     const f = journalFrame(snap);
     expect(JSON.stringify(f)).not.toContain('terminal output');
@@ -321,7 +321,7 @@ describe('recorded: writing only what changed', () => {
 
 describe('seeking', () => {
   const files: JournalLine[][] = [
-    [{ t: 0, k: frame(), boot: true }, { t: 5, e: { type: 'usage', usage: { state: 'normal', until: null, warning: null } } }],
+    [{ t: 0, k: frame(), boot: true }, { t: 5, e: { type: 'usage', usage: { state: 'normal', until: null, warning: null, limits: [] } } }],
     [{ t: 10, k: frame() }, { t: 12, e: { type: 'agentRemoved', agentId: 'a' } }, { t: 18, e: { type: 'agentRemoved', agentId: 'b' } }],
     [{ t: 20, k: frame() }, { t: 25, e: { type: 'agentRemoved', agentId: 'c' } }],
   ];

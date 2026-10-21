@@ -408,11 +408,20 @@ export interface UsageWarningView {
   at: number;
 }
 
+/** Claude's latest reading of one usage window (5-hour or weekly), from a session's status line. */
+export interface UsageLimitView {
+  type: 'five_hour' | 'seven_day';
+  pct: number; // 0-100, rounded
+  resetsAt: number | null; // epoch ms
+  at: number; // when this reading was taken
+}
+
 /** Claude's subscription usage: normal, pacing new work after a usage warning, or paused at the limit until `until`. */
 export interface UsageView {
   state: 'normal' | 'pacing' | 'paused';
   until: number | null;
   warning: UsageWarningView | null; // the latest since the office started, for the usage meter
+  limits: UsageLimitView[]; // live readings, 5-hour first then weekly; only limits with a reading
 }
 
 /** One floor's numbers on mission control (or the whole office's), computed by the server from its state and history. */

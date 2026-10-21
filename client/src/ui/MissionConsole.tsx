@@ -66,13 +66,18 @@ function UsageCard({ hot }: { hot: boolean }) {
           ⏩ Resume full speed
         </button>
       </div>
-      <div className="usage-gauge" role="meter" aria-label="Claude usage at the last warning" aria-valuemin={0} aria-valuemax={100} aria-valuenow={m.pct ?? 0}>
-        <div style={{ width: `${Math.min(100, m.pct ?? 0)}%`, background: (m.pct ?? 0) >= 90 ? 'var(--bad)' : (m.pct ?? 0) >= 75 ? 'var(--warn)' : 'var(--good)' }} />
-      </div>
-      <div className="small">
-        <b>{m.limit}</b>
-        {m.resets && ` · resets ${m.resets}`}
-      </div>
+      {m.limits.map((l) => (
+        <div key={l.label}>
+          <div className="usage-gauge" role="meter" aria-label={`Claude ${l.label === '5-hour' ? '5-hour' : 'weekly'} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={l.pct ?? 0}>
+            <div style={{ width: `${Math.min(100, l.pct ?? 0)}%`, background: (l.pct ?? 0) >= 90 ? 'var(--bad)' : (l.pct ?? 0) >= 75 ? 'var(--warn)' : 'var(--good)' }} />
+          </div>
+          <div className="small">
+            {l.label} {l.pct === null ? '—' : `${l.pct}%`}
+            {l.resets && ` · ${l.resets}`} · as of {l.asOf}
+          </div>
+        </div>
+      ))}
+      {m.noReadings && <div className="small">{m.noReadings}</div>}
       <div className="muted small">{why}</div>
       {demo && (
         <div className="row wrap">

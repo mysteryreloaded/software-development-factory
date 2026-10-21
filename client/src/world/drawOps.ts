@@ -265,35 +265,50 @@ export function drawTeam(ctx: CanvasRenderingContext2D, w: number, h: number, d:
 
 // ---------- Claude's usage ----------
 
+export interface UsageLimitRow {
+  label: string; // "5-hour" or "Weekly"
+  pct: number | null;
+  tone: 'good' | 'warn' | 'bad';
+  resets: string | null;
+  asOf: string;
+}
+
 export interface UsageScreen {
   state: string; // Normal / Pacing / Paused
   tone: 'good' | 'warn' | 'bad';
-  limit: string;
-  pct: number | null;
-  resets: string | null;
+  limits: UsageLimitRow[];
+  noReadings: string | null;
   hint: string;
 }
 
 const TONE = { good: C.good, warn: C.warn, bad: C.bad };
 const STATE_ICON: Record<string, string> = { Normal: '✓', Pacing: '🐢', Paused: '⏸' };
 
-/** The usage meter: normal, pacing or paused, the last warning's limit and fill, and when it resets. */
+/** One labelled bar: the limit's name, its fill, and when it resets / was last read. */
+function bar(ctx: CanvasRenderingContext2D, w: number, y: number, row: UsageLimitRow) {
+  const gx = 60;
+  const gw = w - 120;
+  text(ctx, row.label, gx, y - 14, 26, C.dim, 'left', 600);
+  roundRect(ctx, gx, y, gw, 38, 19);
+  ctx.fillStyle = C.line;
+  ctx.fill();
+  if (row.pct !== null) {
+    roundRect(ctx, gx, y, Math.max(38, (gw * Math.min(100, row.pct)) / 100), 38, 19);
+    ctx.fillStyle = TONE[row.tone];
+    ctx.fill();
+    text(ctx, `${row.pct}%`, gx + gw - 14, y + 19, 24, C.text, 'right', 700);
+  }
+  text(ctx, row.resets ?? 'nothing to reset', gx, y + 56, 22, C.dim, 'left', 500, gw * 0.65);
+  text(ctx, `as of ${row.asOf}`, gx + gw, y + 56, 22, C.dim, 'right', 500);
+}
+
+/** The usage meter: normal, pacing or paused, and a labelled bar per live reading (5-hour, then weekly). */
 export function drawUsage(ctx: CanvasRenderingContext2D, w: number, h: number, d: UsageScreen) {
   frame(ctx, w, h, 'CLAUDE USAGE', d.tone === 'good' ? 'full speed' : 'new work held back');
   const color = TONE[d.tone];
-  text(ctx, `${STATE_ICON[d.state] ?? ''} ${d.state}`, w / 2, 160, 92, color, 'center');
-  const gx = 60;
-  const gw = w - 120;
-  roundRect(ctx, gx, 236, gw, 42, 21);
-  ctx.fillStyle = C.line;
-  ctx.fill();
-  if (d.pct !== null) {
-    roundRect(ctx, gx, 236, Math.max(42, (gw * Math.min(100, d.pct)) / 100), 42, 21);
-    ctx.fillStyle = d.pct >= 90 ? C.bad : d.pct >= 75 ? C.warn : C.good;
-    ctx.fill();
-  }
-  text(ctx, d.limit, w / 2, 320, 34, C.text, 'center', 600, w - 80);
-  text(ctx, d.resets ? `resets ${d.resets}` : 'nothing to reset', w / 2, 368, 30, C.dim, 'center', 600);
+  text(ctx, `${STATE_ICON[d.state] ?? ''} ${d.state}`, w / 2, 140, 80, color, 'center');
+  if (d.noReadings) text(ctx, d.noReadings, w / 2, 260, 28, C.dim, 'center', 600, w - 120);
+  else d.limits.forEach((row, i) => bar(ctx, w, 220 + i * 110, row));
   roundRect(ctx, 60, 404, w - 120, 64, 32);
   ctx.fillStyle = d.tone === 'warn' ? 'rgba(255, 209, 102, 0.16)' : 'rgba(143, 211, 255, 0.08)';
   ctx.fill();
