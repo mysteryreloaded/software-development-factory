@@ -53,6 +53,7 @@ import { WeatherService } from './weather.ts';
 import { blockers, holdUps, waitsMessage } from '../shared/issues.ts';
 import { dayKey, journalFrame, legacyAgent, legacyRequest } from '../shared/journal.ts';
 import { cleanStyle, HAIR_COLORS, SKIN_TONES, type AgentStyle } from '../shared/looks.ts';
+import { MESSAGE_MAX, messageProblem } from '../shared/message.ts';
 import { achievementDef, type ProgressView } from '../shared/progress.ts';
 import { parsePongResult, PONG_PLAYER, recordGame } from '../shared/pong.ts';
 import { effectiveModel } from '../shared/models.ts';
@@ -3208,7 +3209,9 @@ export class Swarm {
     const a = this.agent(id);
     if (a.role === 'ceo') return this.messageCeo(text);
     const repo = this.repo(a.repoId);
-    if (!text.trim()) throw new HttpError(400, 'Empty message');
+    const problem = messageProblem(text);
+    if (problem) throw new HttpError(400, problem);
+    text = text.trim();
     const rt = this.agentRt.get(id)!;
     if (rt.session) {
       this.appendLog(a, [{ kind: 'manager', text: `▶ Manager: ${text}` }]);
@@ -3955,8 +3958,9 @@ export class Swarm {
 
   /** The manager's phone → the CEO. Injected into a running session, otherwise the CEO picks it up next. */
   async messageCeo(text: string) {
-    const t = text.trim().slice(0, 4000);
-    if (!t) throw new HttpError(400, 'Empty message');
+    const problem = messageProblem(text);
+    if (problem) throw new HttpError(400, problem);
+    const t = text.trim();
     const a = this.ceo();
     this.postMessage('manager', t);
     const rt = this.agentRt.get(a.id)!;
@@ -4667,7 +4671,8 @@ export class Swarm {
   // ---------- the phone ----------
 
   private postMessage(from: PhoneMessage['from'], text: string, requestId?: string) {
-    const m: PhoneMessage = { id: this.messageSeq++, from, text: text.trim().slice(0, 6000), at: Date.now(), ...(requestId ? { requestId } : {}) };
+    const clipped = from === 'manager' ? text.trim().slice(0, MESSAGE_MAX) : text.trim().slice(0, 6000);
+    const m: PhoneMessage = { id: this.messageSeq++, from, text: clipped, at: Date.now(), ...(requestId ? { requestId } : {}) };
     const v = this.state.settings.voice;
     if (v.provider !== 'off' && speaks(m, v)) m.voice = v.provider; // what the phone's ▶ replays it with
     this.state.messages.push(m);

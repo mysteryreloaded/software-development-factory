@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type TextareaHTMLAttributes } from 'react';
+import { MESSAGE_MAX } from '../../../shared/message';
 import { useTouch } from '../world/touch';
 
 // The message box shared by the phone's CEO chat and the agent terminal: Enter sends,
@@ -32,6 +33,7 @@ export function MessageBox({ value, onChange, className, onKeyDown, ...rest }: P
 
   return (
     <textarea
+      maxLength={MESSAGE_MAX}
       {...rest}
       ref={ref}
       rows={1}
