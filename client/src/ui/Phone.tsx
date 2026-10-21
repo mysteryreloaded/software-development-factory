@@ -14,6 +14,7 @@ import { Games, type GameId } from './games/Games';
 import { HolidayStrip } from './HolidayStrip';
 import { replayKind } from './voiceQueue';
 import { CLAUDE_MODELS, effectiveModel, modelSuggestions } from '../../../shared/models';
+import { useTouch } from '../world/touch';
 
 // The manager's phone: text the CEO, decide on team changes, see the whole company at a glance
 // without walking anywhere, and play a game while the team works. Press P anywhere in the office.
@@ -633,6 +634,7 @@ export function Phone({ tab: initialTab, requestId }: { tab?: PhoneTab; requestI
   const readAt = useStore((s) => s.phoneReadAt);
   const ceoName = useStore((s) => s.agents[CEO_ID]?.name ?? 'CEO');
   const listenOn = useStore((s) => (s.settings.listen?.provider ?? 'off') !== 'off');
+  const touch = useTouch((s) => s.on);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 20_000);
@@ -703,7 +705,11 @@ export function Phone({ tab: initialTab, requestId }: { tab?: PhoneTab; requestI
         <div className="phone-hint">
           {tab === 'chat' && (
             <>
-              <kbd>Shift</kbd>+<kbd>Enter</kbd> new line ·{' '}
+              {!touch && (
+                <>
+                  <kbd>Shift</kbd>+<kbd>Enter</kbd> new line ·{' '}
+                </>
+              )}
               {listenOn && (
                 <>
                   <Key action="talk" /> to talk ·{' '}
