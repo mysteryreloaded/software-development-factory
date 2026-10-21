@@ -16,6 +16,7 @@ import { speakable } from './ui/voiceQueue';
 import { emitMerge, mergeBursts, recentQaRecord, rememberQa } from './world/confetti';
 import { takeEmote, takePing, takePose, takeRoster } from './world/presence/presenceState';
 import { gongForMerge } from './world/gongRunner';
+import type { SnackKind } from './world/fridge';
 import { ROOF } from './world/layout';
 import { emitReward } from './world/decor/rewards';
 
@@ -55,6 +56,7 @@ export interface Focus {
     | { kind: 'pickup'; toyId: string }
     | { kind: 'poke'; toyId: string }
     | { kind: 'coffee'; op: 'place' | 'brew' | 'take' }
+    | { kind: 'fridge'; op: 'door' | 'freezer' | 'shelf'; snack?: SnackKind }
     | { kind: 'jukebox'; op: 'next' | 'toggle' | 'station' | 'vol+' | 'vol-' }
     | { kind: 'channel'; repoId: string; pr: number | null }
     | { kind: 'resume' }
@@ -80,6 +82,9 @@ export type Held =
   | { kind: 'sticky'; id: string; repoId: string; key: string; number: number; pr: boolean }
   /** A sausage in a bun off the roof's grill: bites left, eaten like coffee is sipped. */
   | { kind: 'sausage'; id: string; bites: number; charred: boolean }
+  /** A snack from the kitchenette's fridge: portions left, eaten the same way. `outAt`: when it left the fridge/
+   * freezer (fridge.ts's clock), so ice cream can melt the longer it's held. */
+  | { kind: 'snack'; id: string; snack: SnackKind; left: number; outAt: number }
   /** A decoration on its way to a slot (#210): from the floor's decor box (from null) or from the slot it stood in. */
   | { kind: 'decor'; id: string; item: DecorItem; from: string | null }
   /** A ping-pong paddle, playing at that end of the table (toys/pongState.ts): mouse and camera belong to the match. */

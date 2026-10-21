@@ -8,6 +8,7 @@ import { CoinChip } from './CoinChip';
 import './progressProbe';
 import './doctorProbe';
 import { eAction } from '../world/toys/sip';
+import { SNACKS } from '../world/fridge';
 import { stickyDrop } from '../world/boardHands';
 import { WorkersPanel } from './WorkersPanel';
 import { PresenceHud } from './PresenceHud';
@@ -206,7 +207,7 @@ export function HUD() {
               <Key action="interact" /> {!held && <>/ <kbd>Click</kbd> </>}
             </>
           )}
-          {sip ? (held?.kind === 'sausage' ? 'Take a bite' : 'Sip coffee') : (dropLabel ?? focus?.label)}
+          {sip ? (held?.kind === 'sausage' ? 'Take a bite' : held?.kind === 'snack' ? `Take a ${SNACKS[held.snack].portionNoun}` : 'Sip coffee') : (dropLabel ?? focus?.label)}
           {!touchOn && !held && focus?.action.kind === 'card' && focus.action.peel && (
             <>
               {' '}

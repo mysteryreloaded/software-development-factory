@@ -20,12 +20,13 @@ import { isBlasterId } from './toys/darts';
 import { reloadHeld, takeBlaster } from './toys/gun';
 import { isMugId, takeMug } from './toys/mugs';
 import { coffeeAction } from './CoffeeMachine';
+import { fridgeAction } from './Fridge';
 import { jukeboxAction } from './Jukebox';
 import { themeAction } from './themes/active';
 import { tuneChannel } from '../ui/theatre';
 import { decorationAction } from './decor/actions';
 import { eAction } from './toys/sip';
-import { sipCoffee, sipPose, tickSip } from './toys/sipping';
+import { sipCoffee, sipPose, tickMelt, tickSip } from './toys/sipping';
 import { peelAimed, placeSticky, pressBoard, releaseBoard } from './boardHands';
 import { bindings, keyName, useControls } from '../ui/controls';
 import { actionsForKey, anyHeld, isBound, type ActionId, type Scope } from '../ui/keymap';
@@ -99,6 +100,10 @@ export function runFocusAction(focus: Focus, via: 'key' | 'click' = 'key') {
   }
   if (focus.action.kind === 'coffee') {
     coffeeAction(focus.action.op);
+    return;
+  }
+  if (focus.action.kind === 'fridge') {
+    fridgeAction(focus.action.op, focus.action.snack);
     return;
   }
   if (focus.action.kind === 'jukebox') {
@@ -512,6 +517,7 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
     const running = anyHeld(b, 'run', k) || padRun.current || touchInput.run;
     const speed = running ? 6.5 : 3.6;
     tickSip();
+    tickMelt();
 
     // another view has the camera (camera/rig.ts): you stay where you were standing
     if (rigOwnsCamera()) {

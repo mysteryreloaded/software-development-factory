@@ -1,23 +1,28 @@
 // Drinking coffee, as pure rules: what E does with a mug in hand, the timeline of a sip and of the big last gulp
 // (when the sounds play, when the coffee goes down, when the empty mug is let go), the mug's pose along the way,
 // and how loud a dropped mug clunks when it lands. sipping.ts plays it; MugToys.tsx draws it. A sausage off the roof's
-// grill is eaten the same way, a bite at a time (roof/HeldSausage.tsx draws it).
+// grill is eaten the same way, a bite at a time (roof/HeldSausage.tsx draws it), and so is a snack from the
+// kitchenette's fridge (fridge.ts has the shelves; HeldSnack.tsx draws it).
+
+import type { SnackKind } from '../fridge';
 
 /** What E does with something in your hands: sip the coffee, hint that the mug is empty, or act on the target. */
 export type EAction = 'sip' | 'empty' | 'target';
 
 /**
  * E with a mug of coffee sips it, whatever the crosshair is on, except the coffee machine (where E puts the mug
- * under the spout or presses the button). With an empty mug E acts on the target as usual, or hints when there is none.
+ * under the spout or presses the button); a snack the same way, except the fridge (where E works the doors and
+ * shelves instead). With nothing left in hand E acts on the target as usual, or hints when there is none.
  */
-export function eAction(held: { kind: string; sips?: number; bites?: number } | null, focusKind: string | null): EAction {
+export function eAction(held: { kind: string; sips?: number; bites?: number; left?: number } | null, focusKind: string | null): EAction {
   if (held?.kind === 'sausage') return (held.bites ?? 0) > 0 ? 'sip' : focusKind ? 'target' : 'empty';
+  if (held?.kind === 'snack') return focusKind === 'fridge' ? 'target' : (held.left ?? 0) > 0 ? 'sip' : 'empty';
   if (held?.kind !== 'mug' || focusKind === 'coffee') return 'target';
   if ((held.sips ?? 0) > 0) return 'sip';
   return focusKind ? 'target' : 'empty';
 }
 
-export type SipCue = 'slurp' | 'drink' | 'mm' | 'gulp' | 'ahh' | 'drop' | 'chomp' | 'munch';
+export type SipCue = 'slurp' | 'drink' | 'mm' | 'gulp' | 'ahh' | 'drop' | 'chomp' | 'munch' | 'lick';
 
 export interface SipPlan {
   /** Seconds the whole thing takes. */
@@ -101,6 +106,59 @@ export const LAST_BITE: SipPlan = {
 export function biteFor(bites: number): SipPlan | null {
   if (!(bites > 0)) return null;
   return bites <= 1 ? LAST_BITE : BITE;
+}
+
+/** Candy: one go, chomped and chewed, and that's it. */
+export const CANDY_GO: SipPlan = {
+  dur: 1.0,
+  up: 0.2,
+  down: 0.45,
+  tilt: 0,
+  head: 0.03,
+  cues: [
+    { at: 0.2, cue: 'chomp' },
+    { at: 0.32, cue: 'drink' },
+    { at: 0.55, cue: 'munch' },
+    { at: 0.85, cue: 'drop' },
+  ],
+};
+
+/** A lick of ice cream, before the last one. */
+export const LICK: SipPlan = {
+  dur: 0.6,
+  up: 0.18,
+  down: 0.32,
+  tilt: 0,
+  head: 0,
+  cues: [
+    { at: 0.16, cue: 'lick' },
+    { at: 0.26, cue: 'drink' },
+  ],
+};
+
+/** The last lick: a bigger one, a contented "mm", and that's the ice cream gone. */
+export const LAST_LICK: SipPlan = {
+  dur: 1.2,
+  up: 0.2,
+  down: 0.5,
+  tilt: 0,
+  head: 0.04,
+  cues: [
+    { at: 0.18, cue: 'lick' },
+    { at: 0.3, cue: 'drink' },
+    { at: 0.55, cue: 'lick' },
+    { at: 0.9, cue: 'mm' },
+    { at: 1.05, cue: 'drop' },
+  ],
+};
+
+/** The plan for the next portion of `snack` with `left` of them: the last one finishes it. Null when it's gone. */
+export function snackPlanFor(snack: SnackKind, left: number): SipPlan | null {
+  if (!(left > 0)) return null;
+  if (snack === 'bar') return left <= 1 ? LAST_BITE : BITE;
+  if (snack === 'water') return left <= 1 ? GULP : SIP;
+  if (snack === 'icecream') return left <= 1 ? LAST_LICK : LICK;
+  return CANDY_GO;
 }
 
 /** The index of the first cue still to come `t` seconds in, having played those before `from`. */

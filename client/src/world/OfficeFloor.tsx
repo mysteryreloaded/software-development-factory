@@ -12,6 +12,7 @@ import { drawSign } from './draw';
 import { Elevator } from './Elevator';
 import { ErrandDirector } from './ErrandDirector';
 import { Gong } from './Gong';
+import { HeldSnack } from './HeldSnack';
 import { useCanvasTexture } from './interact';
 import { KanbanBoard } from './KanbanBoard';
 import { Jukebox } from './Jukebox';
@@ -25,6 +26,7 @@ import { CoinBurst } from './decor/CoinBurst';
 import { Decorations } from './decor/Decorations';
 import { DeskStory, MvpSign } from './desk/DeskStory';
 import { CoffeeTable, Couch, Kitchenette, Plant, Rug, WallClock, WaterCooler } from './Props';
+import { Puddles } from './Puddles';
 import { OfficeRituals } from './Rituals';
 import { PongTable } from './PongTable';
 import { Shell } from './Shell';
@@ -167,7 +169,9 @@ export const OfficeFloor = memo(function OfficeFloor({ repo }: { repo: RepoView 
       <Plant position={[HALF_W - 0.7, 0, HALF_D - 0.7]} scale={0.9} pot="#8338ec" />
       <Couch position={[-HALF_W + 0.9, 0, 6.5]} rotationY={-Math.PI / 2} color={shade(repo.color, -0.05)} />
       <CoffeeTable position={[-HALF_W + 2.6, 0, 6.5]} rotationY={Math.PI / 2} />
-      <Kitchenette position={[HALF_W - 0.45, 0, 7]} />
+      <Kitchenette position={[HALF_W - 0.45, 0, 7]} floor={repo.floor} />
+      <Puddles floor={repo.floor} />
+      <HeldSnack />
       <WaterCooler position={[HALF_W - 0.5, 0, -9.5]} />
       <Jukebox x={JUKEBOX.officeX} floor={repo.floor} />
       <WallClock position={[-10, 2.75, -HALF_D + 0.05]} />

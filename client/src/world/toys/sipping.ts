@@ -1,12 +1,16 @@
 import { useStore } from '../../store';
 import { noise, tone, type Vec3 } from '../../ui/sfx';
+import { dropPuddle, fridgeNow, meltStage } from '../fridge';
+import { playerAt } from '../camera/rig';
 import { dropMug } from './mugs';
-import { biteFor, cuesDue, planFor, pose, type SipCue, type SipPlan } from './sip';
+import { biteFor, cuesDue, planFor, pose, snackPlanFor, type SipCue, type SipPlan } from './sip';
 
 // Drinking the coffee in your hands: E starts a sip (Player.tsx), Player ticks it every frame, and the first-person
 // mug (MugToys.tsx) and the camera read `sipPose`. The timings are in sip.ts. Outside the lazily loaded toy chunk, so
 // sips still count down when the physics engine isn't there; walking carries on throughout. A sausage from the roof's
-// grill is eaten the same way, bite by bite (roof/HeldSausage.tsx draws it).
+// grill is eaten the same way, bite by bite (roof/HeldSausage.tsx draws it), and so is a snack from the fridge
+// (HeldSnack.tsx draws it); tickMelt below watches a held ice cream sag and, left too long, leave your hands as a
+// puddle on the floor (fridge.ts has the rules).
 
 let sip: { plan: SipPlan; mugId: string; start: number; next: number } | null = null;
 
@@ -39,9 +43,18 @@ const sounds: Record<SipCue, (pos?: Vec3) => void> = {
   munch: () => {
     for (let i = 0; i < 3; i++) noise({ ...TOYS, name: 'sausage-munch', at: i * 0.16, dur: 0.1, peak: 0.035, filter: 'lowpass', freq: 900, attack: 0.01 });
   },
+  lick: () => {
+    noise({ ...TOYS, name: 'snack-lick', dur: 0.14, peak: 0.035, filter: 'bandpass', freq: 1700, to: 2600, q: 2.2, attack: 0.01 });
+  },
   drink: () => undefined,
   drop: () => undefined,
 };
+
+/** An ice cream leaving your hands as a puddle: a wet splat. */
+function splat() {
+  noise({ ...TOYS, name: 'snack-splat', dur: 0.22, peak: 0.06, filter: 'lowpass', freq: 550, attack: 0.004 });
+  tone({ ...TOYS, name: 'snack-splat', freq: 220, to: 90, type: 'sine', dur: 0.16, peak: 0.03, attack: 0.004 });
+}
 
 /** A dropped mug landing: a short ceramic clunk at `pos`, `peak` loud (from sip.ts's clunkPeak). */
 export function clunk(pos: Vec3, peak: number) {
@@ -53,11 +66,12 @@ export function clunk(pos: Vec3, peak: number) {
 /** Someone else's sip (an agent on a coffee break), heard from where they stand. */
 export const slurpAt = (pos: Vec3) => sounds.slurp(pos);
 
-/** E with coffee in hand: start a sip (or the big last gulp); with a sausage, a bite. Does nothing mid-sip or without either. */
+/** E with coffee in hand: start a sip (or the big last gulp); with a sausage, a bite; with a snack, a portion. Does
+ * nothing mid-sip or without one of those. */
 export function sipCoffee(now = performance.now()): boolean {
   const held = useStore.getState().held;
   if (sip || !held) return false;
-  const plan = held.kind === 'mug' ? planFor(held.sips) : held.kind === 'sausage' ? biteFor(held.bites) : null;
+  const plan = held.kind === 'mug' ? planFor(held.sips) : held.kind === 'sausage' ? biteFor(held.bites) : held.kind === 'snack' ? snackPlanFor(held.snack, held.left) : null;
   if (!plan) return false;
   sip = { plan, mugId: held.id, start: now, next: 0 };
   return true;
@@ -88,6 +102,15 @@ export function tickSip(now = performance.now()) {
       }
       continue;
     }
+    if (held?.kind === 'snack') {
+      if (cue === 'drink') s.setHeld({ ...held, left: Math.max(0, held.left - 1) });
+      if (cue === 'drop') {
+        endSip();
+        withoutDrop(() => s.setHeld(null)); // the last portion finishes it: nothing falls, even an ice cream
+        return;
+      }
+      continue;
+    }
     if (held?.kind !== 'mug') break;
     if (cue === 'drink') s.setHeld({ ...held, sips: Math.max(0, held.sips - 1) });
     if (cue === 'drop') {
@@ -106,4 +129,44 @@ function endSip() {
   sipPose.lift = 0;
   sipPose.tilt = 0;
   sipPose.head = 0;
+}
+
+// ---------- melting ----------
+
+let suppressDrop = false;
+
+/** Runs `fn`, which is expected to clear a held snack itself (finishing it, or putting it back): the watcher below
+ * won't treat that as a drop. */
+export function withoutDrop(fn: () => void) {
+  suppressDrop = true;
+  try {
+    fn();
+  } finally {
+    suppressDrop = false;
+  }
+}
+
+/** A held ice cream leaving your hands any other way (G, a panel, another pickup, the elevator) becomes a puddle
+ * where you stand; any other snack is just gone. */
+useStore.subscribe((s, prev) => {
+  const was = prev.held;
+  if (suppressDrop || was?.kind !== 'snack') return;
+  if (s.held?.kind === 'snack' && s.held.id === was.id) return; // still the same one (a portion eaten, or the melt clock ticking)
+  if (was.snack !== 'icecream') return;
+  dropPuddle(s.floor, playerAt.x - Math.sin(playerAt.yaw) * 0.5, playerAt.z - Math.cos(playerAt.yaw) * 0.5, fridgeNow());
+  splat();
+  s.pushToast('info', '🍦 The ice cream melted into a puddle');
+});
+
+/** Ticks a held ice cream's melt clock: at MELT.soft it sags and drips (the hint counts down), at MELT.puddle it
+ * leaves your hands with a splat and a puddle appears ahead of you. Called every frame. */
+export function tickMelt() {
+  const s = useStore.getState();
+  const held = s.held;
+  if (held?.kind !== 'snack' || held.snack !== 'icecream') return;
+  if (meltStage(held.outAt, fridgeNow()) !== 'puddle') return;
+  withoutDrop(() => s.setHeld(null));
+  dropPuddle(s.floor, playerAt.x - Math.sin(playerAt.yaw) * 0.5, playerAt.z - Math.cos(playerAt.yaw) * 0.5, fridgeNow());
+  splat();
+  s.pushToast('info', '🍦 The ice cream melted into a puddle');
 }

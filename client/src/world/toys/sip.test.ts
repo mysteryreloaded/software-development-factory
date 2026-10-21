@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { CLUNK, GULP, SIP, clunkPeak, cuesDue, eAction, impactSpeed, lift, planFor, pose } from './sip';
+import { CLUNK, GULP, SIP, clunkPeak, cuesDue, eAction, impactSpeed, lift, planFor, pose, snackPlanFor } from './sip';
 
 const mug = (sips: number) => ({ kind: 'mug', id: 'mug-1', sips });
+const snack = (left: number) => ({ kind: 'snack', id: 'snack-1', left });
 
 describe('what E does', () => {
   it('sips coffee whatever the crosshair is on', () => {
@@ -23,6 +24,38 @@ describe('what E does', () => {
   it('is unchanged without a mug', () => {
     expect(eAction(null, 'pickup')).toBe('target');
     expect(eAction({ kind: 'ball' }, null)).toBe('target');
+  });
+
+  it('eats a snack whatever the crosshair is on, except the fridge', () => {
+    expect(eAction(snack(3), null)).toBe('sip');
+    expect(eAction(snack(1), 'pickup')).toBe('sip');
+    expect(eAction(snack(2), 'fridge')).toBe('target');
+    expect(eAction(snack(0), 'fridge')).toBe('target');
+  });
+});
+
+describe('snack portions', () => {
+  it('a protein bar is three bites, the last one finishing it', () => {
+    expect(snackPlanFor('bar', 3)?.cues.map((c) => c.cue)).toContain('chomp');
+    expect(snackPlanFor('bar', 1)?.cues.some((c) => c.cue === 'drop')).toBe(true);
+    expect(snackPlanFor('bar', 0)).toBeNull();
+  });
+
+  it('water is four sips, the last a gulp', () => {
+    expect(snackPlanFor('water', 4)).toBe(SIP);
+    expect(snackPlanFor('water', 1)).toBe(GULP);
+  });
+
+  it('candy is one go', () => {
+    const plan = snackPlanFor('candy', 1);
+    expect(plan?.cues.some((c) => c.cue === 'drop')).toBe(true);
+    expect(snackPlanFor('candy', 0)).toBeNull();
+  });
+
+  it('ice cream is three licks, the last one finishing it', () => {
+    expect(snackPlanFor('icecream', 3)?.cues.map((c) => c.cue)).toContain('lick');
+    expect(snackPlanFor('icecream', 1)?.cues.some((c) => c.cue === 'drop')).toBe(true);
+    expect(snackPlanFor('icecream', 0)).toBeNull();
   });
 });
 
