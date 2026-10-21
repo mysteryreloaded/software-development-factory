@@ -75,6 +75,19 @@ export function mergeStep(pr: MergePull, rec: MergeRecord, now: number, opts: { 
   return { do: 'merge', set };
 }
 
+/** Hand-merge floors: the QA-passed records whose open swarm PR got new commits after the sign-off (they go back to QA). */
+export function movedSincePass<R extends { prNumber: number; status: string; passedSha: string | null; updatedAt: number }>(
+  recs: readonly R[],
+  pulls: readonly Pick<PullInfo, 'number' | 'state' | 'headRefName' | 'headSha'>[],
+  fetchedAt: number,
+): R[] {
+  return recs.filter((rec) => {
+    if (rec.status !== 'passed' || rec.passedSha == null || fetchedAt < rec.updatedAt) return false;
+    const pull = pulls.find((p) => p.number === rec.prNumber);
+    return !!pull && pull.state === 'OPEN' && pull.headRefName.startsWith('swarm/') && !!pull.headSha && pull.headSha !== rec.passedSha;
+  });
+}
+
 /** The GitHub Actions runs behind failed checks (from their log URLs), once each. Other checks can't be re-run from here. */
 export function failedRunIds(failed: MergePull['failedChecks']): number[] {
   const ids = failed.map((c) => c.url?.match(/\/actions\/runs\/(\d+)/)?.[1]).filter((id): id is string => !!id);

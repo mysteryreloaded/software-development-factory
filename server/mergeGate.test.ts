@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHECKS_ALERT_MS, MAX_MERGE_FIXES, RERUN_GRACE_MS, failedRunIds, mergeStep, type MergePull, type MergeRecord } from './mergeGate.ts';
+import { CHECKS_ALERT_MS, MAX_MERGE_FIXES, RERUN_GRACE_MS, failedRunIds, mergeStep, movedSincePass, type MergePull, type MergeRecord } from './mergeGate.ts';
 
 const NOW = 1_800_000_000_000;
 const base = { base: 'main' };
@@ -251,5 +251,62 @@ describe('mergeStep', () => {
       expect(mergeStep(pull({ checks: 'failing', failedChecks: [{ name: 'Vercel', url: 'https://vercel.com/o/r/abc' }] }), record(), NOW, ceo)).toMatchObject({ do: 'send-back', reason: 'checks' });
       expect(mergeStep(pull({ mergeable: 'CONFLICTING' }), record(), NOW, ceo)).toMatchObject({ do: 'send-back', reason: 'conflict' });
     });
+  });
+});
+
+describe('movedSincePass', () => {
+  const rec = (r: Partial<{ prNumber: number; status: string; passedSha: string | null; updatedAt: number }> = {}) => ({
+    prNumber: 1,
+    status: 'passed',
+    passedSha: 'abc123',
+    updatedAt: 1000,
+    ...r,
+  });
+
+  const pr = (p: Partial<Pick<import('../shared/types.ts').PullInfo, 'number' | 'state' | 'headRefName' | 'headSha'>> = {}) => ({
+    number: 1,
+    state: 'OPEN' as const,
+    headRefName: 'swarm/issue-1-ada',
+    headSha: 'new456',
+    ...p,
+  });
+
+  it('returns a passed record whose swarm PR head moved on', () => {
+    expect(movedSincePass([rec()], [pr()], 2000)).toEqual([rec()]);
+  });
+
+  it('leaves it alone when the head is still what QA passed', () => {
+    expect(movedSincePass([rec()], [pr({ headSha: 'abc123' })], 2000)).toEqual([]);
+  });
+
+  it('leaves records with no passed commit to compare', () => {
+    expect(movedSincePass([rec({ passedSha: null })], [pr()], 2000)).toEqual([]);
+  });
+
+  for (const status of ['queued', 'testing', 'fixing']) {
+    it(`leaves records that are not passed (${status})`, () => {
+      expect(movedSincePass([rec({ status })], [pr()], 2000)).toEqual([]);
+    });
+  }
+
+  it('leaves a closed or merged PR alone', () => {
+    expect(movedSincePass([rec()], [pr({ state: 'CLOSED' })], 2000)).toEqual([]);
+    expect(movedSincePass([rec()], [pr({ state: 'MERGED' })], 2000)).toEqual([]);
+  });
+
+  it('leaves a non-swarm branch alone (the PR is someone else\'s to merge)', () => {
+    expect(movedSincePass([rec()], [pr({ headRefName: 'fix/typo' })], 2000)).toEqual([]);
+  });
+
+  it('skips PR data fetched before the record last changed', () => {
+    expect(movedSincePass([rec({ updatedAt: 5000 })], [pr()], 2000)).toEqual([]);
+  });
+
+  it('leaves an empty head sha alone', () => {
+    expect(movedSincePass([rec()], [pr({ headSha: '' })], 2000)).toEqual([]);
+  });
+
+  it('leaves it alone when no pull matches the PR number', () => {
+    expect(movedSincePass([rec()], [], 2000)).toEqual([]);
   });
 });

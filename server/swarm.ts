@@ -15,7 +15,7 @@ import { fixGoesTo, pickTester, PREP_HOLD_MS, prepFailure, prepHeld, type PrepSt
 import { HttpError } from './httpError.ts';
 import { IssueAges } from './issueAges.ts';
 import { issuesResolvedBy, issueTaken } from './issueClaims.ts';
-import { CHECKS_ALERT_MS, failedRunIds, MAX_MERGE_FIXES, MERGE_RETRY_MS, mergeStep } from './mergeGate.ts';
+import { CHECKS_ALERT_MS, failedRunIds, MAX_MERGE_FIXES, MERGE_RETRY_MS, mergeStep, movedSincePass } from './mergeGate.ts';
 import { orphanedQa } from './qaOrphans.ts';
 import { catchUp, failedRunId, logTail, noChangeReason, PR_LIMITS_VERSION, QA_STOPPED, unpushedFix } from './prOwnership.ts';
 import { conflictFixInstructions, MAX_QA_ROUNDS, qaGate, qaOutcome, type PreQa, type QaNext } from './qaOutcome.ts';
@@ -1496,6 +1496,13 @@ export class Swarm {
     }
   }
 
+  /** Hand-merge floors: a passed PR whose swarm head moved on goes back to QA, same as advanceMerge's 'requeue' step. */
+  private requeueMovedPasses(repo: PersistedRepo, rt: RepoRuntime) {
+    const moved = movedSincePass(this.state.qa.filter((q) => q.repoId === repo.id), rt.pulls, rt.fetchedAt ?? 0);
+    for (const rec of moved) this.setQa(rec, { status: 'queued', round: rec.round + 1, retests: rec.retests + 1, mergeNote: null, pendingSince: null });
+    if (moved.length) setTimeout(() => this.schedule(), 200);
+  }
+
   /** One step toward merging a QA-passed PR. Returns true when it merged. */
   private async advanceMerge(repo: PersistedRepo, rec: QaRecord, pr: PullInfo): Promise<boolean> {
     let step = mergeStep(pr, rec, Date.now(), { base: repo.defaultBranch, ceoReview: repo.ceoReview });
@@ -1786,6 +1793,7 @@ export class Swarm {
         rt.lastMergedAt = newest;
         void this.syncFolder(repo);
       }
+      if (!repo.autoMerge) this.requeueMovedPasses(repo, rt);
       void this.advanceMerges(repo);
     } catch (err) {
       rt.syncError = (err as Error).message;
