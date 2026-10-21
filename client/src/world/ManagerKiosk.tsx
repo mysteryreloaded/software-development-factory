@@ -4,7 +4,7 @@ import { useStore } from '../store';
 import { drawPipeline, type FloorTag } from './drawOps';
 import { useInteractable } from './interact';
 import { MANAGER_KIOSK } from './layout';
-import { alarmFocus, Beacon, Face, useScreen } from './MissionControl';
+import { alarmFocus, Beacon, BEZEL, Face, POST, useScreen } from './MissionControl';
 import { Box, Cyl } from './Toon';
 
 // The manager's kiosk (#29): a free-standing post beside the elevator on every office floor, a small piece of the
@@ -12,8 +12,6 @@ import { Box, Cyl } from './Toon';
 // pipeline screen as the lobby's wall (drawPipeline, with the same data); the beacon on top spins while an alarm
 // is ringing, like the lobby's.
 
-const BEZEL = '#23263a';
-const POST = '#3d4057';
 const PX: [number, number] = [1024, 602]; // same ratio as mission control's top screens
 
 export function ManagerKiosk() {
@@ -56,8 +54,8 @@ export function ManagerKiosk() {
       <group position={[0, 0, d / 2]}>
         <Face tex={pipeline} w={w - 0.1} h={bodyH - 0.1} y={screenY} />
       </group>
-      {/* back, toward the room: the same picture, un-mirrored */}
-      <group position={[0, 0, -(d / 2 + 0.004)]} scale={[-1, 1, 1]}>
+      {/* back, toward the room: the same picture, turned to face -z */}
+      <group position={[0, 0, -d / 2]} rotation={[0, Math.PI, 0]}>
         <Face tex={pipeline} w={w - 0.1} h={bodyH - 0.1} y={screenY} />
       </group>
       <group position={[0, postH + bodyH + 0.02, 0]}>

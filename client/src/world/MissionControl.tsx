@@ -46,8 +46,8 @@ export function useScreen<T>(name: string, px: [number, number], data: T, draw: 
   );
 }
 
-const BEZEL = '#23263a';
-const POST = '#3d4057';
+export const BEZEL = '#23263a';
+export const POST = '#3d4057';
 const TOP_PX: [number, number] = [1024, 602];
 const BOTTOM_PX: [number, number] = [1024, 494];
 
