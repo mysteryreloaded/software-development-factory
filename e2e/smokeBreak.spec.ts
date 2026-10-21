@@ -1,4 +1,4 @@
-import { BALCONY, BALCONY_OUT, ROOF, ROOF_EDGE, sideSign } from '../client/src/world/layout';
+import { BALCONY, BALCONY_OUT, PLAYER_RADIUS, ROOF, ROOF_EDGE, SMOKE_TABLE, sideSign } from '../client/src/world/layout';
 import { LIGHT_MS, PUFFS, PUFF_MS, ROLL_MS, nook } from '../client/src/world/smokeBreak';
 import { enterOffice, expect, startAt, test, type SavedView } from './helpers';
 
@@ -28,6 +28,10 @@ const PLACES: { name: string; id: 'office-west' | 'roof'; floor: number }[] = [
   { name: 'the roof', id: 'roof', floor: ROOF },
 ];
 
+/** Past the table's shorter ends (it's half the bench's length), far enough that a step across to the rail doesn't
+ * clip its corner (PLAYER_RADIUS), with a little to spare before the bench's own end. */
+const TABLE_CLEAR = SMOKE_TABLE.l / 2 + PLAYER_RADIUS + 0.1;
+
 /** The table-rail (or, on the roof, table-parapet) gap: the same width as the bench-table one, on the far side of
  * the table. Its x, centred between the table and the rail's inner face. */
 function railGapX(id: 'office-west' | 'roof') {
@@ -42,17 +46,20 @@ function railGapX(id: 'office-west' | 'roof') {
  * distance (A/D's or W/S's sense of x/z flips with the view's yaw, which differs between west, east and the roof). */
 async function travel(page: Page, axis: 'x' | 'z', to: number, keys: readonly [string, string]) {
   const read = async () => (await pose(page))[axis];
-  const before = await read();
   let key = keys[0];
   for (const tryKey of keys) {
+    // Each key's own starting point, not the overall one: trying the first key can itself move you, and judging the
+    // second key against a stale "before" (further away now) makes a key that's actually closing the distance look
+    // like it isn't.
+    const from = await read();
     await page.keyboard.down(tryKey);
     const moved = await page
-      .waitForFunction(([a, startV]) => Math.abs((window as unknown as { __swarmCamera: CameraProbe }).__swarmCamera.state().pose[a as 'x' | 'z'] - startV) > 0.2, [axis, before] as const, { timeout: 5000 })
+      .waitForFunction(([a, startV]) => Math.abs((window as unknown as { __swarmCamera: CameraProbe }).__swarmCamera.state().pose[a as 'x' | 'z'] - startV) > 0.2, [axis, from] as const, { timeout: 5000 })
       .then(() => true)
       .catch(() => false);
     await page.keyboard.up(tryKey);
     const now = await read();
-    if (moved && Math.abs(now - to) < Math.abs(before - to)) {
+    if (moved && Math.abs(now - to) < Math.abs(from - to)) {
       key = tryKey;
       break;
     }
@@ -67,6 +74,7 @@ async function travel(page: Page, axis: 'x' | 'z', to: number, keys: readonly [s
 
 for (const place of PLACES) {
   test(`smoke break on ${place.name}: sit, roll, light and puff it out`, async ({ page }) => {
+    test.setTimeout(180_000); // a full roll/light/8-puff session plus three real walks, in software-rendered Chromium
     const n = nook(place.id);
     const gap = { x: (n.gap.minX + n.gap.maxX) / 2, z: (n.gap.minZ + n.gap.maxZ) / 2 };
     const start: SavedView = { floor: place.floor, x: gap.x, z: gap.z, yaw: n.yaw, pitch: 0 };
@@ -118,13 +126,14 @@ for (const place of PLACES) {
     await expect.poll(async () => (await probe(page)).me).toBeNull();
     expect((await probe(page)).nooks.find((x) => x.id === place.id)!.butts).toBe(before + 2);
 
-    // walk both gaps: along the bench-table one to its far end (clear of the table), across to the table-rail one
-    // (or, on the roof, table-parapet), and back along its length
-    await travel(page, 'z', n.gap.maxZ - 0.3, ['a', 'd']);
+    // walk both gaps: along the bench-table one to a point clear of the table, across to the table-rail one (or, on
+    // the roof, table-parapet), and back along its length
+    const bz = (n.gap.minZ + n.gap.maxZ) / 2;
+    await travel(page, 'z', bz + TABLE_CLEAR, ['a', 'd']);
     expect(Math.abs((await pose(page)).x - gap.x)).toBeLessThan(0.5); // the gap kept you in its own narrow lane
     const railX = railGapX(place.id);
     await travel(page, 'x', railX, ['w', 's']); // clear of the table at this z, past its shorter ends
-    await travel(page, 'z', n.gap.minZ + 0.3, ['a', 'd']);
+    await travel(page, 'z', bz - TABLE_CLEAR, ['a', 'd']);
     expect(Math.abs((await pose(page)).x - railX)).toBeLessThan(0.5);
   });
 }
