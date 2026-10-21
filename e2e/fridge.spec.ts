@@ -25,8 +25,9 @@ async function eat(page: import('@playwright/test').Page, left: number | null) {
 // Floor 1's kitchenette (east wall): stand west of the fridge, facing east (+x), looking down at its door (the
 // fridge is the lower compartment, its door centred well below eye height).
 const FRIDGE_SPOT: SavedView = { floor: 1, x: HALF_W - 1.65, z: 9.45, yaw: -Math.PI / 2, pitch: -0.87 };
-// Once the fridge door's open, aim a little off its hinge side to clear the swung-open panel and see the bar shelf.
-const BAR_SHELF_SPOT: SavedView = { floor: 1, x: HALF_W - 1.65, z: 9.45, yaw: -1.4925, pitch: -0.6 };
+// Once the fridge door's open, aim well off dead-centre (the narrow "ajar" strip there is for closing it) at the
+// nearest bar, clear of that strip's width.
+const BAR_SHELF_SPOT: SavedView = { floor: 1, x: HALF_W - 1.65, z: 9.45, yaw: -1.3397, pitch: -0.589 };
 
 test('aiming at the fridge and pressing E opens it', async ({ page }) => {
   await startAt(page, FRIDGE_SPOT);

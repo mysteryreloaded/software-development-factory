@@ -169,12 +169,19 @@ const WATER_POS: [number, number, number][] = [-0.24, -0.08, 0.08, 0.24].map((z)
 const CANDY_POS: [number, number, number][] = [-0.26, -0.15, -0.04, 0.07, 0.18, 0.29].map((z) => [-0.18, 0.15, z]);
 const ICE_POS: [number, number, number][] = [-0.18, 0, 0.18].map((z) => [-0.18, 1.72, z]);
 
+// How wide a fixed strip, dead ahead where you stood to open it, stays aimable for closing the door once it's
+// open: narrow enough to leave the shelf items to either side of it free to aim at (unlike the full-width closed
+// hit box, which would cover the whole opening again).
+const AJAR_WIDTH = 0.2;
+
 function Door({ y, height, x, width, open, pos, label, action }: { y: number; height: number; x: number; width: number; open: boolean; pos: Vec3; label: string; action: { kind: 'fridge'; op: 'door' | 'freezer' } }) {
   const swing = useRef<THREE.Group>(null);
   const t = useRef(open ? 1 : 0);
-  // The hit box rides the swinging panel, not the fixed frame: closed, it faces you like the door; opened, it
-  // swings away with the panel so the opening (and the shelves behind it) is free to aim at.
-  const ref = useInteractable<THREE.Group>({ id: `fridge:${action.op}`, label, action }, 2.6);
+  // Closed, the whole front is the hit box (there's nothing behind it yet to leave clear). Open, that would block
+  // the shelves again, so a narrow fixed strip takes over: still dead ahead of where you opened it (so E there
+  // closes it too), but out of the way of the shelf items to either side.
+  const closedRef = useInteractable<THREE.Group>(!open ? { id: `fridge:${action.op}`, label, action } : null, 2.6);
+  const ajarRef = useInteractable<THREE.Group>(open ? { id: `fridge:${action.op}`, label, action } : null, 2.6);
   useFrame((_, dt) => {
     t.current = Math.min(1, Math.max(0, t.current + (open ? dt : -dt) / OPEN_S));
     if (swing.current) swing.current.rotation.y = t.current * OPEN_ANGLE;
@@ -190,12 +197,17 @@ function Door({ y, height, x, width, open, pos, label, action }: { y: number; he
   }, [pos, width]);
   return (
     <group position={[x, y, 0]}>
+      <group ref={closedRef}>
+        <mesh visible={false}>
+          <boxGeometry args={[0.12, height, width]} />
+        </mesh>
+      </group>
+      <group ref={ajarRef}>
+        <mesh visible={false}>
+          <boxGeometry args={[0.12, height, AJAR_WIDTH]} />
+        </mesh>
+      </group>
       <group ref={swing} position={[0, 0, width / 2]}>
-        <group ref={ref} position={[0, 0, -width / 2]}>
-          <mesh visible={false}>
-            <boxGeometry args={[0.12, height, width]} />
-          </mesh>
-        </group>
         <mesh position={[0, 0, -width / 2]} material={toon('#f1f3f5')} castShadow>
           <boxGeometry args={[0.06, height, width]} />
           <Outlines thickness={0.014} color={INK} />
