@@ -1139,6 +1139,13 @@ export class Swarm {
     this.broadcast({ type: 'toast', level, text });
   }
 
+  /** POST /api/toast/demo (demo only): pushes an arbitrary toast, so e2e tests can reproduce a long or stacked one
+   * without waiting on real chatter to say the right thing. */
+  toastDemo(level: 'info' | 'success' | 'error', text: string) {
+    if (!this.backend.demo) throw new HttpError(400, 'Demo toasts are only for the demo office');
+    this.toast(level, text);
+  }
+
   private emitRepo(r: PersistedRepo) {
     const repo = this.repoView(r);
     this.observe({ type: 'repo', repo });

@@ -158,3 +158,58 @@ test.describe('phone HUD layout: no overlaps, nothing off-screen', () => {
     });
   }
 });
+
+// Issue #44 round 2: two states QA's first round never put on screen. (1) Aiming at a working agent's monitor
+// pops up .aim-cards' AgentCard (AgentCard.tsx's AIM_MS) — in landscape it used to dock bottom-left, tall enough to
+// climb into .hud-top above it. (2) Holding a ball turns the one "Use" touch button into up to three (Throw, Drop),
+// growing .touch-buttons past where .toasts used to assume it stopped, in both orientations — and a long toast
+// (near its max-width) used to be wide enough to reach the card's column in portrait.
+const TWO_VIEWPORTS = [
+  ['portrait 360x780', { width: 360, height: 780 }],
+  ['landscape 780x360', { width: 780, height: 360 }],
+] as const;
+
+// Floor 1, 1.4 m south of desk slot 0 (layout.ts's deskPosition(0)), facing it: the demo's agents start out busy,
+// and desk 0 is always the first one filled.
+const WORKING_DESK_SPOT: SavedView = { floor: 1, x: -10.5, z: 4.6, yaw: 0, pitch: -0.1 };
+
+// The lobby, 1.6 m from the basketball under its hoop (toys.spec.ts's spot), facing it.
+const BALL_SPOT: SavedView = { floor: 0, x: -9, z: 9.3, yaw: Math.PI, pitch: -0.73 };
+
+const LONG_TOAST = 'The build on floor 3 failed its third retry in a row and the agent is waiting on a decision about how to proceed before it burns any more of the budget';
+
+test.describe('phone HUD layout round 2: the agent card and a grown touch-buttons column', () => {
+  test.use(S23);
+
+  for (const [name, viewport] of TWO_VIEWPORTS) {
+    test(`aimed agent card (${name})`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await startAt(page, WORKING_DESK_SPOT);
+      await page.goto('/?pocket=0');
+      await enterOffice(page, { loaded: true });
+      await skipTour(page);
+      await expect(page.locator('.agent-card')).toBeVisible({ timeout: 15_000 });
+      await assertNoOverlapOnScreen(page, viewport);
+    });
+  }
+
+  for (const [name, viewport] of TWO_VIEWPORTS) {
+    test(`held ball + long toast (${name})`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await startAt(page, BALL_SPOT);
+      await page.goto('/?pocket=0');
+      await enterOffice(page, { loaded: true });
+      await skipTour(page);
+      const use = page.locator('.touch-btn-use');
+      await expect(use).toHaveText('Pick up ball', { timeout: 90_000 });
+      await use.click(); // a real touch device taps the on-screen button, not a keyboard that isn't there
+      // Throw and Drop show an emoji, not that word, as their visible text (TouchControls.tsx's aria-label carries it).
+      await expect(page.getByRole('button', { name: 'Throw' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Drop' })).toBeVisible();
+      const res = await page.request.post('/api/toast/demo', { data: { level: 'info', text: LONG_TOAST } });
+      expect(res.ok(), await res.text()).toBe(true);
+      await expect(page.locator('.toast', { hasText: LONG_TOAST.slice(0, 20) })).toBeVisible();
+      await assertNoOverlapOnScreen(page, viewport);
+    });
+  }
+});

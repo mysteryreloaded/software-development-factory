@@ -495,6 +495,21 @@ input.inline:focus {
   white-space: nowrap;
   pointer-events: none;
 }
+/* On a phone, 22% of a tall screen's height can land right on .hud-help's own fixed offset below (issue #44's
+   round 2): pin it clear of that instead, by the same fixed amount on both orientations. */
+@media (max-width: 700px), (max-height: 500px) {
+  .hud-hint {
+    bottom: calc(180px + env(safe-area-inset-bottom));
+    left: max(16px, env(safe-area-inset-left));
+    right: max(16px, env(safe-area-inset-right));
+    transform: none;
+    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    width: fit-content;
+    margin: 0 auto;
+    white-space: normal;
+    text-align: center;
+  }
+}
 /* The cards for whoever you're looking at (ui/AgentCard.tsx, then the career peek in ui/CareerCard.tsx): docked at
    the left edge, under the floor card's chips, so the monitor you're watching in the middle stays clear. */
 .aim-cards {
@@ -508,18 +523,16 @@ input.inline:focus {
   pointer-events: none;
 }
 /* Phones, both orientations (covers the HUD's and the touch controls' own max-width: 700px rules too): the top
-   boxes flow instead of floating (.hud-top below), the workers panel stays hidden, and the agent card, the toasts,
-   the phone button and the touch controls each keep a corner of their own — left for the card, above the joystick;
-   right for the toasts, above the touch buttons; the joystick and the phone button keep their usual corners. */
+   boxes and the aim card flow one after another in .hud-top's own column (so the card can't climb into them, or
+   vice versa — issue #44's round 2), the workers panel stays hidden, and the toasts, the phone button and the
+   touch controls each keep a corner of their own clear of one another. */
 @media (max-width: 700px), (max-height: 500px) {
   .aim-cards {
+    position: static;
     top: auto;
-    bottom: calc(200px + env(safe-area-inset-bottom));
-    left: max(16px, env(safe-area-inset-left));
-    right: auto;
-    width: min(240px, calc(100vw - 32px));
-    max-height: calc(100vh - 216px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    overflow-y: auto;
+    left: auto;
+    width: 100%;
+    max-width: 100%;
   }
 }
 .agent-card {
@@ -2956,15 +2969,29 @@ input.inline:focus {
 .toasts {
   bottom: 88px;
 }
-@media (max-width: 700px), (max-height: 500px) {
+/* Above the touch buttons (TouchControls.tsx's .touch-buttons), not under them. Several toasts stacked (each one
+   auto-dismisses after a few seconds: store.ts's pushToast) can grow taller than a short screen has room for above
+   that anchor: scroll instead of running past the top edge. How far above depends on how tall the touch buttons can
+   get, which differs by orientation (below), so each one clears its own worst case, not today's button count —
+   issue #44's round 2 found a toast landing on a grown Throw/Drop/Reload column. */
+@media (max-height: 500px) {
+  /* Landscape phones: .touch-buttons below is a single row here (still at its usual bottom: 76px, clearing the
+     phone button), so one button's height is the whole clearance, not a whole column's. */
   .toasts {
-    /* Above the touch buttons (TouchControls.tsx's .touch-buttons), not under them. Several toasts stacked (each
-       one auto-dismisses after a few seconds: store.ts's pushToast) can grow taller than a short screen has room
-       for above that anchor: scroll instead of running past the top edge. */
-    bottom: calc(140px + env(safe-area-inset-bottom));
+    bottom: calc(142px + env(safe-area-inset-bottom));
     right: max(16px, env(safe-area-inset-right));
     max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
-    max-height: calc(100vh - 156px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: calc(100vh - 158px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+}
+@media (max-width: 700px) and (min-height: 501px) {
+  /* Portrait phones: .touch-buttons stays a column there, up to 4 buttons tall (Reload, Throw, Drop, Use). */
+  .toasts {
+    bottom: calc(342px + env(safe-area-inset-bottom));
+    right: max(16px, env(safe-area-inset-right));
+    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    max-height: calc(100vh - 358px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     overflow-y: auto;
   }
 }
@@ -3069,6 +3096,17 @@ input.inline:focus {
   gap: 10px;
   pointer-events: auto;
 }
+/* Landscape phones: a column of up to 4 buttons (Reload, Throw, Drop, Use) would eat most of a short screen's
+   height, climbing into the HUD above. A row along the bottom edge instead keeps this to one button's height
+   (.toasts above clears just that) with the whole screen width to grow into. */
+@media (max-height: 500px) {
+  .touch-buttons {
+    flex-direction: row;
+    flex-wrap: wrap-reverse;
+    justify-content: flex-end;
+    max-width: calc(100vw - 32px - 152px - env(safe-area-inset-left) - env(safe-area-inset-right));
+  }
+}
 .touch-btn {
   min-width: 56px;
   min-height: 56px;
@@ -3087,6 +3125,11 @@ input.inline:focus {
 .touch-btn-use {
   background: #ffd98a;
   max-width: 160px;
+  /* Its label is whatever's aimed at (Desk.tsx's "View X's terminal..." runs long): one line, ellipsised, so this
+   * button's height stays the one it was sized for instead of growing into .hud-help below it (issue #44 round 2). */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .voice-speaking {
   position: absolute;

@@ -5,6 +5,7 @@ import { BlasterHud } from './BlasterHud';
 import { decorName } from '../world/decor/actions';
 import { Key } from './Key';
 import { PongHud } from './PongHud';
+import { useTouch } from '../world/touch';
 
 /** The throw meter under the crosshair. Animates itself while charging; hidden during the first moments of a tap. */
 function ChargeMeter({ at }: { at: number }) {
@@ -33,6 +34,7 @@ function ChargeMeter({ at }: { at: number }) {
 export function HeldHint() {
   const held = useStore((s) => s.held);
   const chargeAt = useStore((s) => s.chargeAt);
+  const touchOn = useTouch((s) => s.on);
   if (!held) return null;
   if (held.kind === 'blaster') return <BlasterHud held={held} />;
   if (held.kind === 'sausage') {
@@ -67,9 +69,13 @@ export function HeldHint() {
   return (
     <>
       {chargeAt !== null && <ChargeMeter at={chargeAt} />}
-      <div className="hud-hint hud-held">
-        <kbd>Click</kbd> / <Key action="throw" /> throw · hold to charge · <Key action="drop" /> drop
-      </div>
+      {/* On touch, TouchControls.tsx's Throw/Drop buttons already say this: skip the keyboard-only text, which has
+          no room beside .hud-top and the touch controls anyway (issue #44 round 2). */}
+      {!touchOn && (
+        <div className="hud-hint hud-held">
+          <kbd>Click</kbd> / <Key action="throw" /> throw · hold to charge · <Key action="drop" /> drop
+        </div>
+      )}
     </>
   );
 }
