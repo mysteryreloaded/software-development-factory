@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { agentsOnRepo, kanbanFor, useStore, type Agent, type KanbanCard } from '../store';
-import { confirmDialog } from './Confirm';
+import { confirmDialog, isConfirmOpen } from './Confirm';
+import { floorStep } from './kanbanFloors';
 import { Panel } from './Panel';
 
 /** Who has the card; "QA" while they're testing it. */
@@ -82,6 +83,7 @@ function QaLink({ card }: { card: KanbanCard }) {
 }
 
 export function KanbanView({ repoId, embedded }: { repoId: string; embedded?: boolean }) {
+  const repos = useStore((s) => s.repos);
   const repo = useStore((s) => s.repos.find((r) => r.id === repoId));
   const allAgents = useStore((s) => s.agents);
   const qaRecords = useStore((s) => s.qa);
@@ -91,6 +93,33 @@ export function KanbanView({ repoId, embedded }: { repoId: string; embedded?: bo
   const cols = useMemo(() => (repo ? kanbanFor(repo, agents, qaRecords, { state: usageState }) : null), [repo, agents, qaRecords, usageState]);
   const [showForm, setShowForm] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
+
+  // Switching floors must never carry over a half-filled draft or a stale in-flight action.
+  useEffect(() => {
+    setShowForm(false);
+    setPending(null);
+  }, [repoId]);
+
+  const prevId = embedded ? null : floorStep(repos, repoId, -1);
+  const nextId = embedded ? null : floorStep(repos, repoId, 1);
+
+  useEffect(() => {
+    if (!prevId && !nextId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || isConfirmOpen()) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (e.key === 'ArrowLeft' && prevId) {
+        e.preventDefault();
+        openOverlay({ kind: 'kanban', repoId: prevId });
+      } else if (e.key === 'ArrowRight' && nextId) {
+        e.preventDefault();
+        openOverlay({ kind: 'kanban', repoId: nextId });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [prevId, nextId, openOverlay]);
 
   if (!repo || !cols) {
     return (
@@ -199,20 +228,49 @@ export function KanbanView({ repoId, embedded }: { repoId: string; embedded?: bo
     </div>
   );
 
+  const shortName = (fullName: string) => fullName.split('/')[1] ?? fullName;
+  const prevRepo = prevId ? repos.find((r) => r.id === prevId) : null;
+  const nextRepo = nextId ? repos.find((r) => r.id === nextId) : null;
+  const titleName = (
+    <span className="kanban-title-name">
+      📋 Floor {repo.floor} · {repo.fullName}{' '}
+      <a className="small" href={repo.url} target="_blank" rel="noreferrer">
+        GitHub ↗
+      </a>
+    </span>
+  );
+  const title =
+    prevRepo && nextRepo ? (
+      <span className="kanban-title-row">
+        <button
+          className="kanban-arrow panel-x"
+          aria-label="Previous floor"
+          title={`Floor ${prevRepo.floor} · ${shortName(prevRepo.fullName)} (←)`}
+          onClick={() => openOverlay({ kind: 'kanban', repoId: prevRepo.id })}
+        >
+          ‹
+        </button>
+        {titleName}
+        <button
+          className="kanban-arrow panel-x"
+          aria-label="Next floor"
+          title={`Floor ${nextRepo.floor} · ${shortName(nextRepo.fullName)} (→)`}
+          onClick={() => openOverlay({ kind: 'kanban', repoId: nextRepo.id })}
+        >
+          ›
+        </button>
+      </span>
+    ) : (
+      <span>
+        📋 {repo.fullName}{' '}
+        <a className="small" href={repo.url} target="_blank" rel="noreferrer">
+          GitHub ↗
+        </a>
+      </span>
+    );
+
   return (
-    <Frame
-      embedded={embedded}
-      wide
-      accent={repo.color}
-      title={
-        <span>
-          📋 {repo.fullName}{' '}
-          <a className="small" href={repo.url} target="_blank" rel="noreferrer">
-            GitHub ↗
-          </a>
-        </span>
-      }
-    >
+    <Frame embedded={embedded} wide accent={repo.color} title={title}>
       <div className="kanban-toolbar">
         <button className="btn btn-good" onClick={() => setShowForm((v) => !v)}>
           {showForm ? 'Cancel' : '+ New issue'}
