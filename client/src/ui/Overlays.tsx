@@ -230,10 +230,10 @@ function Help({ tab: initial }: { tab?: HelpTab }) {
           <h3>Sound</h3>
           <p>
             The office chimes when a PR is ready to merge, fails QA or gets merged, when someone hits an error and when a new teammate arrives. A merge on the floor you're on bangs its gong (by the whiteboard) and the
-            whole floor cheers; press <Key action="interact" /> at the gong to bang it yourself. Every floor's jukebox plays in its corner: <Key action="interact" /> on it skips to the next song, and its red button
-            stops or starts the music. Its Focus button switches the floor to the Focus station (lo-fi beats and ambient tracks for heads-down work) and back to all songs. While you look at it,{' '}
-            <Key action="volumeDown" /> and <Key action="volumeUp" />, the mouse wheel or its own − and + buttons set its volume, from quiet background up to music that fills the whole floor; the meter on its card
-            shows the level, and each floor keeps its own volume and station. The music dips under the gong, alerts and voices, and goes quiet while a panel or the phone is open and in the elevator. Wherever no
+            whole floor cheers; press <Key action="interact" /> at the gong to bang it yourself. Every floor has a jukebox in its corner, dark and silent until someone turns it on: its red button turns it on (at its
+            last volume) or off, and <Key action="interact" /> on it plays and skips to the next song. Its Focus button switches the floor to the Focus station (lo-fi beats and ambient tracks for heads-down work) and
+            back to all songs. While you look at it, <Key action="volumeDown" /> and <Key action="volumeUp" />, the mouse wheel or its own − and + buttons set its volume, from off through quiet background up to music
+            that fills the whole floor — all the way down turns it off; the meter on its card shows the level, and each floor keeps its own volume and station for the session. The music dips under the gong, alerts and voices, and goes quiet while a panel or the phone is open and in the elevator. Wherever no
             jukebox can be heard, a quiet soundtrack follows the office's mood: soft and calm, a gentle pulse when the team is busy, darker under a red CI or a PR that needs you, slower at night, and a little
             fanfare after a merge (a bigger one on a streak). Every space sounds like itself, from the glassy lobby and the carpeted floors to the tiled kitchenette, the boxy elevator and the open balconies, and
             sounds behind a wall come through muffled. <Key action="mute" /> mutes or unmutes anywhere. Under the master volume, turn footsteps (yours and everyone's), typing (and the team's sighs and cheers), chatter (their babble voices), toys (balls,
