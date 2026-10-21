@@ -20,7 +20,8 @@ import { previewHostMiddleware, previewHostUpgrade, type PreviewHostBackend } fr
 import { screenStatus } from './screenReply.ts';
 import { parseSendBackNote } from './sendBack.ts';
 import { PresenceHub } from './presence.ts';
-import { HttpError, Swarm } from './swarm.ts';
+import { HttpError, Swarm, UPLOADS_DIR } from './swarm.ts';
+import { readUpload, saveUpload } from './uploads.ts';
 
 const swarm = new Swarm(DEMO ? createDemoBackend(DEMO_SCALE) : realBackend);
 // Who else is in the 3D office (shared presence): relayed between tabs over /ws, never saved. The demo adds fake visitors.
@@ -225,6 +226,38 @@ app.get(
   }),
 );
 app.delete('/api/voice/cache', route(() => swarm.voice.clearCache()));
+
+// Files attached to a phone message (#48): the raw body, with its Content-Type and name in X-File-Name. The 100 MB
+// cap covers video, the biggest kind the office takes; shared/attachments.ts's smaller per-kind caps are checked
+// once the bytes are in hand (server/uploads.ts saveUpload).
+const uploadBody = express.raw({ type: () => true, limit: 100 * 1024 * 1024 });
+app.post(
+  '/api/uploads',
+  (req, res, next) => uploadBody(req, res, (err?: unknown) => next((err as { type?: unknown } | undefined)?.type === 'entity.too.large' ? new HttpError(413, 'That file is too big for the office to take.') : err)),
+  route(async (req) => {
+    const name = req.get('x-file-name');
+    if (!name) throw new HttpError(400, 'X-File-Name header is required');
+    const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    return saveUpload(UPLOADS_DIR, decodeURIComponent(name), buf);
+  }),
+);
+app.get('/api/uploads/:id', async (req, res, next) => {
+  try {
+    const found = await readUpload(UPLOADS_DIR, String(req.params.id));
+    if (!found) return void res.status(404).end();
+    const buf = await fs.promises.readFile(found.file).catch(() => null);
+    if (!buf) return void res.status(404).end();
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', 'sandbox');
+    res.setHeader('Content-Type', found.view.mime);
+    // Images and video render inline (the bubble's thumbnail, a click for the full picture); everything else downloads.
+    if (found.view.kind === 'doc') res.setHeader('Content-Disposition', `attachment; filename="${found.view.name.replace(/"/g, '')}"`);
+    res.end(buf);
+  } catch (err) {
+    next(err);
+  }
+});
 // The 🎙 with ElevenLabs: the recorded clip as the raw body (its Content-Type, X-Clip-Ms its length). A body over the
 // cap is refused before it's read, in the same words as clipProblem's.
 const clipBody = express.raw({ type: () => true, limit: CLIP_MAX_BYTES });
@@ -275,7 +308,7 @@ app.get(
 app.post('/api/journal/sample', route(() => swarm.journalSample()));
 
 // The CEO and the manager's phone
-app.post('/api/ceo/message', route((req) => swarm.messageCeo(str(req.body.text))));
+app.post('/api/ceo/message', route((req) => swarm.messageCeo(str(req.body.text), Array.isArray(req.body.attachments) ? req.body.attachments.map(String) : [])));
 app.post('/api/ceo/review', route(() => swarm.requestReview()));
 app.post('/api/phone/read', route((req) => swarm.markPhoneRead(Number(req.body?.at) || Date.now())));
 app.post(

@@ -1,7 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { floorPrCounts, isBusy, pendingRequests, unreadMessages, useStore, type PhoneTab } from '../store';
-import { CEO_ID, type AgentCli, type CliView, type EffortLevel, type HireRequestView, type PhoneMessage, type SwarmSettings } from '../../../shared/types';
+import { CEO_ID, type AgentCli, type AttachmentView, type CliView, type EffortLevel, type HireRequestView, type PhoneMessage, type SwarmSettings } from '../../../shared/types';
+import { humanSize, MAX_FILES } from '../../../shared/attachments';
+import { AttachButton, AttachmentChips, usePendingAttachments } from './AttachButton';
 import { Markdown } from './Markdown';
 import { MessageBox } from './MessageBox';
 import { MicButton } from './MicButton';
@@ -319,6 +321,24 @@ function HandsFreeToggle({ ceoName }: { ceoName: string }) {
   );
 }
 
+/** One attached file in a bubble (#48): an image thumbnail (click opens it full size), a video with controls, or a
+ * document chip that downloads it. GET /api/uploads/:id serves the bytes (server/index.ts). */
+function BubbleAttachment({ a }: { a: AttachmentView }) {
+  const url = `/api/uploads/${a.id}`;
+  if (a.kind === 'image')
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="bubble-img-link">
+        <img src={url} alt={a.name} className="bubble-img" />
+      </a>
+    );
+  if (a.kind === 'video') return <video src={url} controls className="bubble-video" />;
+  return (
+    <a href={url} className="bubble-doc-chip">
+      📄 {a.name} · {humanSize(a.size)}
+    </a>
+  );
+}
+
 function Bubble({ m, ceoName }: { m: PhoneMessage; ceoName: string }) {
   const req = useStore((s) => (m.requestId ? s.requests.find((r) => r.id === m.requestId) : undefined));
   if (m.from === 'office') return <div className="bubble-office">{m.text}</div>;
@@ -327,7 +347,14 @@ function Bubble({ m, ceoName }: { m: PhoneMessage; ceoName: string }) {
     <div className={`bubble-row ${mine ? 'bubble-row-me' : ''}`}>
       <div className={`bubble ${mine ? 'bubble-me' : 'bubble-them'}`}>
         {!mine && <div className="bubble-from">{ceoName}</div>}
-        {mine ? <div className="bubble-text">{m.text}</div> : <Markdown className="bubble-md" text={m.text} />}
+        {m.attachments && m.attachments.length > 0 && (
+          <div className="bubble-attachments">
+            {m.attachments.map((a) => (
+              <BubbleAttachment key={a.id} a={a} />
+            ))}
+          </div>
+        )}
+        {m.text && (mine ? <div className="bubble-text">{m.text}</div> : <Markdown className="bubble-md" text={m.text} />)}
         {req && req.status === 'pending' && m.from === 'ceo' && <Resume req={req} />}
         <div className="bubble-time">
           {!mine && <ReplayButton m={m} />}
@@ -349,6 +376,7 @@ export function Chat({ autoFocus = true }: { autoFocus?: boolean }) {
   const text = useStore((s) => s.ceoDraft);
   const setText = useStore((s) => s.setCeoDraft);
   const scroller = useRef<HTMLDivElement>(null);
+  const attach = usePendingAttachments();
 
   // Reading the thread marks it read.
   useEffect(() => {
@@ -363,10 +391,13 @@ export function Chat({ autoFocus = true }: { autoFocus?: boolean }) {
   if (!ceo) return <p className="muted phone-empty">The corner office is empty.</p>;
   const send = (t: string) => {
     const body = t.trim();
-    if (!body) return;
+    const ids = attach.ids();
+    if (!body && ids.length === 0) return;
     setText('');
-    void attempt(() => api.messageCeo(body));
+    attach.reset();
+    void attempt(() => api.messageCeo(body, ids));
   };
+  const canSend = (text.trim().length > 0 || attach.files.length > 0) && !attach.busy;
   const replying = ceo.status === 'working' && info.job?.kind === 'chat';
   const chatQueued = info.queue.some((j) => j.kind === 'chat');
   const presence =
@@ -418,6 +449,7 @@ export function Chat({ autoFocus = true }: { autoFocus?: boolean }) {
           </button>
         ))}
       </div>
+      <AttachmentChips files={attach.files} remove={attach.remove} />
       <form
         className="chat-input"
         onSubmit={(e) => {
@@ -425,9 +457,10 @@ export function Chat({ autoFocus = true }: { autoFocus?: boolean }) {
           send(text);
         }}
       >
-        <MessageBox value={text} onChange={setText} placeholder={`Message ${ceo.name}…`} aria-label={`Message ${ceo.name}`} title="Enter sends · Shift+Enter adds a new line" autoFocus={autoFocus} />
+        <AttachButton onFiles={attach.add} disabled={attach.files.length >= MAX_FILES} />
+        <MessageBox value={text} onChange={setText} onFiles={attach.add} placeholder={`Message ${ceo.name}…`} aria-label={`Message ${ceo.name}`} title="Enter sends · Shift+Enter adds a new line" autoFocus={autoFocus} />
         <MicButton kind="phone" value={text} onChange={setText} onSend={send} />
-        <button className="btn btn-small btn-good" disabled={!text.trim()}>
+        <button className="btn btn-small btn-good" disabled={!canSend}>
           Send
         </button>
       </form>
