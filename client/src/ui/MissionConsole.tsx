@@ -67,13 +67,14 @@ function UsageCard({ hot }: { hot: boolean }) {
         </button>
       </div>
       {m.limits.map((l) => (
-        <div key={l.label} className="usage-gauge" role="meter" aria-label={`Claude ${l.label === '5-hour' ? '5-hour' : 'weekly'} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={l.pct ?? 0}>
-          <div style={{ width: `${Math.min(100, l.pct ?? 0)}%`, background: (l.pct ?? 0) >= 90 ? 'var(--bad)' : (l.pct ?? 0) >= 75 ? 'var(--warn)' : 'var(--good)' }} />
-        </div>
-      ))}
-      {m.limits.map((l) => (
-        <div key={l.label} className="small">
-          {l.label} {l.pct === null ? '—' : `${l.pct}%`} · {l.resets} · as of {l.asOf}
+        <div key={l.label}>
+          <div className="usage-gauge" role="meter" aria-label={`Claude ${l.label === '5-hour' ? '5-hour' : 'weekly'} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={l.pct ?? 0}>
+            <div style={{ width: `${Math.min(100, l.pct ?? 0)}%`, background: (l.pct ?? 0) >= 90 ? 'var(--bad)' : (l.pct ?? 0) >= 75 ? 'var(--warn)' : 'var(--good)' }} />
+          </div>
+          <div className="small">
+            {l.label} {l.pct === null ? '—' : `${l.pct}%`}
+            {l.resets && ` · ${l.resets}`} · as of {l.asOf}
+          </div>
         </div>
       ))}
       {m.noReadings && <div className="small">{m.noReadings}</div>}

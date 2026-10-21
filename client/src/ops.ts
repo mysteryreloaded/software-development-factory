@@ -78,14 +78,15 @@ export function usageMeter(
 ): { state: string; tone: 'good' | 'warn' | 'bad'; limit: string; pct: number | null; resets: string | null; limits: ReturnType<typeof usageLimitRow>[]; noReadings: string | null } {
   const w = u.warning;
   const resetsAt = u.state === 'normal' ? (w?.resetsAt && w.resetsAt > now ? w.resetsAt : null) : u.until;
+  const limits = u.limits ?? []; // a day recorded before live readings has none
   return {
     state: u.state === 'paused' ? 'Paused' : u.state === 'pacing' ? 'Pacing' : 'Normal',
     tone: u.state === 'paused' ? 'bad' : u.state === 'pacing' ? 'warn' : 'good',
     limit: w ? `${w.limit ?? "Claude's usage"}${w.pct === null ? '' : ` · ${w.pct}%`}` : 'No usage warnings',
     pct: w?.pct ?? null,
     resets: resetsAt ? clock(resetsAt, now) : null,
-    limits: u.limits.map((l) => usageLimitRow(l, now)),
-    noReadings: u.limits.length ? null : 'No reading yet: it comes with the next Claude session',
+    limits: limits.map((l) => usageLimitRow(l, now)),
+    noReadings: limits.length ? null : 'No reading yet: it comes with the next Claude session',
   };
 }
 

@@ -47,7 +47,6 @@ const BIN_DIR = path.join(HOME_DIR, 'bin');
 const FINISH_GRACE_MS = 3000;
 /** Starting up: how long before the office says the CLI seems to be waiting on something. */
 const BOOT_MS = 60_000;
-/** Claude's usage warning, the way the SDK's allowed_warning is used: pace new work from here. */
 /** Prompts longer than this go in a file: Windows caps a command line at 32K characters. */
 const INLINE_PROMPT_MAX = 8000;
 

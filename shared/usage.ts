@@ -21,7 +21,7 @@ export const limitName = (type: string) => LIMIT_NAMES[type] ?? type.replace(/_/
 /** How full a limit is, 0-100: Claude reports a fraction (0.82) or a percentage (82). */
 export const usedPercent = (utilization: number) => Math.round(utilization <= 1 ? utilization * 100 : utilization);
 
-/** A limit never used_percentage below is a warning; 100 or more stays as-is (the hard limit). */
+/** A limit's used_percentage at or above this (but under 100, the hard limit) is a usage warning. */
 export const USAGE_WARN_PCT = 90;
 
 /** One of Claude's rate_limits entries read from a status line, rounded for display. */

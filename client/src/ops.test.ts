@@ -70,6 +70,11 @@ describe('usage', () => {
   it('says so when there are no readings at all', () => {
     expect(usageMeter({ state: 'normal', until: null, warning: null, limits: [] }, NOW).noReadings).toBe('No reading yet: it comes with the next Claude session');
   });
+
+  it('copes with a day recorded before live readings existed, with no limits field at all', () => {
+    const old = { state: 'normal', until: null, warning: null } as UsageView;
+    expect(usageMeter(old, NOW)).toMatchObject({ limits: [], noReadings: 'No reading yet: it comes with the next Claude session' });
+  });
 });
 
 describe('newAlarms', () => {
