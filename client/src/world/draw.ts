@@ -6,6 +6,7 @@ import { chipRects } from '../ui/channels';
 import { inkOn } from '../ui/colorMath';
 import { KIND_ICON, kindStrong, STANDARD_LOOK, STATUS_KIND, TONE_KIND, toneFill, type StatusKind, type StatusLook } from '../ui/statusLook';
 import { statsChips, type BoardStats } from './boardStats';
+import { fitSize } from './signFit';
 import type { Pair } from './whiteboard';
 
 // 2D canvas painters for everything in the office that shows text: laptop terminals,
@@ -611,7 +612,7 @@ export function drawCandidateTag(ctx: CanvasRenderingContext2D, w: number, h: nu
   ctx.fillText(fit(`${detail}${floor ? ` · Floor ${floor}` : ''}`, w - 100), 80, h * 0.72);
 }
 
-export function drawSign(ctx: CanvasRenderingContext2D, w: number, h: number, lines: { text: string; size: number; color?: string; weight?: number }[], bg: string, fg = '#ffffff') {
+export function drawSign(ctx: CanvasRenderingContext2D, w: number, h: number, lines: { text: string; size: number; color?: string; weight?: number; fit?: 'shrink' }[], bg: string, fg = '#ffffff') {
   roundRect(ctx, 0, 0, w, h, 28);
   ctx.fillStyle = bg;
   ctx.fill();
@@ -622,7 +623,15 @@ export function drawSign(ctx: CanvasRenderingContext2D, w: number, h: number, li
   for (const l of lines) {
     y += (l.size * 1.25) / 2;
     ctx.fillStyle = l.color ?? fg;
-    ctx.font = `${l.weight ?? 700} ${l.size}px ${SANS}`;
+    const weight = l.weight ?? 700;
+    let size = l.size;
+    if (l.fit === 'shrink') {
+      size = fitSize((s) => {
+        ctx.font = `${weight} ${s}px ${SANS}`;
+        return ctx.measureText(l.text).width;
+      }, l.size, w - 40);
+    }
+    ctx.font = `${weight} ${size}px ${SANS}`;
     let text = l.text;
     while (text.length > 3 && ctx.measureText(text).width > w - 40) text = `${text.slice(0, -2)}…`;
     ctx.fillText(text, w / 2, y);
