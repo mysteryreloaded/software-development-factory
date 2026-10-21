@@ -448,18 +448,30 @@ input.inline:focus {
     overflow-y: auto;
   }
 }
-/* Landscape phones: not enough room to share one clip with the card too and still show it whole (issue #44 round
-   4), so .hud-top-scroll gets its own instead (the same budget .hud-top used above), and .hud-top-lower none at
-   all — an absolutely- or fixed-positioned element is still clipped by an ancestor's overflow regardless of its
-   own position, so .aim-cards and .toasts (inside .hud-top-lower, each fixed in this media query, their own
-   rules below) only truly escape to the screen if nothing above them clips either. .hud-top itself narrows to
-   leave their corner clear. */
+/* Landscape phones: not enough room to share .hud-top-scroll's clip with the card too and still show it whole
+   (issue #44 round 4), so that gets its own instead (the same budget .hud-top used above). .hud-top-lower (the
+   card, the hints, the toasts) gets a corner of its own too, top-right (.hud-top itself narrows to leave it
+   clear) — one shared clip for the three of them, same reasoning as the portrait one above: whichever is present
+   shares whatever room there is rather than each claiming a fixed slice of it regardless of what's actually
+   there (round 4's own fix tried that, giving the card enough room to show whole but leaving toasts less than
+   one toast's worth below it). position: fixed, not absolute: .hud-top (an ancestor here) is itself positioned
+   on a phone, so this needs the same escape .hud-top's own absolute children get to .hud on desktop, where
+   .hud-top isn't positioned at all — and being fixed, not just positioned, is what lets it escape .hud-top-scroll
+   and .hud-top's own clipping too, which an absolutely positioned descendant doesn't. */
 @media (max-height: 500px) {
   .hud-top {
     max-width: min(520px, calc(100vw - 32px - 236px - env(safe-area-inset-right)));
   }
   .hud-top-scroll {
     max-height: calc(100vh - 200px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+  .hud-top-lower {
+    position: fixed;
+    top: max(16px, env(safe-area-inset-top));
+    right: max(16px, env(safe-area-inset-right));
+    width: min(220px, calc(100vw - 32px));
+    max-height: calc(100vh - 156px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     overflow-y: auto;
   }
 }
@@ -527,13 +539,15 @@ input.inline:focus {
   pointer-events: none;
 }
 /* On a phone, 22% of a tall screen's height could land on .hud-help's own fixed offset below, or on the touch
-   controls (issue #44's round 2, 3 and 4): instead of floating independently, it flows inside .aim-cards (HUD.tsx
-   nests it there, after AgentCard/CareerPeek — they're about the same thing you're aiming at), sharing whatever
-   spot and scrollable budget that gets, so it can't land anywhere .aim-cards itself couldn't, and never hidden
-   outright (every held item's own hint, HeldHint.tsx's sticky/sausage/mug/⚠️ text included, needs a real spot
-   too, not just the generic one). */
+   controls (issue #44's round 2, 3 and 4): instead of floating independently, the one inside .aim-cards (HUD.tsx
+   nests the aim/held hints there, after AgentCard/CareerPeek — they're about the same thing you're aiming at)
+   flows with it, sharing whatever spot and scrollable budget that gets, so it can't land anywhere .aim-cards
+   itself couldn't, and never hidden outright (every held item's own hint, HeldHint.tsx's sticky/sausage/mug/⚠️
+   text included, needs a real spot too, not just the generic one). Scoped to .aim-cards .hud-hint, not every
+   .hud-hint: RoofHud.tsx's own two (the deck chair and the telescope) are .hud's direct children, not nested in
+   .aim-cards, and get their own phone spot below instead (round 4 found this rule dropping them to y=0). */
 @media (max-width: 700px), (max-height: 500px) {
-  .hud-hint {
+  .aim-cards .hud-hint {
     position: static;
     bottom: auto;
     left: auto;
@@ -543,6 +557,20 @@ input.inline:focus {
     max-width: 100%;
     white-space: normal;
     text-align: left;
+  }
+  /* The roof's own hints: clear .hud-help below (same reasoning as that one clearing the joystick), centred the
+     way they are on desktop instead of .aim-cards' left-aligned flow, since there's nothing else up there to flow
+     after on the roof. Higher specificity than .roof-scope-hint's own bottom: 5% (a single class), so this wins
+     for the telescope's hint too without needing !important. */
+  .hud > .hud-hint {
+    bottom: calc(184px + env(safe-area-inset-bottom));
+    left: max(16px, env(safe-area-inset-left));
+    right: max(16px, env(safe-area-inset-right));
+    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    width: fit-content;
+    margin: 0 auto;
+    white-space: normal;
+    text-align: center;
   }
 }
 /* The cards for whoever you're looking at (ui/AgentCard.tsx, then the career peek in ui/CareerCard.tsx): docked at
@@ -568,27 +596,6 @@ input.inline:focus {
     left: auto;
     width: 100%;
     max-width: 100%;
-  }
-}
-/* Landscape phones: .hud-top-scroll's own max-height (above) only has room for its usual boxes, clipping the card
-   (issue #44 round 3) — too little height to share with anything else. Its own corner instead, top-right (free:
-   .hud-top's narrowed above), with a budget sized to clear .toasts below (its own corner, further below still —
-   its top edge is a constant 156px up from the bottom, whatever the viewport height: 134px bottom offset plus its
-   own 22px max-height) rather than share .hud-top-scroll's. Even so, the shortest tested landscape screen
-   (780x360) leaves just enough room for the card to show in full (round 4's own requirement) with only a few px
-   to spare: there's no slack left here for anything taller (e.g. two agent cards at once isn't a real scenario,
-   but worth knowing why this is tight). position: fixed, not absolute, because .hud-top (an ancestor here) is
-   itself positioned on a phone: this escapes it the same way .hud-top's absolute children escape to .hud on
-   desktop, where .hud-top isn't positioned at all. */
-@media (max-height: 500px) {
-  .aim-cards {
-    position: fixed;
-    top: max(16px, env(safe-area-inset-top));
-    right: max(16px, env(safe-area-inset-right));
-    left: auto;
-    width: min(220px, calc(100vw - 32px));
-    max-height: calc(100vh - 178px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    overflow-y: auto;
   }
 }
 .agent-card {
@@ -709,9 +716,12 @@ input.inline:focus {
 .roof-scope-hint {
   bottom: 5%;
 }
-/* Throw charge, just under the crosshair. */
+/* Throw charge, just under the crosshair. position: fixed, not absolute: HeldHint.tsx now renders inside
+   .aim-cards (issue #44's round 2), which is itself positioned on desktop, so this needs the same escape to the
+   viewport .hud-hint's own fixed position gets, instead of re-anchoring to .aim-cards' corner (round 4 found it
+   jumping there at 1280x800). Same for .hud-pong and .hud-ammo below: all three are HeldHint's. */
 .charge {
-  position: absolute;
+  position: fixed;
   top: calc(50% + 14px);
   left: 50%;
   width: 56px;
@@ -739,7 +749,7 @@ input.inline:focus {
 }
 /* Ping-pong: the score at the top of the screen while you play, and what just happened under it. */
 .hud-pong {
-  position: absolute;
+  position: fixed;
   top: 16px;
   left: 50%;
   transform: translateX(-50%);
@@ -787,7 +797,7 @@ input.inline:focus {
 }
 /* Foam blaster ammo, bottom right above the phone, next to where the blaster sits in view. */
 .hud-ammo {
-  position: absolute;
+  position: fixed;
   right: 16px;
   bottom: 72px;
   display: flex;
@@ -3027,42 +3037,34 @@ input.inline:focus {
 }
 /* Above the touch buttons (TouchControls.tsx's .touch-buttons), not under them. Several toasts stacked (each one
    auto-dismisses after a few seconds: store.ts's pushToast) can grow taller than a short screen has room for above
-   that anchor: scroll instead of running past the top edge. How far above depends on how tall the touch buttons can
-   get, which differs by orientation (below), so each one clears its own worst case, not today's button count —
-   issue #44's round 2 found a toast landing on a grown Throw/Drop/Reload column. */
-@media (max-height: 500px) {
-  /* Landscape phones: .touch-buttons below is a single row here (still at its usual bottom: 76px, clearing the
-     phone button), so one button's height is the whole clearance, not a whole column's. .aim-cards' own corner is
-     right above this one though (issue #44 round 4: at 780x360, the card needs enough of the screen's 360px to
-     show in full), so this clears .touch-buttons with only a couple of px to spare, and .toast is smaller still,
-     rather than the generous, vh-independent clearance round 3 used. overflow-y:auto still clips anything that
-     doesn't fit rather than reaching up into .aim-cards. position: fixed, not absolute: on a phone .hud-top (an
-     ancestor here too, like .aim-cards above) is itself positioned, so this needs the same escape to stay
-     anchored to the viewport instead of to it. */
-  .toasts {
-    position: fixed;
-    bottom: calc(134px + env(safe-area-inset-bottom));
-    right: max(16px, env(safe-area-inset-right));
-    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
-    max-height: 22px;
-    overflow-y: auto;
-  }
-  .toast {
-    padding: 2px 8px;
-    font-size: 0.7rem;
-  }
-}
-@media (max-width: 700px) and (min-height: 501px) {
-  /* Portrait phones: plenty of room, so it flows in .hud-top's own column instead (HUD.tsx nests it there, after
-     the held/aim hints) — the fixed band tried in round 3 still landed on an aimed card's own flow there
-     (issue #44 round 4: 320x568). Flowing it the same way rules that out structurally, the same reasoning as
-     .aim-cards and .hud-hint above. */
-  .toasts {
+   that anchor: scroll instead of running past the top edge — issue #44's round 2 found a toast landing on a grown
+   Throw/Drop/Reload column, and its round 4 found a fixed band sized for today's button count landing on the
+   aimed card's own flow at 320x568. Flowing it in .hud-top-lower instead (HUD.tsx nests it there, after the
+   held/aim hints) — portrait inside .hud-top's shared clip, landscape inside .hud-top-lower's own corner (both
+   above) — rules both out structurally: it shares whatever room is actually there with the card and the hints,
+   the same reasoning as those above, instead of each claiming a fixed slice of the screen regardless of what's
+   present. Scoped to .hud-top-lower, not every .toasts/.toast: Pocket.tsx's and PhotoPanel's own toasts reuse
+   those class names outside the 3D HUD (round 4 found this hitting them too). */
+@media (max-width: 700px), (max-height: 500px) {
+  .hud-top-lower .toasts {
     position: static;
     bottom: auto;
     right: auto;
     width: 100%;
     max-width: 100%;
+  }
+}
+@media (max-height: 500px) {
+  /* Landscape phones: a smaller .toast, to fit more of .hud-top-lower's tighter corner there, and the newest one
+   * first (reversed from the usual oldest-first order) so it's the one kept visible if .hud-top-lower's own clip
+   * (above) cuts off the rest — not the oldest, which overflow-y: auto's default scroll position would otherwise
+   * keep showing instead (issue #44 round 4: the newest toast must be the one that shows whole). */
+  .hud-top-lower .toasts {
+    flex-direction: column-reverse;
+  }
+  .hud-top-lower .toast {
+    padding: 4px 10px;
+    font-size: 0.78rem;
   }
 }
 .phone-btn {

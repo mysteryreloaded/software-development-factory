@@ -236,6 +236,30 @@ test.describe('phone HUD layout round 2: the agent card and a grown touch-button
 // the held/aim hints, so none of the four can land on another. (2) a short landscape phone's .hud-top couldn't
 // fit the whole card either (its own max-height, sized for the floor/status/chips boxes alone); the card gets its
 // own corner there now (top-right, .aim-cards' landscape rules), sized to show it in full, not just avoid overlap.
+/** `selector`'s own unclipped rect, and the same rect intersected with every scrolling ancestor's — equal only if
+ * nothing actually clips it on screen. Shared by the agent card's and the newest toast's "shows whole" checks. */
+async function ownVsClippedRect(page: Page, selector: string) {
+  return page.locator(selector).evaluate((el) => {
+    const own = el.getBoundingClientRect();
+    let rect = own;
+    let node = el.parentElement;
+    while (node && node !== document.body) {
+      const cs = getComputedStyle(node);
+      if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+        const cr = node.getBoundingClientRect();
+        const left = Math.max(rect.left, cr.left);
+        const top = Math.max(rect.top, cr.top);
+        const right = Math.min(rect.right, cr.right);
+        const bottom = Math.min(rect.bottom, cr.bottom);
+        rect = new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
+      }
+      node = node.parentElement;
+    }
+    const box = (r: DOMRect) => ({ x: r.x, y: r.y, width: r.width, height: r.height });
+    return { own: box(own), clipped: box(rect) };
+  });
+}
+
 test.describe('phone HUD layout round 4: the agent card sharing a band with toasts and hints', () => {
   test.use(S23);
 
@@ -270,27 +294,52 @@ test.describe('phone HUD layout round 4: the agent card sharing a band with toas
       await skipTour(page);
       await expect(page.locator('.agent-card')).toBeVisible({ timeout: 15_000 });
       await page.waitForTimeout(1000);
-      const { own, clipped } = await page.locator('.agent-card').evaluate((el) => {
-        const own = el.getBoundingClientRect();
-        let rect = own;
-        let node = el.parentElement;
-        while (node && node !== document.body) {
-          const cs = getComputedStyle(node);
-          if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
-            const cr = node.getBoundingClientRect();
-            const left = Math.max(rect.left, cr.left);
-            const top = Math.max(rect.top, cr.top);
-            const right = Math.min(rect.right, cr.right);
-            const bottom = Math.min(rect.bottom, cr.bottom);
-            rect = new DOMRect(left, top, Math.max(0, right - left), Math.max(0, bottom - top));
-          }
-          node = node.parentElement;
-        }
-        const box = (r: DOMRect) => ({ x: r.x, y: r.y, width: r.width, height: r.height });
-        return { own: box(own), clipped: box(rect) };
-      });
+      const { own, clipped } = await ownVsClippedRect(page, '.agent-card');
       expect(clipped, 'the agent card is clipped by a scrolling ancestor').toEqual(own);
       await assertNoOverlapOnScreen(page, viewport);
     });
+
+    test(`newest toast shows whole, not clipped (${name})`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await page.goto('/?pocket=0');
+      await enterOffice(page, { loaded: true });
+      await skipTour(page);
+      // 3 toasts, stacked (same mute binding as the round-2 "held ball" spec above): the newest is last in the DOM.
+      await expect(async () => {
+        await page.keyboard.press('m');
+        await page.keyboard.press('m');
+        await page.keyboard.press('m');
+        await expect(page.locator('.toast').first()).toBeVisible({ timeout: 2000 });
+      }).toPass({ timeout: 10_000 });
+      const { own, clipped } = await ownVsClippedRect(page, '.toast:last-child');
+      expect(clipped, 'the newest toast is clipped by a scrolling ancestor').toEqual(own);
+      await assertNoOverlapOnScreen(page, viewport);
+    });
   }
+});
+
+// Issue #44 round 4's 4th fix: HeldHint.tsx now renders inside .aim-cards (round 2), so its own absolutely
+// positioned pieces (the throw charge meter, the ammo counter, the ping-pong scoreboard) re-anchored to
+// .aim-cards' own corner instead of the viewport .hud-hint gets — only visible on a wide-enough desktop window,
+// where .aim-cards is itself positioned (on a phone it just flows, so there's nothing to re-anchor to). Desktop's
+// own layout is otherwise out of scope for issue #44: this is the one state it can regress on a phone fix.
+test.describe('phone HUD layout round 4: desktop stays unaffected', () => {
+  test('the throw charge meter stays centred under the crosshair at 1280x800', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    // In the lobby, 1.6 m north of the basketball under its hoop (toys.spec.ts's spot), facing it.
+    await startAt(page, { floor: 0, x: -9, z: 9.3, yaw: Math.PI, pitch: -0.73 });
+    await page.goto('/?pocket=0');
+    await enterOffice(page, { loaded: true });
+    await expect(page.getByText('Pick up ball')).toBeVisible({ timeout: 90_000 });
+    await page.keyboard.press('e');
+    await page.keyboard.down('KeyF'); // hold to charge (Key.tsx's default 'throw' binding)
+    try {
+      await expect(page.locator('.charge-on')).toBeVisible();
+      const box = await page.locator('.charge').boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x + box!.width / 2, 'the charge meter is centred horizontally').toBeCloseTo(1280 / 2, 0);
+    } finally {
+      await page.keyboard.up('KeyF');
+    }
+  });
 });
