@@ -390,6 +390,7 @@ export function Chat({ autoFocus = true }: { autoFocus?: boolean }) {
 
   if (!ceo) return <p className="muted phone-empty">The corner office is empty.</p>;
   const send = (t: string) => {
+    if (attach.busy) return;
     const body = t.trim();
     const ids = attach.ids();
     if (!body && ids.length === 0) return;

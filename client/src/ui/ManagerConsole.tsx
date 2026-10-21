@@ -275,6 +275,7 @@ function CeoTab() {
   const working = ceo.status === 'working';
   const pending = pendingRequests(requests);
   const send = (t: string) => {
+    if (attach.busy) return;
     const ids = attach.ids();
     if (!t.trim() && ids.length === 0) return;
     setText('');

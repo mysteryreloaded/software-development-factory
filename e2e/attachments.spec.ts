@@ -181,6 +181,23 @@ test('a PDF shows a doc chip, uploads, and downloads from the bubble', async ({ 
   await expect(docChip).toContainText('report.pdf');
 });
 
+test('a .json file uploads and the chip finishes without a warning (its own Content-Type must not be parsed as the request body)', async ({ page }) => {
+  await page.goto('/');
+  await enterOffice(page, { loaded: true });
+  await openChat(page);
+  const file = writeFixture('notes.json', JSON.stringify({ hello: 'from the e2e test' }));
+
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: '📎' }).click();
+  const fileChooser = await chooser;
+  await fileChooser.setFiles(file);
+
+  const c = chip(page, 'notes.json');
+  await expect(c).toBeVisible();
+  await expect(c.locator('.attach-chip-spin')).toBeHidden({ timeout: 15_000 });
+  await expect(c.locator('.attach-chip-warn')).toBeHidden();
+});
+
 test('an .exe is refused, in plain words, without ever reaching the CEO', async ({ request }) => {
   const res = await request.post('/api/uploads', { headers: { 'Content-Type': 'application/octet-stream', 'X-File-Name': 'virus.exe' }, data: Buffer.from('MZ\x90\x00\x03\x00\x00\x00 not really an executable') });
   expect(res.status()).toBe(415);

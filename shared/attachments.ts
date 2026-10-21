@@ -63,11 +63,19 @@ export const ruleFor = (name: string): TypeRule => RULES[ext(name)] ?? TEXT_RULE
 /** What AttachmentView.kind this file name is. */
 export const kindOf = (name: string): AttachmentKind => ruleFor(name).kind;
 
-/** The basename, kept to characters a path and a URL are both happy with, at most 80 of them, never empty. */
+/** The basename, kept to characters a path and a URL are both happy with, at most 80 of them, never empty. Cutting to
+ * length keeps the extension (so the CEO's Read, and any kind-by-extension check, still sees a .pdf or .png). */
 export function cleanName(name: string): string {
   const base = name.replace(/^.*[\\/]/, '').trim();
-  const cleaned = base.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80);
-  return /[A-Za-z0-9]/.test(cleaned) ? cleaned : 'file';
+  const cleaned = base.replace(/[^A-Za-z0-9._-]/g, '_');
+  const trimmed = (() => {
+    if (cleaned.length <= 80) return cleaned;
+    const e = ext(cleaned);
+    // Only keep a short, known extension: an overlong or junk ".suffix" is just truncated with everything else.
+    if (e && e.length <= 10 && e.length < 80) return cleaned.slice(0, 80 - e.length) + e;
+    return cleaned.slice(0, 80);
+  })();
+  return /[A-Za-z0-9]/.test(trimmed) ? trimmed : 'file';
 }
 
 /** A human size: "240 KB", "1.4 MB". */

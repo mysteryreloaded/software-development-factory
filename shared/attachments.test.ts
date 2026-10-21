@@ -52,6 +52,12 @@ describe('cleanName', () => {
     expect(cleanName('a'.repeat(100) + '.txt')).toHaveLength(80);
   });
 
+  it('keeps the extension when cutting a long name to length', () => {
+    const cut = cleanName('a'.repeat(100) + '.pdf');
+    expect(cut).toHaveLength(80);
+    expect(cut.endsWith('.pdf')).toBe(true);
+  });
+
   it('never returns empty', () => {
     expect(cleanName('')).toBe('file');
     expect(cleanName('***')).toBe('file');
