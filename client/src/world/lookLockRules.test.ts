@@ -55,19 +55,23 @@ describe('shouldGrabLook', () => {
 
 describe('shouldReleaseLock', () => {
   it('keeps a lock held in first person with no arrival', () => {
-    expect(shouldReleaseLock(true, true)).toBe(false);
+    expect(shouldReleaseLock(true, true, false)).toBe(false);
   });
 
   it('releases a lock in the overview, the building view or the follow cam', () => {
-    expect(shouldReleaseLock(true, false)).toBe(true);
+    expect(shouldReleaseLock(true, false, false)).toBe(true);
   });
 
   it('releases a lock that landed mid-arrival (first person, but not yet allowed)', () => {
-    expect(shouldReleaseLock(true, false)).toBe(true);
+    expect(shouldReleaseLock(true, false, false)).toBe(true);
   });
 
   it('does nothing when there is no lock to release', () => {
-    expect(shouldReleaseLock(false, true)).toBe(false);
-    expect(shouldReleaseLock(false, false)).toBe(false);
+    expect(shouldReleaseLock(false, true, false)).toBe(false);
+    expect(shouldReleaseLock(false, false, false)).toBe(false);
+  });
+
+  it('keeps a lock held in a view while photo mode is on (its own free camera owns it)', () => {
+    expect(shouldReleaseLock(true, false, true)).toBe(false);
   });
 });

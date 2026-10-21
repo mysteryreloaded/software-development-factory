@@ -350,7 +350,7 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       useStore.getState().setLocked(locked);
       // A lock that landed (or still holds) outside first person hides the cursor with no way to pick a floor:
       // release it at once (the overview, the building view, the follow cam, or mid-arrival to one of them).
-      if (shouldReleaseLock(locked, lookAllowed())) document.exitPointerLock();
+      if (shouldReleaseLock(locked, lookAllowed(), photoActive())) document.exitPointerLock();
     };
     const onMove = (e: MouseEvent) => {
       if (document.pointerLockElement !== gl.domElement || !document.hasFocus() || photoActive()) return;

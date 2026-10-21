@@ -20,8 +20,9 @@ export function shouldGrabLook(prev: Covering, next: Covering, opts: { started: 
 
 /**
  * The cursor guard: a pointer lock landing (or still held) outside first person hides the mouse with no way to
- * click a floor in the overview or the building view. Release it at once whenever that happens.
+ * click a floor in the overview or the building view. Release it at once whenever that happens — unless photo
+ * mode is on, which locks the same canvas for its own free camera (PhotoScene.tsx) regardless of the rig's mode.
  */
-export function shouldReleaseLock(locked: boolean, lookAllowed: boolean): boolean {
-  return locked && !lookAllowed;
+export function shouldReleaseLock(locked: boolean, lookAllowed: boolean, photo: boolean): boolean {
+  return locked && !lookAllowed && !photo;
 }
