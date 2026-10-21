@@ -18,7 +18,7 @@ import { PaintedTexture } from './paint/painter';
 import { BLOOM } from './gfx/bloomMarks';
 import { DeskGlow } from './gfx/ScreenGlow';
 import { DeskLamp } from './DeskLamp';
-import { deskLampLit } from './deskLamp';
+import { deskLampLit } from './deskLampRule';
 import { shade, toon } from './materials';
 import { deskMug, subscribeMugs } from './people';
 import { MUG_SIZE, MugLook, mugColor } from './toys/mugLook';

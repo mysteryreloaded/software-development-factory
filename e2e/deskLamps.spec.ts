@@ -15,7 +15,7 @@ const lamps = (page: Page) => page.evaluate(() => (window as unknown as { __swar
 // Floor 1, on the open wood floor facing the front desk row.
 const SPOT: SavedView = { floor: 1, x: -4, z: 8.5, yaw: 0, pitch: -0.1 };
 
-test('lights up over the busy desks, matching the sign, first person and from the overview', async ({ page }) => {
+test('lights up over the busy desks, matching the sign, first person and from the overview', async ({ page }, testInfo) => {
   await startAt(page, SPOT);
   await enterOffice(page);
 
@@ -27,11 +27,11 @@ test('lights up over the busy desks, matching the sign, first person and from th
     }, { timeout: 60_000 })
     .toBe('match');
 
-  await page.screenshot({ path: 'e2e/screenshots/deskLamps-first-person.png' });
+  await page.screenshot({ path: testInfo.outputPath('deskLamps-first-person.png') });
 
   await page.keyboard.press('Tab');
   await expect.poll(async () => (await page.evaluate(() => (window as unknown as { __swarmCamera: { state: () => { mode: string; flying: boolean } } }).__swarmCamera.state())).mode, { timeout: 60_000 }).toBe('overview');
   await expect.poll(async () => (await page.evaluate(() => (window as unknown as { __swarmCamera: { state: () => { mode: string; flying: boolean } } }).__swarmCamera.state())).flying, { timeout: 60_000 }).toBe(false);
 
-  await page.screenshot({ path: 'e2e/screenshots/deskLamps-overview.png' });
+  await page.screenshot({ path: testInfo.outputPath('deskLamps-overview.png') });
 });

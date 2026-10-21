@@ -5,7 +5,7 @@
 import { useEffect } from 'react';
 import * as THREE from 'three';
 import { markBloom } from './gfx/bloomMarks';
-import { DESK_LAMP } from './deskLamp';
+import { DESK_LAMP } from './deskLampRule';
 
 const noRaycast = () => null;
 
@@ -38,6 +38,25 @@ function warmPoolTexture() {
   ctx.fillRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** The beam cone's own texture: even all round (it only varies down the cylinder's V axis), bright at the shade's
+ * mouth and fading to nothing at the floor. */
+function beamTexture() {
+  const c = document.createElement('canvas');
+  c.width = 1;
+  c.height = 128;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, 0, 128);
+  g.addColorStop(0, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.35)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 1, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
   return tex;
 }
 
@@ -77,7 +96,7 @@ function parts(): Parts {
 
   const tex = warmPoolTexture();
   const beamMaterial = new THREE.MeshBasicMaterial({
-    map: tex,
+    map: beamTexture(),
     color: '#ffdca8',
     transparent: true,
     opacity: 0.16,

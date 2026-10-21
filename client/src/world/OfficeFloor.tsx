@@ -8,7 +8,7 @@ import { ActivityIcon } from './ActivityIcon';
 import { ActivityTicker } from './ActivityTicker';
 import { AppMonitor } from './AppMonitor';
 import { Desk } from './Desk';
-import { deskLampLit } from './deskLamp';
+import { deskLampLit } from './deskLampRule';
 import { setDeskLampBusy } from './DeskLamp';
 import { drawSign } from './draw';
 import { Elevator } from './Elevator';

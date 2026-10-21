@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentStatus } from '../../../shared/types.ts';
 import { DESK, deskPosition, SEATS } from './layout.ts';
-import { DESK_LAMP, deskLampLit, DOLLHOUSE_CUT, nearestCeilingLampDistance, SHADE_CLEARANCE_ABOVE } from './deskLamp.ts';
+import { DESK_LAMP, deskLampLit, DOLLHOUSE_CUT, nearestCeilingLampDistance, SHADE_CLEARANCE_ABOVE } from './deskLampRule.ts';
 
 describe('deskLampLit', () => {
   it('lights a desk while its agent is setting up or working', () => {
