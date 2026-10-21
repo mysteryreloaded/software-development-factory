@@ -344,16 +344,17 @@ test.describe('phone HUD layout round 4: desktop stays unaffected', () => {
   });
 });
 
-// Issue #44 round 5: the roof (in scope since the issue's "every floor kind (lobby, an office floor, the roof)")
+// Issue #44 round 6: the roof (in scope since the issue's "every floor kind (lobby, an office floor, the roof)")
 // has its own .hud-hint, a direct child of .hud rather than nested in .aim-cards — the spec never put one of
 // those on screen on a phone before. Sitting in a deck chair shows "🪑 Sitting back · …", testing .hud > .hud-hint
 // (styles.css) the same way the lobby/floor-1 worst case above tests .hud-top: with every pill and a long floor
 // name/sub-line on screen too (the deck chairs aren't on a repo floor, but the HUD doesn't know that).
-test.describe('phone HUD layout round 5: the roof’s own hints', () => {
+test.describe('phone HUD layout round 6: the roof’s own hints', () => {
   test.use(S23);
 
-  // Deck chair 0's front spot (layout.ts's deckChairFront(0)), facing it.
-  const DECK_CHAIR_FRONT: SavedView = { floor: -1, x: 4.4, z: -3.6, yaw: 0, pitch: -0.15 };
+  // Deck chair 0's front spot (layout.ts's deckChairFront(0)), facing back at the chair (the front spot sits
+  // south of it, outside the decking, so the chair is behind-and-up from there).
+  const DECK_CHAIR_FRONT: SavedView = { floor: -1, x: 4.4, z: -3.6, yaw: 2.99, pitch: -0.48 };
 
   for (const [name, viewport] of TWO_VIEWPORTS) {
     test(`sitting in a deck chair (${name})`, async ({ page }) => {
