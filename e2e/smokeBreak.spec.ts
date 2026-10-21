@@ -29,17 +29,22 @@ const PLACES: { name: string; id: 'office-west' | 'roof'; floor: number }[] = [
 ];
 
 /** Past the table's shorter ends (it's half the bench's length), far enough that a step across to the rail doesn't
- * clip its corner (PLAYER_RADIUS), with a little to spare before the bench's own end. */
-const TABLE_CLEAR = SMOKE_TABLE.l / 2 + PLAYER_RADIUS + 0.1;
+ * clip its corner (PLAYER_RADIUS) even at travel()'s worst case: its 0.3 m catch window means "there" can be up to
+ * 0.3 m short of the actual target, so the real margin past the table needs PLAYER_RADIUS *and* that 0.3 m, plus a
+ * little to spare. This overshoots the bench's own (shorter) end, but nothing stands past it to block the walk. */
+const TABLE_CLEAR = SMOKE_TABLE.l / 2 + PLAYER_RADIUS + 0.3 + 0.1;
 
-/** The table-rail (or, on the roof, table-parapet) gap: the same width as the bench-table one, on the far side of
- * the table. Its x, centred between the table and the rail's inner face. */
+/** The table-rail (or, on the roof, table-parapet) gap, at 0.7 m the same width as the bench-table one: once the
+ * table's and the rail's own PLAYER_RADIUS margins are subtracted, only about 0.1 m of it is clear of *both* at
+ * once (collide() pads each rect by a full PLAYER_RADIUS on every side, not a rounded corner), far too little to
+ * aim for with travel()'s 0.3 m catch window. Clear of the table only needs PLAYER_RADIUS past its edge, which the
+ * rail itself already gives for free: walking until the rail stops you lands well past the table's edge too, so
+ * target the rail's own stop, not a midpoint between the two. */
 function railGapX(id: 'office-west' | 'roof') {
-  const n = nook(id);
-  if (id === 'roof') return (n.table.maxX + (ROOF_EDGE.x - ROOF_EDGE.t)) / 2;
+  if (id === 'roof') return ROOF_EDGE.x - ROOF_EDGE.t - PLAYER_RADIUS;
   const s = sideSign('west');
   const railInner = s * (BALCONY_OUT - BALCONY.railT);
-  return (n.table.minX + railInner) / 2;
+  return railInner - s * PLAYER_RADIUS;
 }
 
 /** Holds a movement key until `axis` ('x' or 'z') reaches `to`, picking whichever of `keys` actually closes the
@@ -66,6 +71,8 @@ async function travel(page: Page, axis: 'x' | 'z', to: number, keys: readonly [s
   }
   await page.keyboard.down(key);
   try {
+    // The 0.3 m catch window matters: closer than that and a tick's worth of walking (up to ~0.36 m at a 100 ms poll
+    // interval) can step clean over a narrower one between two polls, so the key never gets released at all.
     await expect.poll(async () => Math.abs((await read()) - to), { message: `travelling ${axis} to ${to.toFixed(2)}`, timeout: 60_000, intervals: [100] }).toBeLessThan(0.3);
   } finally {
     await page.keyboard.up(key);
