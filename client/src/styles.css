@@ -328,6 +328,15 @@ input.inline:focus {
 .hud > * {
   pointer-events: auto;
 }
+/* The 4 top boxes (floor card, status pills, office/usage/doctor chips, the GitHub-error banner), wrapped so a
+   phone can flow them one after another instead of floating them (@media (max-width: 700px), (max-height: 500px)
+   below). On desktop this adds no positioning of its own, so each box keeps its absolute spot against .hud. */
+.hud-top {
+  pointer-events: none;
+}
+.hud-top > * {
+  pointer-events: auto;
+}
 .hud-floor {
   position: absolute;
   top: 16px;
@@ -356,6 +365,11 @@ input.inline:focus {
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.25);
   flex: none;
 }
+/* So a long floor name/sub-line's ellipsis (below) actually shrinks the row instead of overflowing it: a
+   nowrap text's intrinsic width would otherwise keep this flex item from shrinking past it. */
+.hud-floor > div:not(.floor-num) {
+  min-width: 0;
+}
 .floor-name {
   font-weight: 700;
   font-size: 1.1rem;
@@ -366,6 +380,9 @@ input.inline:focus {
 .floor-sub {
   font-size: 0.85rem;
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hud-status {
   position: absolute;
@@ -389,6 +406,35 @@ input.inline:focus {
   font-weight: 600;
   max-width: 90vw;
 }
+@media (max-width: 700px), (max-height: 500px) {
+  .hud-top {
+    position: absolute;
+    top: max(16px, env(safe-area-inset-top));
+    left: max(16px, env(safe-area-inset-left));
+    max-width: min(520px, calc(100vw - 32px - env(safe-area-inset-right)));
+    /* However many chips stack up, leave the touch joystick and its hint (below) room on a short screen: scroll
+       rather than grow into them. */
+    max-height: calc(100vh - 200px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .hud-top .hud-floor,
+  .hud-top .hud-status,
+  .hud-top .hud-chips,
+  .hud-top .hud-banner {
+    position: static;
+    max-width: 100%;
+  }
+  .hud-top .hud-status {
+    justify-content: flex-start;
+  }
+  .hud-top .hud-banner {
+    transform: none;
+  }
+}
 /* The office updating itself: under the floor card, out of the way; opens the console. */
 .office-chip {
   position: absolute;
@@ -406,6 +452,9 @@ input.inline:focus {
   box-shadow: 0 3px 0 var(--ink);
   cursor: pointer;
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .office-chip:hover {
   transform: translateY(-1px);
@@ -458,12 +507,19 @@ input.inline:focus {
   gap: 8px;
   pointer-events: none;
 }
-@media (max-width: 700px) {
+/* Phones, both orientations (covers the HUD's and the touch controls' own max-width: 700px rules too): the top
+   boxes flow instead of floating (.hud-top below), the workers panel stays hidden, and the agent card, the toasts,
+   the phone button and the touch controls each keep a corner of their own — left for the card, above the joystick;
+   right for the toasts, above the touch buttons; the joystick and the phone button keep their usual corners. */
+@media (max-width: 700px), (max-height: 500px) {
   .aim-cards {
     top: auto;
-    bottom: 16px;
-    right: 16px;
-    width: auto;
+    bottom: calc(200px + env(safe-area-inset-bottom));
+    left: max(16px, env(safe-area-inset-left));
+    right: auto;
+    width: min(240px, calc(100vw - 32px));
+    max-height: calc(100vh - 216px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
   }
 }
 .agent-card {
@@ -967,7 +1023,7 @@ input.inline:focus {
   background: rgba(31, 29, 43, 0.08);
   color: var(--ink);
 }
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) {
   .workers {
     display: none;
   }
@@ -981,6 +1037,18 @@ input.inline:focus {
   border-radius: 12px;
   padding: 6px 10px;
   pointer-events: none;
+}
+@media (max-width: 700px), (max-height: 500px) {
+  .hud-help {
+    /* Above the joystick (TouchControls.tsx's .touch-stick), not under it; .hud-top's own max-height (above)
+       keeps it from growing down into this on a short screen. */
+    bottom: calc(144px + env(safe-area-inset-bottom));
+    left: max(16px, env(safe-area-inset-left));
+    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 /* `?stats` readout: tucked into the top-left corner above everything, including open panels */
 .stats {
@@ -1026,6 +1094,7 @@ input.inline:focus {
   z-index: 40;
 }
 .toast {
+  max-width: 100%;
   background: var(--paper);
   border: 3px solid var(--ink);
   border-radius: 14px;
@@ -1033,6 +1102,7 @@ input.inline:focus {
   padding: 10px 14px;
   font-weight: 500;
   cursor: pointer;
+  overflow-wrap: anywhere;
   animation: pop 0.25s ease-out;
 }
 .toast-success {
@@ -2855,6 +2925,18 @@ input.inline:focus {
 .toasts {
   bottom: 88px;
 }
+@media (max-width: 700px), (max-height: 500px) {
+  .toasts {
+    /* Above the touch buttons (TouchControls.tsx's .touch-buttons), not under them. Several toasts stacked (each
+       one auto-dismisses after a few seconds: store.ts's pushToast) can grow taller than a short screen has room
+       for above that anchor: scroll instead of running past the top edge. */
+    bottom: calc(140px + env(safe-area-inset-bottom));
+    right: max(16px, env(safe-area-inset-right));
+    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    max-height: calc(100vh - 156px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overflow-y: auto;
+  }
+}
 .phone-btn {
   position: absolute;
   right: 16px;
@@ -2875,6 +2957,12 @@ input.inline:focus {
 }
 .phone-btn:hover {
   transform: translateY(-1px);
+}
+@media (max-width: 700px), (max-height: 500px) {
+  .phone-btn {
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
 }
 .phone-btn-icon {
   font-size: 1.7rem;
