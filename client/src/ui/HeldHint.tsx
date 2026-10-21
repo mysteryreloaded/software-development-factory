@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { CHARGE, chargePower } from '../world/toys/hands';
 import { BlasterHud } from './BlasterHud';
@@ -34,6 +34,14 @@ function ChargeMeter({ at }: { at: number }) {
 export function HeldHint() {
   const held = useStore((s) => s.held);
   const chargeAt = useStore((s) => s.chargeAt);
+  // An ice cream keeps melting while held, which this hint's countdown needs to show without waiting for `held`
+  // itself to change (it only does on a bite or a drop).
+  const [, retick] = useState(0);
+  useEffect(() => {
+    if (!(held?.kind === 'snack' && held.snack === 'icecream')) return;
+    const id = setInterval(() => retick((n) => (n + 1) % 1_000_000), 250);
+    return () => clearInterval(id);
+  }, [held]);
   if (!held) return null;
   if (held.kind === 'blaster') return <BlasterHud held={held} />;
   if (held.kind === 'sausage') {

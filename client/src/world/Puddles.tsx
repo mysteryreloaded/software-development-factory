@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { fridgeNow, puddleFade, puddlesOf, type Puddle } from './fridge';
-import { toon } from './materials';
+import { ramp } from './materials';
 
 // What's left of a melted ice cream (fridge.ts has the rules: at most PUDDLE.cap on a floor, the oldest going first,
 // each one drying up after PUDDLE.life seconds): a flat irregular cream/pink blob with a soggy cone on top, fading
@@ -21,13 +21,28 @@ BLOB.computeVertexNormals();
 const CONE = new THREE.ConeGeometry(0.05, 0.09, 8);
 
 function PuddleBlob({ puddle }: { puddle: Puddle }) {
-  const [fade, setFade] = useState(1);
-  useFrame(() => setFade(puddleFade(puddle, fridgeNow())));
-  if (fade <= 0) return null;
+  // Its own materials, not the shared `toon()` cache: the fade changes every frame, and keying the cache on
+  // opacity would mint (and never free) a fresh cached material each frame instead of reusing one.
+  const blobMat = useMemo(() => new THREE.MeshToonMaterial({ color: '#ffe8f0', gradientMap: ramp, transparent: true, opacity: 0.85 }), []);
+  const coneMat = useMemo(() => new THREE.MeshToonMaterial({ color: '#fff5e6', gradientMap: ramp, transparent: true, opacity: 0.85 }), []);
+  useEffect(
+    () => () => {
+      blobMat.dispose();
+      coneMat.dispose();
+    },
+    [blobMat, coneMat],
+  );
+  const group = useRef<THREE.Group>(null);
+  useFrame(() => {
+    const fade = puddleFade(puddle, fridgeNow());
+    blobMat.opacity = 0.85 * fade;
+    coneMat.opacity = 0.85 * fade;
+    if (group.current) group.current.visible = fade > 0;
+  });
   return (
-    <group position={[puddle.x, 0.004, puddle.z]} rotation={[0, (puddle.bornAt * 37) % (Math.PI * 2), 0]} scale={0.35}>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} geometry={BLOB} material={toon('#ffe8f0', { transparent: true, opacity: 0.85 * fade })} renderOrder={1} />
-      <mesh position={[0, 0.1, 0]} rotation={[Math.PI, 0, 0]} geometry={CONE} material={toon('#fff5e6', { transparent: true, opacity: 0.85 * fade })} />
+    <group ref={group} position={[puddle.x, 0.004, puddle.z]} rotation={[0, (puddle.bornAt * 37) % (Math.PI * 2), 0]} scale={0.35}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} geometry={BLOB} material={blobMat} renderOrder={1} />
+      <mesh position={[0, 0.1, 0]} rotation={[Math.PI, 0, 0]} geometry={CONE} material={coneMat} />
     </group>
   );
 }

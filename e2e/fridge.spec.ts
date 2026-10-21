@@ -22,8 +22,11 @@ async function eat(page: import('@playwright/test').Page, left: number | null) {
   await expect.poll(async () => (await toys(page)).sipping).toBe(false);
 }
 
-// Floor 1's kitchenette (east wall): stand west of the fridge, facing east (+x), looking a little down at its door.
-const FRIDGE_SPOT: SavedView = { floor: 1, x: HALF_W - 1.65, z: 9.45, yaw: -Math.PI / 2, pitch: -0.4 };
+// Floor 1's kitchenette (east wall): stand west of the fridge, facing east (+x), looking down at its door (the
+// fridge is the lower compartment, its door centred well below eye height).
+const FRIDGE_SPOT: SavedView = { floor: 1, x: HALF_W - 1.65, z: 9.45, yaw: -Math.PI / 2, pitch: -0.87 };
+// Once the fridge door's open, aim a little off its hinge side to clear the swung-open panel and see the bar shelf.
+const BAR_SHELF_SPOT: SavedView = { floor: 1, x: HALF_W - 1.65, z: 9.45, yaw: -1.4925, pitch: -0.6 };
 
 test('aiming at the fridge and pressing E opens it', async ({ page }) => {
   await startAt(page, FRIDGE_SPOT);
@@ -34,6 +37,16 @@ test('aiming at the fridge and pressing E opens it', async ({ page }) => {
   await expect(page.getByText('Close the fridge')).toBeVisible();
   await page.keyboard.press('e');
   await expect.poll(async () => (await fridge(page)).fridgeOpen).toBe(false);
+});
+
+test('aiming at a shelf and pressing E takes a snack, with the opening free once the door is open', async ({ page }) => {
+  await startAt(page, BAR_SHELF_SPOT);
+  await enterOffice(page);
+  await act(page, 'fridge'); // the door itself is covered by fridge.spec.ts's own aiming test
+  await expect.poll(async () => (await fridge(page)).fridgeOpen).toBe(true);
+  await expect(page.getByText(/Take a protein bar/)).toBeVisible({ timeout: 30_000 });
+  await page.keyboard.press('e');
+  await expect.poll(async () => (await toys(page)).held).toMatchObject({ kind: 'snack', snack: 'bar', left: 3 });
 });
 
 test('a protein bar is three bites, then gone with no puddle', async ({ page }) => {

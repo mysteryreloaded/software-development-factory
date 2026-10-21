@@ -31,13 +31,14 @@ const INK = '#1f1d2b';
 const OPEN_ANGLE = (100 * Math.PI) / 180;
 const OPEN_S = 0.35;
 
-// The fridge's footprint: 0.8 (x, depth) by 2 (y, height) by 0.8 (z, width), split into the freezer on top and the
-// fridge below. `position` is its base centre on the floor (y = 0 at the kitchenette's counter level).
+// The fridge's footprint: 0.8 (x, depth) by 2 (y, height) by 0.8 (z, width), split into the fridge below and the
+// freezer on top. `position` is its base centre on the floor (y = 0 at the kitchenette's counter level).
 const DEPTH = 0.8;
 const WIDTH = 0.8;
 const FREEZER_H = 0.6;
 const FRIDGE_H = 1.4;
 const FRONT_X = -DEPTH / 2;
+const WALL = 0.03;
 
 let fridgeOpen = false;
 let freezerOpen = false;
@@ -171,12 +172,12 @@ const ICE_POS: [number, number, number][] = [-0.18, 0, 0.18].map((z) => [-0.18, 
 function Door({ y, height, x, width, open, pos, label, action }: { y: number; height: number; x: number; width: number; open: boolean; pos: Vec3; label: string; action: { kind: 'fridge'; op: 'door' | 'freezer' } }) {
   const swing = useRef<THREE.Group>(null);
   const t = useRef(open ? 1 : 0);
-  // The hit box stays put (facing you, like the closed door) even once the panel swings open and out of your
-  // crosshair: otherwise there'd be nothing left to aim E at to shut it again.
+  // The hit box rides the swinging panel, not the fixed frame: closed, it faces you like the door; opened, it
+  // swings away with the panel so the opening (and the shelves behind it) is free to aim at.
   const ref = useInteractable<THREE.Group>({ id: `fridge:${action.op}`, label, action }, 2.6);
   useFrame((_, dt) => {
     t.current = Math.min(1, Math.max(0, t.current + (open ? dt : -dt) / OPEN_S));
-    if (swing.current) swing.current.rotation.y = -t.current * OPEN_ANGLE;
+    if (swing.current) swing.current.rotation.y = t.current * OPEN_ANGLE;
   });
   useEffect(() => {
     if (swing.current) {
@@ -189,12 +190,12 @@ function Door({ y, height, x, width, open, pos, label, action }: { y: number; he
   }, [pos, width]);
   return (
     <group position={[x, y, 0]}>
-      <group ref={ref}>
-        <mesh visible={false}>
-          <boxGeometry args={[0.12, height, width]} />
-        </mesh>
-      </group>
       <group ref={swing} position={[0, 0, width / 2]}>
+        <group ref={ref} position={[0, 0, -width / 2]}>
+          <mesh visible={false}>
+            <boxGeometry args={[0.12, height, width]} />
+          </mesh>
+        </group>
         <mesh position={[0, 0, -width / 2]} material={toon('#f1f3f5')} castShadow>
           <boxGeometry args={[0.06, height, width]} />
           <Outlines thickness={0.014} color={INK} />
@@ -204,6 +205,35 @@ function Door({ y, height, x, width, open, pos, label, action }: { y: number; he
         </mesh>
       </group>
     </group>
+  );
+}
+
+/** A hollow compartment's walls (back, sides, top, bottom), open at -x where its door swings: so what's on the
+ * shelves inside, and the glow of its light, actually show once the door is open. */
+function CabinetWalls({ bottom, top, color }: { bottom: number; top: number; color: string }) {
+  const mat = toon(color);
+  const mid = (bottom + top) / 2;
+  const height = top - bottom;
+  return (
+    <>
+      <mesh position={[DEPTH / 2 - WALL / 2, mid, 0]} material={mat} castShadow>
+        <boxGeometry args={[WALL, height, WIDTH]} />
+        <Outlines thickness={0.018} color={INK} />
+      </mesh>
+      <mesh position={[0, mid, -WIDTH / 2 + WALL / 2]} material={mat} castShadow>
+        <boxGeometry args={[DEPTH, height, WALL]} />
+      </mesh>
+      <mesh position={[0, mid, WIDTH / 2 - WALL / 2]} material={mat} castShadow>
+        <boxGeometry args={[DEPTH, height, WALL]} />
+      </mesh>
+      <mesh position={[0, top - WALL / 2, 0]} material={mat} castShadow>
+        <boxGeometry args={[DEPTH, WALL, WIDTH]} />
+        <Outlines thickness={0.018} color={INK} />
+      </mesh>
+      <mesh position={[0, bottom + WALL / 2, 0]} material={mat} castShadow>
+        <boxGeometry args={[DEPTH, WALL, WIDTH]} />
+      </mesh>
+    </>
   );
 }
 
@@ -241,29 +271,23 @@ export function Fridge({ position, floor }: { position: [number, number, number]
 
   return (
     <group position={position}>
-      {/* the cabinet: freezer on top, fridge below */}
-      <mesh position={[0, FREEZER_H + FRIDGE_H / 2, 0]} material={toon('#dee2e6')} castShadow>
-        <boxGeometry args={[DEPTH, FRIDGE_H, WIDTH]} />
-        <Outlines thickness={0.018} color={INK} />
-      </mesh>
-      <mesh position={[0, FREEZER_H / 2, 0]} material={toon('#ced4da')} castShadow>
-        <boxGeometry args={[DEPTH, FREEZER_H, WIDTH]} />
-        <Outlines thickness={0.018} color={INK} />
-      </mesh>
+      {/* the hollow cabinet, open at -x: fridge below, freezer on top */}
+      <CabinetWalls bottom={0} top={FRIDGE_H} color="#ced4da" />
+      <CabinetWalls bottom={FRIDGE_H} top={FRIDGE_H + FREEZER_H} color="#dee2e6" />
       {/* the inside light, on with the door */}
-      <group position={[0, FREEZER_H + FRIDGE_H / 2, 0]} visible={open.fridge}>
+      <group position={[0, FRIDGE_H / 2, 0]} visible={open.fridge}>
         <mesh material={glow('#fff9db')}>
           <boxGeometry args={[0.02, FRIDGE_H - 0.1, WIDTH - 0.1]} />
         </mesh>
       </group>
-      <group position={[0, FREEZER_H / 2, 0]} visible={open.freezer}>
+      <group position={[0, FRIDGE_H + FREEZER_H / 2, 0]} visible={open.freezer}>
         <mesh material={glow('#d0ebff')}>
           <boxGeometry args={[0.02, FREEZER_H - 0.08, WIDTH - 0.1]} />
         </mesh>
       </group>
 
-      <Door y={FREEZER_H + FRIDGE_H / 2} height={FRIDGE_H - 0.02} x={FRONT_X} width={WIDTH} open={open.fridge} pos={fridgeSpot} label={open.fridge ? 'Close the fridge' : 'Open the fridge'} action={{ kind: 'fridge', op: 'door' }} />
-      <Door y={FREEZER_H / 2} height={FREEZER_H - 0.02} x={FRONT_X} width={WIDTH} open={open.freezer} pos={freezerSpot} label={open.freezer ? 'Close the freezer' : 'Open the freezer'} action={{ kind: 'fridge', op: 'freezer' }} />
+      <Door y={FRIDGE_H / 2} height={FRIDGE_H - 0.02} x={FRONT_X} width={WIDTH} open={open.fridge} pos={fridgeSpot} label={open.fridge ? 'Close the fridge' : 'Open the fridge'} action={{ kind: 'fridge', op: 'door' }} />
+      <Door y={FRIDGE_H + FREEZER_H / 2} height={FREEZER_H - 0.02} x={FRONT_X} width={WIDTH} open={open.freezer} pos={freezerSpot} label={open.freezer ? 'Close the freezer' : 'Open the freezer'} action={{ kind: 'fridge', op: 'freezer' }} />
 
       {open.fridge && (
         <>

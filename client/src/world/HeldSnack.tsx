@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useStore } from '../store';
@@ -22,6 +22,14 @@ export function HeldSnack() {
   const held = useStore((s) => (s.held?.kind === 'snack' ? s.held : null));
   const root = useRef<THREE.Group>(null);
   const hand = useRef<THREE.Group>(null);
+  // An ice cream keeps sagging while held, which needs a re-render to show without waiting for `held` itself to
+  // change (it only does on a bite or a drop).
+  const [, retick] = useState(0);
+  useEffect(() => {
+    if (held?.snack !== 'icecream') return;
+    const id = setInterval(() => retick((n) => (n + 1) % 1_000_000), 250);
+    return () => clearInterval(id);
+  }, [held]);
   useFrame(({ camera }) => {
     const r = root.current;
     const h = hand.current;
