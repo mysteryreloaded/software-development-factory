@@ -15,6 +15,17 @@ function shortName(fullName: string) {
   return fullName.split('/')[1] ?? fullName;
 }
 
+/**
+ * Waits for the panel's pop-in CSS animation to actually finish (via Element.getAnimations(), not a
+ * wall-clock guess: under load its nominal 0.2s can stretch well past that and a fixed timeout flakes).
+ */
+async function waitForPanelToSettle(page: import('@playwright/test').Page) {
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.panel');
+    return !el || el.getAnimations().every((a) => a.playState !== 'running');
+  });
+}
+
 test('‹ › and ← → flip through every floor\'s Kanban board, wrapping around', async ({ page, request }) => {
   const sorted = await floors(request);
   expect(sorted.length).toBeGreaterThanOrEqual(2);
@@ -35,8 +46,8 @@ test('‹ › and ← → flip through every floor\'s Kanban board, wrapping aro
   const next = page.getByRole('button', { name: 'Next floor' });
   const prev = page.getByRole('button', { name: 'Previous floor' });
 
-  // Wait out the panel's 0.2s pop-in animation so the "before" measurement isn't taken mid-transform.
-  await page.waitForTimeout(300);
+  // Wait out the panel's pop-in animation so the "before" measurement isn't taken mid-transform.
+  await waitForPanelToSettle(page);
   const nextBoxBefore = await next.boundingBox();
 
   await next.click();
