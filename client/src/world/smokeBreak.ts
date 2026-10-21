@@ -28,8 +28,12 @@ function buildNook(id: NookId, bench: Rect, table: Rect): SmokeNook {
   const bz = (bench.minZ + bench.maxZ) / 2;
   const xs = [bench.minX, bench.maxX, table.minX, table.maxX].sort((a, b) => a - b);
   const gap: Rect = { minX: xs[1], maxX: xs[2], minZ: bench.minZ, maxZ: bench.maxZ };
-  const seatX = (gap.minX + gap.maxX) / 2;
-  const yaw = seatX < 0 ? Math.PI / 2 : -Math.PI / 2;
+  const benchCx = (bench.minX + bench.maxX) / 2;
+  const tableCx = (table.minX + table.maxX) / 2;
+  const toward = Math.sign(tableCx - benchCx) || 1; // which way the table (and so the view) is, from the bench
+  // On the bench itself (Outside.tsx's furnitureGeometry seatX), nudged a touch towards the gap, not floating in it.
+  const seatX = benchCx + toward * 0.04;
+  const yaw = toward < 0 ? Math.PI / 2 : -Math.PI / 2;
   return { id, bench, table, gap, yaw, seats: [{ x: seatX, z: bz - 0.45 }, { x: seatX, z: bz + 0.45 }] };
 }
 

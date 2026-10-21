@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { PLAYER_RADIUS, collide } from './layout';
+import { THEME_IDS } from '../../../shared/themes';
+import { BALCONY, BALCONY_OUT, PLAYER_RADIUS, ROOF_EDGE, collide, decorSlots, outsideColliders, roofColliders } from './layout';
+import { decorColliders } from './themes/themes';
 import {
   GO_OUT_MS,
   LIGHT_MS,
@@ -11,10 +13,15 @@ import {
   addButt,
   inGap,
   newSmoke,
+  nook,
   pressE,
   standUpSmoke,
   tickSmoke,
 } from './smokeBreak';
+
+const overlaps = (a: { minX: number; maxX: number; minZ: number; maxZ: number }, b: typeof a) => a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ;
+/** A decor slot (a point, maybe turned) as a small rect, the way themes.ts's decorColliders sizes an item there. */
+const slotRect = (x: number, z: number, w = 0.5) => ({ minX: x - w / 2, maxX: x + w / 2, minZ: z - w / 2, maxZ: z + w / 2 });
 
 const run = (ms: number, now: number) => {
   let t = now;
@@ -139,6 +146,21 @@ describe('smokeBreak nooks', () => {
     }
   });
 
+  it('walks the table-rail (or, on the roof, table-parapet) gap too, not just the bench-table one', () => {
+    for (const n of NOOKS) {
+      const rects = n.id === 'roof' ? roofColliders() : outsideColliders('office');
+      const toward = n.id === 'office-west' ? -1 : 1; // which way the table (and the rail beyond it) is from the bench
+      const railInner = n.id === 'roof' ? ROOF_EDGE.x - ROOF_EDGE.t : toward * (BALCONY_OUT - BALCONY.railT);
+      const tableFar = toward > 0 ? n.table.maxX : n.table.minX;
+      const gapX = (tableFar + railInner) / 2;
+      for (let z = n.table.minZ + 0.05; z <= n.table.maxZ - 0.05; z += 0.1) {
+        const out = collide(gapX, z, rects);
+        expect(out.x, `${n.id} z=${z}`).toBeCloseTo(gapX);
+        expect(out.z, `${n.id} z=${z}`).toBeCloseTo(z);
+      }
+    }
+  });
+
   it('seats sit within the gap, centred on the bench, 0.9 m apart', () => {
     for (const n of NOOKS) {
       for (const seat of n.seats) {
@@ -158,12 +180,50 @@ describe('smokeBreak nooks', () => {
   });
 
   it("no nook's bench or table overlaps another nook's", () => {
-    const overlaps = (a: { minX: number; maxX: number; minZ: number; maxZ: number }, b: typeof a) => a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ;
     for (let i = 0; i < NOOKS.length; i++) {
       for (let j = i + 1; j < NOOKS.length; j++) {
         expect(overlaps(NOOKS[i].bench, NOOKS[j].bench)).toBe(false);
         expect(overlaps(NOOKS[i].table, NOOKS[j].table)).toBe(false);
       }
+    }
+  });
+
+  const same = (a: { minX: number; maxX: number; minZ: number; maxZ: number }, b: typeof a) => a.minX === b.minX && a.maxX === b.maxX && a.minZ === b.minZ && a.maxZ === b.maxZ;
+
+  it("the office nooks' table doesn't overlap the balcony's planters or the lobby-style decor slots", () => {
+    for (const n of NOOKS) {
+      if (n.id === 'roof') continue;
+      for (const r of outsideColliders('office')) {
+        if (same(r, n.table) || same(r, n.bench)) continue; // its own furniture
+        expect(overlaps(n.table, r), n.id).toBe(false);
+        expect(overlaps(n.bench, r), n.id).toBe(false);
+      }
+      for (const slot of decorSlots('office')) {
+        if (!slot.id.startsWith('balcony-')) continue; // the only office slots anywhere near a balcony
+        expect(overlaps(n.table, slotRect(slot.x, slot.z)), `${n.id} ${slot.id}`).toBe(false);
+        expect(overlaps(n.bench, slotRect(slot.x, slot.z)), `${n.id} ${slot.id}`).toBe(false);
+      }
+    }
+  });
+
+  it("no theme's decoration ends up inside the office nooks' table or bench", () => {
+    for (const n of NOOKS) {
+      if (n.id === 'roof') continue;
+      for (const id of THEME_IDS) {
+        for (const r of decorColliders(id, 'office')) {
+          expect(overlaps(n.table, r), `${n.id} ${id}`).toBe(false);
+          expect(overlaps(n.bench, r), `${n.id} ${id}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("the roof nook's bench and table don't overlap any of the roof's other things", () => {
+    const roof = nook('roof');
+    const others = roofColliders().filter((r) => r !== roof.bench && r !== roof.table);
+    for (const r of others) {
+      expect(overlaps(roof.bench, r)).toBe(false);
+      expect(overlaps(roof.table, r)).toBe(false);
     }
   });
 });
