@@ -1599,6 +1599,37 @@ input.inline:focus {
 
 /* ---------- kanban overlay ---------- */
 
+/* Floor-flipping arrows in the panel title (KanbanView.tsx): the title row overrides panel-title's own
+   ellipsis/nowrap so the arrows don't clip, and the name span truncates instead. */
+.panel-title:has(.kanban-title-row) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: visible;
+  white-space: normal;
+  text-overflow: unset;
+}
+.kanban-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.kanban-title-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kanban-arrow {
+  flex: none;
+  font-size: 1.2rem;
+  line-height: 1;
+  padding: 0;
+}
+
 .kanban-toolbar {
   display: flex;
   gap: 12px;
