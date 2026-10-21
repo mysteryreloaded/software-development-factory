@@ -161,6 +161,7 @@ export function setJukeboxVolume(n: number) {
   const floor = floorNow;
   const from = levelFor(floor);
   const v = clampJukeboxLevel(n);
+  if (from === OFF_LEVEL && v === OFF_LEVEL) return; // off, pressed -: no sound
   volumeClick(v, v !== from);
   if (v === from) return;
   setLevel(floor, v);

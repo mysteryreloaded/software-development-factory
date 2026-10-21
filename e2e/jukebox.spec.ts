@@ -24,8 +24,17 @@ const press = (page: Page, op: string) => page.evaluate((o) => (window as unknow
 
 /** Rides the elevator to floor `n` (the roof's own probe rides it to any floor) and waits for the jukebox to follow. */
 async function goToFloor(page: Page, n: number) {
-  await page.evaluate((f) => (window as unknown as { __swarmRoof: { go(n: number): void } }).__swarmRoof.go(f), n);
-  await expect.poll(async () => (await jukebox(page)).floor).toBe(n);
+  // go() is dropped while the store is mid-travel (client/src/store.ts), so poll-and-repeat until it lands.
+  await expect
+    .poll(
+      async () => {
+        await page.evaluate((f) => (window as unknown as { __swarmRoof: { go(n: number): void } }).__swarmRoof.go(f), n);
+        return (await jukebox(page)).floor;
+      },
+      { timeout: 15000 },
+    )
+    .toBe(n);
+  await expect(page.locator('.fade-label')).toHaveCount(0);
 }
 
 const spot: SavedView = { floor: 1, x: 0, z: -7, yaw: 0, pitch: 0.15 };
