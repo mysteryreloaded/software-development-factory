@@ -35,11 +35,21 @@ test('‹ › and ← → flip through every floor\'s Kanban board, wrapping aro
   const next = page.getByRole('button', { name: 'Next floor' });
   const prev = page.getByRole('button', { name: 'Previous floor' });
 
+  // Wait out the panel's 0.2s pop-in animation so the "before" measurement isn't taken mid-transform.
+  await page.waitForTimeout(300);
+  const nextBoxBefore = await next.boundingBox();
+
   await next.click();
   await expect(panelTitle).toContainText(shortName(floor2.fullName));
   await expect(panelTitle).toContainText(`Floor ${floor2.floor}`);
   await expect(page.locator('.panel')).toBeVisible(); // the panel never closed
   await expect(next).toBeFocused();
+
+  // The arrow stays put when floor names differ in length, so a second click on the same spot lands.
+  const nextBoxAfter = await next.boundingBox();
+  expect(nextBoxBefore).not.toBeNull();
+  expect(nextBoxAfter).not.toBeNull();
+  expect(Math.abs(nextBoxAfter!.x - nextBoxBefore!.x)).toBeLessThanOrEqual(1);
 
   await prev.click();
   await expect(panelTitle).toContainText(shortName(floor1.fullName));
