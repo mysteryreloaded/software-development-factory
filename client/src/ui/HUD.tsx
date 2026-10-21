@@ -202,10 +202,7 @@ export function HUD() {
       {/* the centre dot (Settings → Accessibility) is a bolder crosshair that stays through the elevator's fade too */}
       {started && !overlay && (!travel || centerDot) && onFoot && !scope && held?.kind !== 'paddle' && <div className={`crosshair ${focus ? 'crosshair-hot' : ''} ${centerDot ? 'crosshair-dot' : ''}`} />}
       {started && !overlay && !travel && onFoot && <RoofHud />}
-      {/* On touch, .touch-btn-use already shows focus.label: skip the floating hint too when it would say nothing
-          more than that (there's no clear room for it beside .hud-top and the touch controls — issue #44 round 2),
-          but keep it for the sip/drop nuance the button doesn't carry. */}
-      {started && !overlay && onFoot && (focus || sip) && (!touchOn || sip || dropLabel) && (
+      {started && !overlay && onFoot && (focus || sip) && (
         <div className="hud-hint">
           {touchOn ? (
             'Tap '

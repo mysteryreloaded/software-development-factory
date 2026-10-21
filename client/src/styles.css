@@ -509,6 +509,12 @@ input.inline:focus {
     white-space: normal;
     text-align: center;
   }
+  /* TouchControls.tsx's on-screen buttons (Use, Throw, Drop) already say whatever this would (HeldHint.tsx's own
+     hud-hint included): with .touch-controls on screen there's no text here that isn't already on a button, and
+     no safe spot for it beside .hud-top and those controls on a short screen either (issue #44 round 2). */
+  .hud:has(.touch-controls) .hud-hint {
+    display: none;
+  }
 }
 /* The cards for whoever you're looking at (ui/AgentCard.tsx, then the career peek in ui/CareerCard.tsx): docked at
    the left edge, under the floor card's chips, so the monitor you're watching in the middle stays clear. */
@@ -2976,22 +2982,35 @@ input.inline:focus {
    issue #44's round 2 found a toast landing on a grown Throw/Drop/Reload column. */
 @media (max-height: 500px) {
   /* Landscape phones: .touch-buttons below is a single row here (still at its usual bottom: 76px, clearing the
-     phone button), so one button's height is the whole clearance, not a whole column's. */
+     phone button), so one button's height is the whole clearance, not a whole column's. But .hud-top above can
+     grow (scrolling) all the way down to a fixed 184px + the bottom safe-area-inset from the viewport's bottom
+     edge (top: 16px plus its own max-height: 100vh - 200px, independent of vh — issue #44 round 3's 568x320
+     failure). The two leave only ~42px of genuinely free space on the shortest tested screens, regardless of
+     height: a fixed, small clearance (not a vh-scaled one, which only looked safe on taller test viewports)
+     that stops short of .hud-top's worst case, with .toast's own compact mobile size (below) and overflow-y:auto
+     clipping anything that still doesn't fit rather than reaching up into it. */
   .toasts {
     bottom: calc(142px + env(safe-area-inset-bottom));
     right: max(16px, env(safe-area-inset-right));
     max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
-    max-height: calc(100vh - 158px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: 38px;
     overflow-y: auto;
+  }
+  .toast {
+    padding: 4px 10px;
+    font-size: 0.78rem;
   }
 }
 @media (max-width: 700px) and (min-height: 501px) {
-  /* Portrait phones: .touch-buttons stays a column there, up to 4 buttons tall (Reload, Throw, Drop, Use). */
+  /* Portrait phones: .touch-buttons stays a column there, up to 4 buttons tall (Reload, Throw, Drop, Use), so
+     this clears a column, not a row — but a vh-scaled max-height (issue #44 round 3) grows enough on a tall
+     phone to reach .hud-top's actual content even though that content never grows with vh: a small fixed one,
+     with overflow-y:auto clipping whatever still doesn't fit, same as landscape above. */
   .toasts {
     bottom: calc(342px + env(safe-area-inset-bottom));
     right: max(16px, env(safe-area-inset-right));
     max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
-    max-height: calc(100vh - 358px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height: 110px;
     overflow-y: auto;
   }
 }

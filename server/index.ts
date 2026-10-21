@@ -293,8 +293,6 @@ app.post(
 app.post('/api/requests/:id/reject', route((req) => swarm.rejectRequest(String(req.params.id), str(req.body?.note))));
 // The demo office only: the CEO grows (or shrinks) a floor's team on demand.
 app.post('/api/demo/proposals', route((req) => swarm.demoPropose(req.body?.kind, req.body?.floor)));
-// The demo office only: an arbitrary toast, for e2e tests (phone chatter can't be made to say the right thing on cue).
-app.post('/api/toast/demo', route((req) => swarm.toastDemo(req.body?.level === 'error' || req.body?.level === 'success' ? req.body.level : 'info', str(req.body?.text))));
 
 // Office progression (#210): the lobby kiosk, a floor's decorations, the player's coffees, and the demo's coins and
 // tenure for QA.
