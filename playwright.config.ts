@@ -28,6 +28,12 @@ const chromium = {
   launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] },
 };
 
+// e2e/previewHost.spec.ts visits office.cubefarm.test and floor1.cubefarm.test, both resolved to the demo office.
+const previewHostChromium = {
+  ...chromium,
+  launchOptions: { ...chromium.launchOptions, args: [...chromium.launchOptions.args, '--host-resolver-rules=MAP *.cubefarm.test 127.0.0.1'] },
+};
+
 export default defineConfig({
   testDir: 'e2e',
   // One demo office is shared by every test, and software WebGL is CPU-bound: run one test at a time.
@@ -49,7 +55,8 @@ export default defineConfig({
   // grabbed): smoke.spec.ts runs first so that's the boot smoke, not whichever feature spec sorts first.
   projects: [
     { name: 'smoke', testMatch: 'smoke.spec.ts', use: chromium },
-    { name: 'chromium', testIgnore: 'smoke.spec.ts', dependencies: ['smoke'], use: chromium },
+    { name: 'chromium', testIgnore: ['smoke.spec.ts', 'previewHost.spec.ts'], dependencies: ['smoke'], use: chromium },
+    { name: 'previewHost', testMatch: 'previewHost.spec.ts', dependencies: ['smoke'], use: previewHostChromium },
   ],
   webServer: {
     command: webServerCommand(process.env),

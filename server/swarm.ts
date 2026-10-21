@@ -47,6 +47,7 @@ import { DEFAULT_LISTEN, DEFAULT_VOICE, listenSettings, speaks, Voice, voiceSett
 import { Notifier } from './notifier.ts';
 import { clip, plainText, stuckAgents } from './notify.ts';
 import { DEFAULT_NOTIFY, notifySettings, officeUrl } from '../shared/notify.ts';
+import { previewAddress as validatePreviewAddress } from '../shared/previewAddress.ts';
 import { agentActivity, lineActivity, sameActivity, type SeenActivity } from '../shared/activity.ts';
 import { WeatherService } from './weather.ts';
 import { blockers, holdUps, waitsMessage } from '../shared/issues.ts';
@@ -478,6 +479,7 @@ export class Swarm {
       worldEvents: { ...DEFAULT_WORLD_EVENTS },
       listen: { ...DEFAULT_LISTEN },
       notify: notifySettings(DEFAULT_NOTIFY, {}),
+      previewAddress: '',
     },
     repos: [],
     agents: [],
@@ -1687,6 +1689,24 @@ export class Swarm {
   watchPreview(viewer: string, repoId: string | null, pr: number | null) {
     if (repoId) this.repo(repoId);
     this.previews.watch(viewer, repoId, pr);
+  }
+
+  /** The `previewAddress` setting (shared/previewAddress.ts): '' when off. */
+  previewHostTemplate(): string {
+    return this.state.settings.previewAddress;
+  }
+
+  /** Whether floor N exists at all (server/previewHost.ts: a non-existent floor is a 404, not a 503). */
+  floorExists(floor: number): boolean {
+    return this.state.repos.some((r) => r.floor === floor);
+  }
+
+  /** Floor N's main preview port while it's running, else null (server/previewHost.ts). */
+  previewPortForFloor(floor: number): number | null {
+    const repo = this.state.repos.find((r) => r.floor === floor);
+    if (!repo) return null;
+    const v = this.previews.view(repo);
+    return v.status === 'running' ? v.port : null;
   }
 
   /** The address of a sync proxy in front of the floor's app (pr null) or a PR preview, for compare mode's synced scrolling. */
@@ -3249,6 +3269,11 @@ export class Swarm {
       const url = (patch.notify as { officeUrl?: unknown } | null)?.officeUrl;
       if (url !== undefined && officeUrl(url) === null) throw new HttpError(400, 'The office URL must be an http(s) address, e.g. https://office.your-tailnet.ts.net');
       s.notify = notifySettings(s.notify, patch.notify);
+    }
+    if (patch.previewAddress !== undefined) {
+      const addr = validatePreviewAddress(patch.previewAddress);
+      if (addr === null) throw new HttpError(400, 'The preview address must be an http(s) address with {floor} in its host or port');
+      s.previewAddress = addr;
     }
     this.save();
     this.broadcast({ type: 'settings', settings: s });

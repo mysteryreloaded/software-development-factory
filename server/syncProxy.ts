@@ -33,10 +33,16 @@ export function injectSync(html: string): string {
   return SYNC_SCRIPT + html;
 }
 
+/** The path+query+hash of a Location pointing at loopback:`port`, or null if it points elsewhere. */
+export function loopbackPath(location: string, port: number): string | null {
+  const m = location.match(/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]):(\d+)(.*)$/i);
+  return m && Number(m[2]) === port ? m[3] || '/' : null;
+}
+
 /** A redirect to the app's own address stays inside the proxy. */
 export function rewriteLocation(location: string, target: number, proxy: number): string {
-  const m = location.match(/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]):(\d+)(.*)$/i);
-  return m && Number(m[2]) === target ? `http://localhost:${proxy}${m[3] || '/'}` : location;
+  const p = loopbackPath(location, target);
+  return p === null ? location : `http://localhost:${proxy}${p}`;
 }
 
 /** Headers for a page the script went into: its length changed, and a CSP or frame rule would block the script. */
@@ -53,22 +59,51 @@ export function syncedHeaders(headers: http.OutgoingHttpHeaders, length: number)
 const HOP = /^(connection|keep-alive|transfer-encoding|proxy-connection|upgrade)$/i;
 
 /** Response headers passed through, minus the hop-by-hop ones (Node frames the body again itself). */
-function passHeaders(headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
+export function passHeaders(headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
   const out: http.OutgoingHttpHeaders = {};
   for (const [k, v] of Object.entries(headers)) if (v !== undefined && !HOP.test(k)) out[k] = v;
   return out;
 }
 
-/** Send a request on to the app, on IPv4 loopback and then IPv6 (dev servers bind either). */
-function upstream(target: number, req: http.IncomingMessage, body: Buffer, onResponse: (res: http.IncomingMessage) => void, onError: (err: Error) => void) {
+/** Send a request on to the app, on IPv4 loopback and then IPv6 (dev servers bind either); `extra` headers go on top. */
+export function upstream(
+  target: number,
+  req: http.IncomingMessage,
+  body: Buffer,
+  onResponse: (res: http.IncomingMessage) => void,
+  onError: (err: Error) => void,
+  extra?: http.OutgoingHttpHeaders,
+) {
   const headers: http.OutgoingHttpHeaders = { ...req.headers, host: `localhost:${target}`, 'accept-encoding': 'identity' };
   for (const k of Object.keys(headers)) if (HOP.test(k)) delete headers[k];
+  Object.assign(headers, extra);
   const send = (host: string, retry: boolean) => {
     const up = http.request({ host, port: target, method: req.method, path: req.url, headers }, onResponse);
     up.once('error', (err: NodeJS.ErrnoException) => (retry && err.code === 'ECONNREFUSED' ? send('::1', false) : onError(err)));
     up.end(body);
   };
   send('127.0.0.1', true);
+}
+
+/** A WebSocket upgrade on to the app on `target`, on IPv4 loopback and then IPv6; `extra` headers go on top. */
+export function tunnel(target: number, req: http.IncomingMessage, socket: net.Socket, head: Buffer, extra?: Record<string, string>) {
+  const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
+  for (let i = 0; i < req.rawHeaders.length; i += 2) {
+    const name = req.rawHeaders[i];
+    lines.push(`${name}: ${/^host$/i.test(name) ? `localhost:${target}` : req.rawHeaders[i + 1]}`);
+  }
+  for (const [k, v] of Object.entries(extra ?? {})) lines.push(`${k}: ${v}`);
+  const connect = (host: string, retry: boolean) => {
+    const up = net.connect(target, host, () => {
+      up.write(`${lines.join('\r\n')}\r\n\r\n`);
+      if (head.length) up.write(head);
+      socket.pipe(up).pipe(socket);
+    });
+    up.once('error', (err: NodeJS.ErrnoException) => (retry && err.code === 'ECONNREFUSED' ? connect('::1', false) : socket.destroy()));
+    socket.once('error', () => up.destroy());
+    socket.once('close', () => up.destroy());
+  };
+  connect('127.0.0.1', true);
 }
 
 class SyncProxy {
@@ -125,22 +160,7 @@ class SyncProxy {
 
   /** WebSockets (a dev server's hot reload, an app's live updates) pass straight through. */
   private tunnel(req: http.IncomingMessage, socket: net.Socket, head: Buffer) {
-    const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
-    for (let i = 0; i < req.rawHeaders.length; i += 2) {
-      const name = req.rawHeaders[i];
-      lines.push(`${name}: ${/^host$/i.test(name) ? `localhost:${this.target}` : req.rawHeaders[i + 1]}`);
-    }
-    const connect = (host: string, retry: boolean) => {
-      const up = net.connect(this.target, host, () => {
-        up.write(`${lines.join('\r\n')}\r\n\r\n`);
-        if (head.length) up.write(head);
-        socket.pipe(up).pipe(socket);
-      });
-      up.once('error', (err: NodeJS.ErrnoException) => (retry && err.code === 'ECONNREFUSED' ? connect('::1', false) : socket.destroy()));
-      socket.once('error', () => up.destroy());
-      socket.once('close', () => up.destroy());
-    };
-    connect('127.0.0.1', true);
+    tunnel(this.target, req, socket, head);
   }
 
   async close() {

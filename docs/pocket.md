@@ -113,3 +113,10 @@ your phone, put something that authenticates you in front of it:
 
 Over plain `http://` on your LAN (say `http://192.168.1.20:4317`, which needs the office to listen there, which it
 doesn't) browsers refuse service workers and push, so there's no install and no push: another reason to use HTTPS.
+
+A floor's running app shows blank over a tunnel unless it also gets its own address: set **Preview address for other
+devices** to a template with `{floor}` in its host or port, e.g. `https://office-floor{floor}.your-tailnet.ts.net`,
+and point a hostname per floor at the office's own address (`http://127.0.0.1:4317`), in the same Access app as the
+office itself. With Cloudflare Tunnel that's one public hostname per floor, each routed to `http://127.0.0.1:4317`;
+the Host header must reach the office unchanged (`cloudflared` keeps it) so it can tell which floor you mean. PR
+previews and compare mode still only open on the office's own PC.

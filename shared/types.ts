@@ -328,6 +328,7 @@ export interface SwarmSettings {
   worldEvents: WorldEventSettings; // Settings → World events: how often something happens outside
   listen: ListenSettings;
   notify: NotifySettings;
+  previewAddress: string; // '' = off; else an http(s) template with {floor} in its host or port, so other devices reach a floor's running app (shared/previewAddress.ts)
 }
 
 /** What the office tells the manager about when they're away (docs/pocket.md). */

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { api } from '../api';
 import { qaKey, useStore } from '../store';
+import { previewSrc } from '../../../shared/previewAddress';
 import type { PreviewStatus, PreviewView, PullInfo, QaView, RepoView } from '../../../shared/types';
 import { atPath, channelLabel, channelLed, channelPulls, comparePath, newPathSync, prAsPreview, QA_BADGE, qaShotUrl, relayPath, type Channel, type Side } from './channels';
 import { Markdown } from './Markdown';
@@ -529,6 +530,7 @@ let lastQa = true;
 /** The floor's app on the big screen, up close: main or one of its open PRs, alone or beside main. */
 export function AppViewer({ repoId, pr }: { repoId: string; pr?: number | null }) {
   const repo = useStore((s) => s.repos.find((r) => r.id === repoId));
+  const previewAddress = useStore((s) => s.settings.previewAddress);
   const prPreviews = useStore((s) => s.prPreviews);
   const qaRecords = useStore((s) => s.qa);
   const channel = useChannel(repoId);
@@ -582,6 +584,9 @@ export function AppViewer({ repoId, pr }: { repoId: string; pr?: number | null }
   const label = channel == null ? repo.defaultBranch : `PR #${channel}`;
   const name = repo.fullName.split('/')[1];
   const comparing = compare && prView != null;
+  const remote = typeof location !== 'undefined' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  // Only the floor's main app (not a PR preview or compare) has its own public origin; a PR channel keeps localhost.
+  const mainSrc = channel == null && current.url ? previewSrc(current.url, repo.floor, previewAddress, typeof location === 'undefined' ? 'localhost' : location.hostname) : current.url;
 
   return (
     <Panel
@@ -655,8 +660,8 @@ export function AppViewer({ repoId, pr }: { repoId: string; pr?: number | null }
               📋 QA
             </button>
           )}
-          {current.url ? (
-            <a className="btn btn-small" href={current.url} target="_blank" rel="noreferrer">
+          {mainSrc ? (
+            <a className="btn btn-small" href={mainSrc} target="_blank" rel="noreferrer">
               Open in new tab ↗
             </a>
           ) : (
@@ -672,11 +677,12 @@ export function AppViewer({ repoId, pr }: { repoId: string; pr?: number | null }
           {comparing ? (
             <CompareView repo={repo} main={main} pr={prView} width={width} reloads={reloads} busy={busy} onStartMain={() => void startMain()} onStartPr={() => void startPr()} />
           ) : (
-            <PreviewStage repo={repo} preview={current} label={label} src={current.url} width={width} reloads={reloads} busy={busy} onStart={() => void (channel == null ? startMain() : startPr())} />
+            <PreviewStage repo={repo} preview={current} label={label} src={mainSrc} width={width} reloads={reloads} busy={busy} onStart={() => void (channel == null ? startMain() : startPr())} />
           )}
         </div>
         {prView && showQa && pull && <QaPanel repo={repo} pull={pull} qa={qaRecords[qaKey(repo.id, pull.number)]} />}
       </div>
+      {remote && (prView || comparing) && <p className="muted small app-foot">PR previews and compare open on the office's PC only.</p>}
       {current.status === 'running' && (
         <p className="muted small app-foot">
           Blank, or “refused to connect”? The app may block being framed: use <b>Open in new tab</b>. Keys typed in the app stay in the app, so <kbd>Esc</kbd> only closes this panel

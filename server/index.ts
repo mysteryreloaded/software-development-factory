@@ -1,4 +1,5 @@
 import http from 'node:http';
+import type net from 'node:net';
 import path from 'node:path';
 import fs from 'node:fs';
 import express, { type NextFunction, type Request, type Response } from 'express';
@@ -15,6 +16,7 @@ import { createDemoBackend } from './demo.ts';
 import { parseRange } from './journal.ts';
 import { underLauncher } from './officeUpdate.ts';
 import { serviceWorkerSource, swVersion } from './pwa.ts';
+import { previewHostMiddleware, previewHostUpgrade, type PreviewHostBackend } from './previewHost.ts';
 import { screenStatus } from './screenReply.ts';
 import { parseSendBackNote } from './sendBack.ts';
 import { PresenceHub } from './presence.ts';
@@ -27,7 +29,16 @@ const presence = new PresenceHub({ demo: DEMO });
 if (PORT) setOfficeUrl(`http://127.0.0.1:${PORT}`);
 await swarm.init();
 
+// Floor previews reachable from other devices (shared/previewAddress.ts): a matching Host is proxied straight to
+// the floor's running preview, ahead of everything else the office serves.
+const previewHostBackend: PreviewHostBackend = {
+  template: () => swarm.previewHostTemplate(),
+  floorExists: (floor) => swarm.floorExists(floor),
+  portFor: (floor) => swarm.previewPortForFloor(floor),
+};
+
 const app = express();
+app.use(previewHostMiddleware(previewHostBackend));
 // Agent CLIs calling back: hooks (a tool result can be a large screenshot, hence the limit) and the CEO's office tools.
 // The token in the path is the session's; unknown tokens get an empty answer.
 app.post('/api/hooks/:token', express.json({ limit: '64mb' }), (req, res) => void res.json(handleHook(String(req.params.token), req.body)));
@@ -323,6 +334,7 @@ wss.on('connection', (ws) => {
 });
 terms.on('connection', (ws, req) => swarm.attachTerminal(new URL(req.url ?? '', 'http://localhost').searchParams.get('agent') ?? '', ws));
 server.on('upgrade', (req, socket, head) => {
+  if (previewHostUpgrade(previewHostBackend, req, socket as net.Socket, head)) return;
   const { pathname } = new URL(req.url ?? '', 'http://localhost');
   const target = pathname === '/ws' ? wss : pathname === '/ws/term' ? terms : null;
   if (!target) return void socket.destroy();
