@@ -13,7 +13,7 @@ interface SmokeProbe {
 }
 
 interface CameraProbe {
-  pose: { x: number; z: number };
+  state(): { pose: { x: number; z: number } };
 }
 
 type Page = import('@playwright/test').Page;
@@ -21,7 +21,7 @@ type Page = import('@playwright/test').Page;
 const probe = (page: Page) => page.evaluate(() => (window as unknown as { __swarmSmokeBreak: SmokeProbe }).__swarmSmokeBreak);
 const doIt = (page: Page, action: 'sit' | 'roll' | 'light' | 'puff' | 'up', nookId?: string) =>
   page.evaluate(([a, n]) => (window as unknown as { __swarmSmokeBreakDo: (a: string, n?: string) => void }).__swarmSmokeBreakDo(a, n), [action, nookId] as const);
-const pose = async (page: Page) => (await page.evaluate(() => (window as unknown as { __swarmCamera: CameraProbe }).__swarmCamera.pose));
+const pose = async (page: Page) => (await page.evaluate(() => (window as unknown as { __swarmCamera: CameraProbe }).__swarmCamera.state().pose));
 
 const PLACES: { name: string; id: 'office-west' | 'roof'; floor: number }[] = [
   { name: 'floor 1 west', id: 'office-west', floor: 1 },
@@ -47,7 +47,7 @@ async function travel(page: Page, axis: 'x' | 'z', to: number, keys: readonly [s
   for (const tryKey of keys) {
     await page.keyboard.down(tryKey);
     const moved = await page
-      .waitForFunction(([a, startV]) => Math.abs((window as unknown as { __swarmCamera: CameraProbe }).__swarmCamera.pose[a as 'x' | 'z'] - startV) > 0.2, [axis, before] as const, { timeout: 5000 })
+      .waitForFunction(([a, startV]) => Math.abs((window as unknown as { __swarmCamera: CameraProbe }).__swarmCamera.state().pose[a as 'x' | 'z'] - startV) > 0.2, [axis, before] as const, { timeout: 5000 })
       .then(() => true)
       .catch(() => false);
     await page.keyboard.up(tryKey);
