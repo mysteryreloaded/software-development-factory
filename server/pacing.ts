@@ -1,4 +1,4 @@
-import type { UsageView, UsageWarningView } from '../shared/types.ts';
+import type { UsageLimitView, UsageView, UsageWarningView } from '../shared/types.ts';
 import { clock, limitName, usedPercent } from '../shared/usage.ts';
 
 export { clock };
@@ -27,11 +27,15 @@ export function mayStart(kind: WorkKind, c: UsageClock & { running: number; paci
   return true;
 }
 
-/** The usage state for the snapshot, with the last warning's details for the usage meter. */
-export function usageView(c: UsageClock, warning: UsageWarningView | null = null): UsageView {
-  if (c.now < c.pausedUntil) return { state: 'paused', until: c.pausedUntil, warning };
-  if (c.now < c.pacingUntil) return { state: 'pacing', until: c.pacingUntil, warning };
-  return { state: 'normal', until: null, warning };
+/** 5-hour first, then weekly: the usage meter's row order. */
+const LIMIT_ORDER: UsageLimitView['type'][] = ['five_hour', 'seven_day'];
+
+/** The usage state for the snapshot, with the last warning's details and the live readings for the usage meter. */
+export function usageView(c: UsageClock, warning: UsageWarningView | null = null, readings: Partial<Record<UsageLimitView['type'], UsageLimitView>> = {}): UsageView {
+  const limits = LIMIT_ORDER.map((t) => readings[t]).filter((r): r is UsageLimitView => !!r);
+  if (c.now < c.pausedUntil) return { state: 'paused', until: c.pausedUntil, warning, limits };
+  if (c.now < c.pacingUntil) return { state: 'pacing', until: c.pacingUntil, warning, limits };
+  return { state: 'normal', until: null, warning, limits };
 }
 
 /** company.usage for the CEO: "normal", "pacing until 14:30" or "paused until 14:30". */

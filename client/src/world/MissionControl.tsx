@@ -160,7 +160,10 @@ export function MissionControl() {
   );
   const m = usageMeter(usage, officeNow());
   const meterData: UsageScreen = {
-    ...m,
+    state: m.state,
+    tone: m.tone,
+    limits: m.limits,
+    noReadings: m.noReadings,
     hint: usage.state === 'pacing' ? `Press ${use} to resume full speed` : usage.state === 'paused' ? "A pause at the limit can't be cleared early" : 'New work starts at full speed',
   };
   const meter = useScreen('usage', BOTTOM_PX, meterData, drawUsage);

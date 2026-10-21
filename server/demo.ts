@@ -576,7 +576,15 @@ function fakeUsageWarning(cb: SessionCallbacks) {
     const resetsAt = Date.now() + USAGE_WARNING_MS;
     cb.log([{ kind: 'error', text: `⚠ Subscription usage warning (five_hour) · resets ${new Date(resetsAt).toLocaleTimeString()} (demo)` }]);
     cb.usageWarning?.({ resetsAt, rateLimitType: 'five_hour', utilization: 0.82 });
+    cb.usageReading?.({ type: 'five_hour', pct: 82, resetsAt });
   }, 3000);
+}
+
+/** Every fake session reports both of Claude's live readings, growing a few % per session (never reaching 90). */
+function fakeUsageReadings(cb: SessionCallbacks, n: number) {
+  const grown = (base: number) => Math.min(88, base + n * 3);
+  cb.usageReading?.({ type: 'five_hour', pct: grown(20), resetsAt: Date.now() + 3 * 60 * 60_000 });
+  cb.usageReading?.({ type: 'seven_day', pct: grown(35), resetsAt: Date.now() + 3 * DAY_MS });
 }
 
 /** A made-up install and build of 300-900 MB freed, so the idle-desk setting and its phone message can be seen. */
@@ -825,8 +833,10 @@ export function createDemoBackend(scale: DemoScale | null = null): Backend {
     trimDesk: (_fullName, _slug, stillIdle) => fakeTrim(stillIdle),
     releaseDesk: async () => undefined,
     startSession: (opts, cb) => {
+      sessionsStarted += 1;
+      fakeUsageReadings(cb, sessionsStarted);
       // The big company is for measuring the office at full speed, so it never paces.
-      if (++sessionsStarted === USAGE_WARNING_AT && !scale) fakeUsageWarning(cb);
+      if (sessionsStarted === USAGE_WARNING_AT && !scale) fakeUsageWarning(cb);
       return inTerminal(opts, cb, (c) => (opts.role === 'ceo' ? ceoSession(opts, c) : fakeSession(opts, c, deskRepo.get(opts.cwd) ?? [...repos.keys()][0])));
     },
     terminals: true,

@@ -319,6 +319,7 @@ const compactUsage = (u: UsageView): UsageView => ({
   state: u.state,
   until: u.until,
   warning: u.warning ? { limit: u.warning.limit && clip(u.warning.limit, 60), pct: u.warning.pct, resetsAt: u.warning.resetsAt, at: u.warning.at } : null,
+  limits: u.limits,
 });
 
 /** Mission control's numbers; an alarm about someone's error says who, never the error. */

@@ -1,7 +1,7 @@
 // Mission control in the office: how its numbers and Claude's usage read on the lobby wall, the floor signs, the HUD
 // chip and the manager's console, and which alarms are new (they sound). Pure, so it's tested without a browser.
 
-import type { OpsAlarm, OpsNumbers, OpsView, UsageView } from '../../shared/types';
+import type { OpsAlarm, OpsNumbers, OpsView, UsageLimitView, UsageView } from '../../shared/types';
 import { clock } from '../../shared/usage';
 
 export const EMPTY_NUMBERS: OpsNumbers = {
@@ -56,8 +56,26 @@ export function usageChip(u: UsageView, pacingSessions: number, now: number): st
   return `🐢 Paced until ${until}: new issues start when fewer than ${pacingSessions} session${pacingSessions === 1 ? '' : 's'} run`;
 }
 
-/** The usage meter's headline and details: the state, and the last warning's limit, fill and reset time. */
-export function usageMeter(u: UsageView, now: number): { state: string; tone: 'good' | 'warn' | 'bad'; limit: string; pct: number | null; resets: string | null } {
+const LIMIT_LABEL: Record<UsageLimitView['type'], string> = { five_hour: '5-hour', seven_day: 'Weekly' };
+
+/** One live reading's row for the usage meter: its fill, tone and when it was last read. A passed reset shows no reading since. */
+export function usageLimitRow(l: UsageLimitView, now: number): { label: string; pct: number | null; tone: 'good' | 'warn' | 'bad'; resets: string | null; asOf: string } {
+  const stale = l.resetsAt !== null && l.resetsAt <= now;
+  const pct = stale ? null : l.pct;
+  return {
+    label: LIMIT_LABEL[l.type],
+    pct,
+    tone: pct === null ? 'good' : pct >= 90 ? 'bad' : pct >= 75 ? 'warn' : 'good',
+    resets: l.resetsAt ? `reset at ${clock(l.resetsAt, now)}${stale ? ', no reading since' : ''}` : null,
+    asOf: clock(l.at, now),
+  };
+}
+
+/** The usage meter's headline and details: the state, the last warning's limit, fill and reset time, and a row per live reading. */
+export function usageMeter(
+  u: UsageView,
+  now: number,
+): { state: string; tone: 'good' | 'warn' | 'bad'; limit: string; pct: number | null; resets: string | null; limits: ReturnType<typeof usageLimitRow>[]; noReadings: string | null } {
   const w = u.warning;
   const resetsAt = u.state === 'normal' ? (w?.resetsAt && w.resetsAt > now ? w.resetsAt : null) : u.until;
   return {
@@ -66,6 +84,8 @@ export function usageMeter(u: UsageView, now: number): { state: string; tone: 'g
     limit: w ? `${w.limit ?? "Claude's usage"}${w.pct === null ? '' : ` · ${w.pct}%`}` : 'No usage warnings',
     pct: w?.pct ?? null,
     resets: resetsAt ? clock(resetsAt, now) : null,
+    limits: u.limits.map((l) => usageLimitRow(l, now)),
+    noReadings: u.limits.length ? null : 'No reading yet: it comes with the next Claude session',
   };
 }
 

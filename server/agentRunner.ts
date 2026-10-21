@@ -8,6 +8,7 @@ import type { AgentTerminal } from './terminal.ts';
 import { browserProblem, playwrightMcp } from './browser.ts';
 import { CROSS_TURN_TOOLS } from './clis.ts';
 import { VERSION } from './config.ts';
+import { usedPercent, type UsageReadingInfo } from '../shared/usage.ts';
 
 // One Claude Code instance (via the Claude Agent SDK) on one task (building an issue, testing or fixing a PR) in its own git worktree.
 // The CEO runs through here too, with the office tools instead of a shell.
@@ -75,6 +76,8 @@ export interface SessionCallbacks {
   limited?(resetsAt: number | null): void;
   /** Claude warned that the subscription's usage is getting high (not while on overage). */
   usageWarning?(info: UsageWarning): void;
+  /** A live reading of one of Claude's usage windows (5-hour or weekly), for the usage meter. */
+  usageReading?(info: UsageReadingInfo): void;
   finished(result: SessionResult): void;
 }
 
@@ -408,6 +411,9 @@ export function startSession(opts: SessionOptions, callbacks: SessionCallbacks):
       }
       case 'rate_limit_event': {
         const info = msg.rate_limit_info;
+        if (typeof info.utilization === 'number' && (info.rateLimitType === 'five_hour' || info.rateLimitType === 'seven_day')) {
+          cb.usageReading?.({ type: info.rateLimitType, pct: usedPercent(info.utilization), resetsAt: info.resetsAt ? info.resetsAt * 1000 : null });
+        }
         if (info.status !== 'allowed') {
           const when = info.resetsAt ? new Date(info.resetsAt * 1000).toLocaleTimeString() : 'later';
           cb.log([{ kind: 'error', text: `⚠ Subscription usage ${info.status === 'rejected' ? 'limit reached' : 'warning'} (${info.rateLimitType ?? 'limit'}) · resets ${when}` }]);

@@ -90,10 +90,12 @@ import type {
   RepoView,
   ServerEvent,
   SwarmSettings,
+  UsageLimitView,
   UsageView,
   UsageWarningView,
   WorldSnapshot,
 } from '../shared/types.ts';
+import { usedPercent, type UsageReadingInfo } from '../shared/usage.ts';
 
 // ---------- persisted shape ----------
 
@@ -2558,6 +2560,7 @@ export class Swarm {
         },
         limited: (at) => this.pauseForLimit(at),
         usageWarning: (info) => this.paceForWarning(info),
+        usageReading: (info) => this.recordUsageReading(info),
         finished: (result) => void this.onFinished(a, repo, result),
       },
     );
@@ -3293,6 +3296,7 @@ export class Swarm {
   private pacingUntil = 0; // Claude warned about usage: new issues are paced until this
   private pacingLimit: string | null = null; // which of Claude's limits the pacing is for
   private lastWarning: UsageWarningView | null = null; // the latest usage warning, for the usage meter
+  private lastReadings: Partial<Record<UsageLimitView['type'], UsageLimitView>> = {}; // live 5-hour/weekly readings, in memory only
   private waiver: Waiver | null = null; // pacing the manager cleared with "Resume full speed"
   private lastUsage = '';
 
@@ -3397,6 +3401,15 @@ export class Swarm {
     this.emitUsage();
   }
 
+  /** A session's status line reported a live reading of one of Claude's usage windows: keep it for the usage meter. */
+  private recordUsageReading(info: UsageReadingInfo) {
+    if (info.type !== 'five_hour' && info.type !== 'seven_day') return;
+    const prev = this.lastReadings[info.type];
+    const changed = !prev || prev.pct !== info.pct || prev.resetsAt !== info.resetsAt;
+    this.lastReadings[info.type] = { type: info.type, pct: info.pct, resetsAt: info.resetsAt, at: Date.now() };
+    if (changed) this.emitUsage();
+  }
+
   /** The manager's "Resume full speed" (they topped up, or their usage was reset): pacing ends now. A hard pause never does. */
   resumeFullSpeed(): UsageView {
     const now = Date.now();
@@ -3420,6 +3433,9 @@ export class Swarm {
     else {
       this.waiver = null; // a simulated warning always paces, even after Resume full speed
       this.paceForWarning(usage);
+      if ((usage.rateLimitType === 'five_hour' || usage.rateLimitType === 'seven_day') && usage.utilization !== null) {
+        this.recordUsageReading({ type: usage.rateLimitType, pct: usedPercent(usage.utilization), resetsAt: usage.resetsAt });
+      }
     }
     return this.usageNow();
   }
@@ -3430,7 +3446,7 @@ export class Swarm {
   }
 
   private usageNow() {
-    return usageView({ now: Date.now(), pausedUntil: this.pausedUntil, pacingUntil: this.pacingUntil }, this.lastWarning);
+    return usageView({ now: Date.now(), pausedUntil: this.pausedUntil, pacingUntil: this.pacingUntil }, this.lastWarning, this.lastReadings);
   }
 
   private emitUsage() {
@@ -3872,6 +3888,7 @@ export class Swarm {
         turn: (text) => this.postMessage('ceo', text),
         limited: (at) => this.pauseForLimit(at),
         usageWarning: (info) => this.paceForWarning(info),
+        usageReading: (info) => this.recordUsageReading(info),
         finished: (result) => this.onCeoFinished(a, result),
       },
     );
