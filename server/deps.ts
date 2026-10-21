@@ -104,29 +104,33 @@ export function killTree(child: ChildProcess): Promise<void> {
 
 /**
  * Stop a process and its children gracefully: SIGTERM to the whole process group (spawned detached) so a script's
- * cleanup trap runs, and SIGKILL only if it is still running after `graceMs`. On Windows a shell tree has no
- * graceful signal, so kill at once as before.
+ * cleanup trap runs, then SIGKILL anything still in the group after `graceMs` — not just the leader, since a
+ * child can outlive it and keep holding a port. On Windows a shell tree has no graceful signal, so kill at once
+ * as before.
  */
 export async function stopTree(child: ChildProcess, graceMs = 30_000): Promise<void> {
   if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform === 'win32') return killTree(child);
+  const pid = child.pid;
   try {
-    process.kill(-child.pid, 'SIGTERM'); // the whole process group (spawned detached)
+    process.kill(-pid, 'SIGTERM'); // the whole process group (spawned detached)
   } catch {
     child.kill('SIGTERM');
   }
-  await new Promise<void>((resolve) => {
-    const onExit = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(() => {
-      child.removeListener('exit', onExit);
-      resolve();
-    }, graceMs);
-    child.on('exit', onExit);
-  });
-  await killTree(child); // a no-op when the exit came from the SIGTERM
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(-pid, 0); // throws ESRCH once the whole group is gone
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    // already gone
+  }
 }
 
 /** npm ci in a folder (on Windows through cmd.exe); rejects on failure, and kills the tree after `timeoutMs`. */
