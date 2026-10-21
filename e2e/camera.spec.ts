@@ -30,30 +30,38 @@ const SPOT: SavedView = { floor: 1, x: -4, z: 8.5, yaw: 0, pitch: -0.1 };
 
 /**
  * Headless Chromium can't actually lock the pointer, so this fakes requestPointerLock/exitPointerLock: the lock
- * lands about 150ms after it's requested (pointerlockchange fires then, as a real one would arrive asynchronously),
+ * lands `delayMs` after it's requested (pointerlockchange fires then, as a real one would arrive asynchronously),
  * and exiting clears it at once. Lets the middle-click and cursor-guard tests below exercise the real lock-driven
- * code (Player.tsx's onLockChange) instead of skipping it.
+ * code (Player.tsx's onLockChange) instead of skipping it. Default 150ms stands in for a slow lock; a small
+ * `delayMs` (e.g. 20) stands in for a fast one (real Chrome often lands a lock in 20-50ms).
  */
-async function fakePointerLock(page: Page) {
-  await page.addInitScript(() => {
+async function fakePointerLock(page: Page, delayMs = 150) {
+  await page.addInitScript((delay) => {
     let locked: Element | null = null;
     Object.defineProperty(document, 'pointerLockElement', { configurable: true, get: () => locked });
     HTMLElement.prototype.requestPointerLock = function (this: HTMLElement) {
       setTimeout(() => {
         locked = this;
         document.dispatchEvent(new Event('pointerlockchange'));
-      }, 150);
+      }, delay);
       return undefined as unknown as Promise<void>;
     };
     document.exitPointerLock = () => {
       locked = null;
       document.dispatchEvent(new Event('pointerlockchange'));
     };
-  });
+  }, delayMs);
 }
 
 const pings = (page: Page) => page.evaluate(() => (window as unknown as { __swarmPresence: { pings: () => unknown[] } }).__swarmPresence.pings());
 const locked = (page: Page) => page.evaluate(() => document.pointerLockElement !== null);
+
+/** Dispatches a Tab keydown on `window`, in-page: precise timing, unlike a real key press (slow software-WebGL
+ * frames can delay those past the double-tap window; see the "Tab twice" test above). */
+const dispatchTab = (page: Page) => page.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Tab', key: 'Tab', bubbles: true })));
+/** Same, for a middle mousedown on the canvas. */
+const dispatchMiddleClick = (page: Page) =>
+  page.evaluate(() => document.querySelector('canvas')!.dispatchEvent(new MouseEvent('mousedown', { button: 1, bubbles: true, cancelable: true })));
 
 async function viewCenter(page: Page) {
   const box = await page.locator('canvas').first().boundingBox();
@@ -165,6 +173,39 @@ test('the same race, driven by a middle-click double tap instead of Tab', async 
   await page.mouse.click(at.x, at.y, { button: 'middle', clickCount: 2 });
   await settled(page, 'building');
   await page.waitForTimeout(400);
+  expect(await locked(page)).toBe(false);
+});
+
+// A lock that lands FAST (real Chrome: ~20-50ms) is a different race than the one above: it lands and is held
+// while mode 'first' is still legitimate (so the guard rightly leaves it alone), and only the second tap's
+// enterBuilding (while the rig still owns the camera from the first tap's FLY_BACK) must let go of it — in
+// leaveFirst (camera/rig.ts), not in the pointerlockchange-driven guard, since no further pointerlockchange fires.
+test('a fast lock landing between two quick Tabs is still released on the second tap', async ({ page }) => {
+  await fakePointerLock(page, 20);
+  await startAt(page, SPOT);
+  await enterOffice(page);
+  await page.keyboard.press('Tab');
+  await settled(page, 'overview');
+  await dispatchTab(page); // tap 1: back to first, grabs the lock
+  await page.waitForTimeout(100);
+  expect(await locked(page)).toBe(true); // the lock landed after tap 1
+  await dispatchTab(page); // tap 2, well within the double-tap window: the building
+  await settled(page, 'building');
+  expect(await locked(page)).toBe(false);
+});
+
+test('the same fast-lock race, driven by two quick middle clicks', async ({ page }) => {
+  await fakePointerLock(page, 20);
+  await startAt(page, SPOT);
+  await enterOffice(page);
+  const at = await viewCenter(page);
+  await page.mouse.click(at.x, at.y, { button: 'middle' });
+  await settled(page, 'overview');
+  await dispatchMiddleClick(page); // tap 1: back to first, grabs the lock
+  await page.waitForTimeout(100);
+  expect(await locked(page)).toBe(true); // the lock landed after tap 1
+  await dispatchMiddleClick(page); // tap 2, well within the double-tap window: the building
+  await settled(page, 'building');
   expect(await locked(page)).toBe(false);
 });
 
