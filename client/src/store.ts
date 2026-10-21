@@ -230,6 +230,7 @@ export const useStore = create<State>((set, get) => ({
     worldEvents: DEFAULT_WORLD_EVENTS,
     listen: { provider: 'off', autoSend: false, handsFree: false },
     notify: DEFAULT_NOTIFY,
+    previewAddress: '',
   },
   clis: [],
   repos: [],

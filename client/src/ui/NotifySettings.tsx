@@ -261,8 +261,11 @@ function ThisDevice({ notify, save }: { notify: Notify; save: Save }) {
 
 export function NotifySettings() {
   const notify = useStore((s) => s.settings.notify);
+  const previewAddress = useStore((s) => s.settings.previewAddress);
   const [url, setUrl] = useState(notify.officeUrl);
   useEffect(() => setUrl(notify.officeUrl), [notify.officeUrl]);
+  const [previewUrl, setPreviewUrl] = useState(previewAddress);
+  useEffect(() => setPreviewUrl(previewAddress), [previewAddress]);
   const save: Save = (patch) => void api.updateSettings({ notify: { ...notify, ...patch } }).catch(() => undefined);
   return (
     <div className="card notify-settings">
@@ -286,6 +289,18 @@ export function NotifySettings() {
           placeholder="https://office.your-tailnet.ts.net"
           inputMode="url"
         />
+      </label>
+      <label className="field">
+        <span>Preview address for other devices (optional)</span>
+        <input
+          type="text"
+          value={previewUrl}
+          onChange={(e) => setPreviewUrl(e.target.value)}
+          onBlur={() => previewUrl.trim() !== previewAddress && void api.updateSettings({ previewAddress: previewUrl.trim() }).catch(() => undefined)}
+          placeholder="https://office-floor{floor}.your-tailnet.ts.net"
+          inputMode="url"
+        />
+        <span className="muted small">Point a hostname per floor at the office's own port, with {'{floor}'} in its host or port, so a floor's running app opens on another device too.</span>
       </label>
       <h4 className="notify-h">This device</h4>
       <ThisDevice notify={notify} save={save} />
