@@ -8,13 +8,13 @@ import { dayTime, useSkyFrame } from '../sky/useDayTime';
 import { skyAt, sunDirection, type SkyPalette } from '../sky/time';
 import { viewElevation } from '../layout';
 import { toon } from '../materials';
-import { boxesGeometry, type BoxSpec } from '../shapes';
+import { boxesGeometry, merged, type BoxSpec } from '../shapes';
 import { hazeRange, weatherSky } from '../weather/weatherRules';
 import { weather } from '../weather/weatherState';
 import { carPose, carRoutes, CITY, cityLayout, CORRIDOR_HALF, MAX_CARS, waterTowers, type CityBox } from './cityLayout';
-import { PAVED_STREET, parkFenceLines } from './grounds';
+import { bollardXs, bollardZs, PAVED_STREET, parkFenceLines } from './grounds';
 
-// ---------- the park fence (#41) ----------
+// ---------- the park fence and the paved street's bollards (#41) ----------
 
 const FENCE = { postH: 1.2, postW: 0.08, rail: 0.06, gap: 2.4 };
 
@@ -42,10 +42,24 @@ function ParkFence() {
   return <mesh geometry={geo} material={toon('#6b5a46')} renderOrder={1} />;
 }
 
-// The city around the building (cityLayout.ts says where everything is). Seven draw calls: the buildings (one
+const BOLLARD = { r: 0.09, h: 0.5 };
+
+/** Short bollards across each end of the paved stretch, where the road resumes unpaved (bollardXs/Zs). */
+function bollardGeometry() {
+  const posts = bollardZs().flatMap((z) => bollardXs().map((x) => new THREE.CylinderGeometry(BOLLARD.r, BOLLARD.r, BOLLARD.h, 10).translate(x, BOLLARD.h / 2, z)));
+  return merged(posts);
+}
+
+function Bollards() {
+  const geo = useMemo(bollardGeometry, []);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return <mesh geometry={geo} material={toon('#d6d0c4')} renderOrder={1} />;
+}
+
+// The city around the building (cityLayout.ts says where everything is). Eight draw calls: the buildings (one
 // InstancedMesh with a shared window texture), roof bits as instanced boxes, cylinders and cones, the ground
-// (streets, pavements, crossings, street lamps and headlight pools drawn in one shader), the cars, and the park's
-// fence (#41). All of it
+// (streets, pavements, crossings, street lamps and headlight pools drawn in one shader), the cars, the park's
+// fence and the paved street's bollards (#41). All of it
 // lights itself from the time of day (time.ts), not from the office's lights, and fades into the horizon colour
 // with distance. The windows, lamps and headlights come on through one shared uniform (cityLights), so the
 // evening costs nothing. Drawn after the office (renderOrder 1), so indoors the walls hide it before it shades.
@@ -580,6 +594,7 @@ export function City() {
         <primitive key={m.uuid} object={m} />
       ))}
       <ParkFence />
+      <Bollards />
     </group>
   );
 }
@@ -623,7 +638,7 @@ export function setTowerDown(i: number, down: boolean) {
 // For QA: __swarmCity tells what the city holds and how far below you the street is.
 if (typeof window !== 'undefined' && !Object.getOwnPropertyDescriptor(window, '__swarmCity')) {
   Object.defineProperty(window, '__swarmCity', {
-    get: () => ({ ...probe, drawCalls: 7, lights: shared.uLights.value, towersDown: [...towersDown] }),
+    get: () => ({ ...probe, drawCalls: 8, lights: shared.uLights.value, towersDown: [...towersDown] }),
     enumerable: false,
     configurable: false,
   });

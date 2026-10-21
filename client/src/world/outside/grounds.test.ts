@@ -29,17 +29,22 @@ describe('grounds', () => {
     expect(isWalkable(GROUNDS.maxX + 5, 0)).toBe(false); // the street east of our block
   });
 
-  it('walls off every edge but the east one, which the existing patio rail already guards', () => {
+  it('walls off every edge, including the east one past where the patio rail stops guarding it', () => {
     const walls = groundsColliders();
-    expect(walls).toHaveLength(3);
+    expect(walls).toHaveLength(4);
     for (const w of walls) {
       // every wall sits right on the GROUNDS boundary, not out in the open or inside it
       const onEdge = [w.minX, w.maxX].includes(GROUNDS.minX) || [w.minX, w.maxX].includes(GROUNDS.maxX) || [w.minZ, w.maxZ].includes(GROUNDS.minZ) || [w.minZ, w.maxZ].includes(GROUNDS.maxZ);
       expect(onEdge).toBe(true);
     }
-    // just the three: north, south and west. No dedicated east wall (the existing patio rail already guards it)
+    // north, south, west and east: two thin vertical walls (west and east), not just one
     const thinVertical = (w: Rect) => w.maxX - w.minX <= 0.5 && w.maxZ - w.minZ > 10;
-    expect(walls.filter(thinVertical)).toHaveLength(1); // the west one only
+    expect(walls.filter(thinVertical)).toHaveLength(2);
+    const east = walls.find((w) => w.minX === GROUNDS.maxX);
+    expect(east).toBeDefined();
+    // spans the whole edge, not just where the patio rail already guards it (|z| <= 11.2)
+    expect(east!.minZ).toBe(GROUNDS.minZ);
+    expect(east!.maxZ).toBe(GROUNDS.maxZ);
   });
 
   it("fences the park's north, west and south edges, never its east one", () => {

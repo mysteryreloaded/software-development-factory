@@ -4,6 +4,7 @@ import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BALCONY_TOP, BENCH, FLOOR_HEIGHT,
 import { APP_SCREEN, BOARD, CEO_DESK, CEO_ROOM, COFFEE_CORNER, coffeeCorner, collide, decorSlots, DESK_RUGS, ELEVATOR, elevatorDoorway, GONG, GONG_SPOT, gongRect, HALF_D, LOBBY_RUG, lobbyColliders, MANAGER_DESK, MANAGER_KIOSK, MANAGER_KIOSK_SPOT, managerKioskRect, MANAGER_ROOM, MISSION, missionColumn, missionRects, officeColliders, PLAYER_RADIUS, RECEPTION, rect, shellColliders, SPAWN, surfaceAt, WAITING, WAITING_TABLE, type Rect } from './layout.ts';
 import { DESK, DESK_ROWS, EAST_DESKS, EAST_ROTATION, MAX_DESKS, SEATS, deskPosition, deskRotation, isEastDesk } from './layout.ts';
 import { spot, walkways } from './walkways.ts';
+import { DRUM_RADIUS, drumColliders } from './revolvingDoor.ts';
 
 const R = 0.3;
 const box: Rect = { minX: 0, maxX: 2, minZ: 0, maxZ: 2 };
@@ -416,6 +417,21 @@ describe('outside: side doors, windows and balconies', () => {
     // the lobby's east patio (candidates use it) is untouched
     const east = balconyFurniture('lobby', 'east');
     expect(outsideColliders('lobby')).toEqual(expect.arrayContaining([...balconyRailing('east'), ...east.planters, east.bench]));
+  });
+
+  it("solid on the revolving door's drum sides, so the player can't walk through its glass (#41)", () => {
+    const x = sideSign('west') * (HALF_W + WALL_T / 2);
+    const z = SIDE_OPENINGS.lobby.west.door;
+    const drum = drumColliders(x, z, -1);
+    expect(drum).toHaveLength(2);
+    expect(lobbyColliders()).toEqual(expect.arrayContaining(drum));
+    // stepping into one of the drum's solid sides pushes the player back out of it
+    const side = drum[0];
+    const px = (side.minX + side.maxX) / 2;
+    const pz = (side.minZ + side.maxZ) / 2;
+    expect(collide(px, pz, lobbyColliders(), R)).not.toEqual({ x: px, z: pz });
+    // the open middle between the two sides stays walkable
+    expect(collide(x - DRUM_RADIUS, z, lobbyColliders(), R)).toEqual({ x: x - DRUM_RADIUS, z });
   });
 
   it('hangs the balcony lamps along the middle of each balcony, under the balcony above', () => {

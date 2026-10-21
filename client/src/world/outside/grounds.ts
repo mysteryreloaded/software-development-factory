@@ -29,8 +29,8 @@ export const isWalkable = (x: number, z: number) => x >= GROUNDS.minX && x <= GR
 const EDGE = 0.4;
 
 /**
- * Invisible colliders along the grounds' north, south and west edges, so you never stray onto a real street: the
- * east edge needs none, the existing east patio's rail already stops you well short of it.
+ * Invisible colliders along all four of the grounds' edges, so you never stray onto a real street: the east one
+ * backs up the existing east patio's rail, which only covers |z| <= 11.2 and leaves the rest of that edge open.
  */
 export function groundsColliders(): Rect[] {
   const { minX, maxX, minZ, maxZ } = GROUNDS;
@@ -38,6 +38,7 @@ export function groundsColliders(): Rect[] {
     { minX, maxX, minZ: minZ - EDGE, maxZ: minZ }, // north
     { minX, maxX, minZ: maxZ, maxZ: maxZ + EDGE }, // south
     { minX: minX - EDGE, maxX: minX, minZ, maxZ }, // west
+    { minX: maxX, maxX: maxX + EDGE, minZ, maxZ }, // east
   ];
 }
 

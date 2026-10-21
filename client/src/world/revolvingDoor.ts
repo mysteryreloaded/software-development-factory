@@ -9,9 +9,10 @@ export const WING_T = 0.04;
 /** How wide the walked-through gap between a drum's two side panes is: comfortably past the player's shoulders. */
 export const PASSAGE = DRUM_RADIUS * 0.85;
 
-/** How fast the wings turn for a given walking speed through the drum (rad/s per m/s): running turns them
- * clearly faster than walking, never so fast they'd sweep through where you're standing. */
-export const SPEED_GAIN = 1.3;
+/** How fast the wings turn for a given walking speed through the drum (rad/s per m/s), phased to your progress
+ * rather than free-running: crossing the full diameter turns the drum a quarter turn (about 90°, WINGS' own
+ * spacing), so a wing sweeps across your path once, never twice, whatever speed you cross at. */
+export const SPEED_GAIN = Math.PI / 2 / (2 * DRUM_RADIUS);
 /** Once nobody is pushing it, the drum eases to a stop over about this long. */
 export const COAST_S = 2.2;
 /** Below this angular speed (rad/s) it counts as stopped, so a test (or the renderer) isn't chasing an asymptote forever. */
