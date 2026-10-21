@@ -16,6 +16,7 @@ import { useCanvasTexture } from './interact';
 import { KanbanBoard } from './KanbanBoard';
 import { Jukebox } from './Jukebox';
 import { Leaver, useLeavers } from './Leavers';
+import { ManagerKiosk } from './ManagerKiosk';
 import { DESK_RUGS, HALF_D, HALF_W, JUKEBOX, MAX_DESKS, SEATS, deskPosition, deskRotation } from './layout';
 import { shade } from './materials';
 import { MergeConfetti } from './MergeConfetti';
@@ -105,6 +106,7 @@ export const OfficeFloor = memo(function OfficeFloor({ repo }: { repo: RepoView 
       <Decorations repo={repo} />
       <Gong repoId={repo.id} />
       <PongTable repoId={repo.id} />
+      <ManagerKiosk />
       <Elevator floorLabel={`▲ ${repo.floor} · ${name}`} accent={repo.color} />
       <Toys floor="office" />
       <ErrandDirector floor="office" agents={agents} leavers={leavers} onGone={gone} repoId={repo.id} />

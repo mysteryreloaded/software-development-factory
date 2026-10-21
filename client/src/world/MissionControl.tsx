@@ -32,7 +32,7 @@ if (typeof window !== 'undefined' && !Object.getOwnPropertyDescriptor(window, '_
 }
 
 /** A canvas texture keyed by the data it shows: it repaints when (and only when) that data changes. */
-function useScreen<T>(name: string, px: [number, number], data: T, draw: (ctx: CanvasRenderingContext2D, w: number, h: number, data: T) => void) {
+export function useScreen<T>(name: string, px: [number, number], data: T, draw: (ctx: CanvasRenderingContext2D, w: number, h: number, data: T) => void) {
   const key = JSON.stringify(data);
   return useCanvasTexture(
     px[0],
@@ -46,13 +46,13 @@ function useScreen<T>(name: string, px: [number, number], data: T, draw: (ctx: C
   );
 }
 
-const BEZEL = '#23263a';
-const POST = '#3d4057';
+export const BEZEL = '#23263a';
+export const POST = '#3d4057';
 const TOP_PX: [number, number] = [1024, 602];
 const BOTTOM_PX: [number, number] = [1024, 494];
 
 /** A screen's picture, just in front of its column's bezel. */
-function Face({ tex, w, h, y }: { tex: THREE.Texture; w: number; h: number; y: number }) {
+export function Face({ tex, w, h, y }: { tex: THREE.Texture; w: number; h: number; y: number }) {
   return (
     <mesh position={[0, y, 0.002]}>
       <planeGeometry args={[w, h]} />
@@ -112,7 +112,7 @@ export function Beacon({ on, size = 0.11 }: { on: boolean; size?: number }) {
 }
 
 /** E on an alarm: the console at its card. The label is the alarm without its details ("PR #7 needs you"). */
-const alarmFocus = (id: string, a: OpsAlarm): Focus => ({
+export const alarmFocus = (id: string, a: OpsAlarm): Focus => ({
   id,
   label: `🚨 ${a.text.split(':')[0]} on floor ${a.floor}: open it in the console`,
   action: { kind: 'manager', tab: 'ops', card: a.id },
