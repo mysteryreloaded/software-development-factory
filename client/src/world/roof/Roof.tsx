@@ -13,6 +13,7 @@ import { RoofDeck } from './RoofDeck';
 import { roofReport, runRoofOp, useRoofReport } from './roofOps';
 import { RoofPeople } from './RoofPeople';
 import { mountRoof } from './roofState';
+import { SmokeNook } from '../SmokeBreak';
 import { StringLights } from './StringLights';
 import { Telescope } from './Telescope';
 
@@ -37,6 +38,7 @@ export default function Roof({ top }: { top: number }) {
       <Garden />
       <StringLights />
       <DeckChairs />
+      <SmokeNook id="roof" bench />
       <Grill />
       <Telescope />
       <Billboards top={top} />

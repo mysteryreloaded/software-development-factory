@@ -600,6 +600,22 @@ export function boop(pos?: Vec3) {
   tone({ name: 'boop', group: 'toys', pos, freq: 1040, to: 660, type: 'triangle', dur: 0.07, peak: 0.025, attack: 0.004 });
 }
 
+/** The smoke break's grinder, twisting its lid: a short, gritty rasp. */
+export function smokeGrind(pos: Vec3) {
+  noise({ name: 'smoke:grind', group: 'toys', pos, dur: 0.5, peak: 0.06, filter: 'bandpass', freq: 900, to: 650, q: 3, attack: 0.04 });
+}
+
+/** The smoke break's lighter: a flick-click, then a soft ~1 s flame hiss. */
+export function smokeLight(pos: Vec3) {
+  tone({ name: 'smoke:light', group: 'toys', pos, freq: 1800, type: 'square', dur: 0.03, peak: 0.05, attack: 0.002 });
+  noise({ name: 'smoke:light', group: 'toys', pos, at: 0.05, dur: 1, peak: 0.03, filter: 'bandpass', freq: 1400, to: 1100, q: 1.2, attack: 0.1 });
+}
+
+/** A soft crackle as the smoke break's ember brightens on a puff. */
+export function smokeCrackle(pos: Vec3) {
+  noise({ name: 'smoke:puff', group: 'toys', pos, dur: 0.3, peak: 0.025, filter: 'highpass', freq: 2200, q: 0.7, attack: 0.02 });
+}
+
 /** The roomba sucking up a dart: a rising slurp of air with a little pop at the end. */
 export function slurp(pos: Vec3) {
   const o = { name: 'roomba:slurp', group: 'toys', pos } as const;
