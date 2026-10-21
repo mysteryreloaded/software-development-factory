@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import type { TermClientMessage, TermServerMessage } from '../../../shared/types';
+import { pastScrollThreshold, touchScrollLines } from './termTouch';
 
 // An agent's real terminal: their CLI's screen streamed from the office (/ws/term), and what you type sent back to it.
 // Opening it late shows everything so far: the office keeps a copy of each agent's screen and scrollback.
@@ -121,6 +122,68 @@ export function LiveTerminal({ agentId, className }: { agentId: string; classNam
     ro.observe(el);
     void document.fonts?.ready.then(() => !closed && fitAndTell());
 
+    // Touch scrolling: xterm 6's viewport only answers the mouse wheel, so a one-finger drag is turned into
+    // scrollLines calls (normal buffer) or forwarded as wheel steps (alternate buffer, full-screen TUIs, which
+    // scroll themselves on a reported wheel event and have no scrollback of their own).
+    let touchId: number | null = null;
+    let startX = 0;
+    let startY = 0;
+    let lastY = 0;
+    let dragging = false;
+    let carryPx = 0;
+    const lineHeightPx = () => {
+      const screen = el.querySelector('.xterm-screen') as HTMLElement | null;
+      return screen && term.rows > 0 ? screen.clientHeight / term.rows : 0;
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      touchId = t.identifier;
+      startX = t.clientX;
+      startY = lastY = t.clientY;
+      dragging = false;
+      carryPx = 0;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (touchId === null) return;
+      const t = Array.from(e.changedTouches).find((x) => x.identifier === touchId) ?? Array.from(e.touches).find((x) => x.identifier === touchId);
+      if (!t) return;
+      if (!dragging) {
+        if (!pastScrollThreshold(t.clientX - startX, t.clientY - startY)) return;
+        dragging = true;
+      }
+      e.preventDefault();
+      const deltaY = t.clientY - lastY;
+      lastY = t.clientY;
+      if (term.buffer.active.type === 'alternate') {
+        // The app in the alt buffer scrolls itself on a wheel event xterm reports to it; dragging down pans the
+        // same way a scrollback drag would (earlier output/up), so it gets the opposite sign of a drag down.
+        term.element?.dispatchEvent(
+          new WheelEvent('wheel', {
+            deltaY: -deltaY,
+            deltaMode: WheelEvent.DOM_DELTA_PIXEL,
+            clientX: t.clientX,
+            clientY: t.clientY,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        return;
+      }
+      const step = touchScrollLines(deltaY, carryPx, lineHeightPx());
+      carryPx = step.carryPx;
+      if (step.lines !== 0) term.scrollLines(-step.lines);
+    };
+    const onTouchEnd = () => {
+      touchId = null;
+      dragging = false;
+      carryPx = 0;
+    };
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+
     return () => {
       closed = true;
       clearTimeout(retry);
@@ -128,6 +191,10 @@ export function LiveTerminal({ agentId, className }: { agentId: string; classNam
       ro.disconnect();
       input.dispose();
       el.removeEventListener('keydown', onKey);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
       ws?.close();
       term.dispose();
     };

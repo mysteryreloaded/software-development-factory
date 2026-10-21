@@ -1516,6 +1516,7 @@ input.inline:focus {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  touch-action: none; /* a swipe scrolls the terminal (LiveTerminal.tsx); don't let the browser pan the panel instead */
 }
 /* The padding sits on .xterm itself: the fit addon subtracts that element's padding, not its parent's. */
 .live-term-screen .xterm {
