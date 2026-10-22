@@ -116,17 +116,17 @@ export const OfficeFloor = memo(function OfficeFloor({ repo }: { repo: RepoView 
       ))}
 
       <WallSign
-        position={[-4.6, 1.95, HALF_D - 0.03]}
-        size={[4.2, 1.3]}
-        px={[1024, 317]}
+        position={[-4.6, 2.275, HALF_D - 0.03]}
+        size={[5.25, 1.95]}
+        px={[1280, 475]}
         draw={(ctx) =>
           drawSign(
             ctx,
-            1024,
-            317,
+            1280,
+            475,
             [
               { text: `FLOOR ${repo.floor}`, size: 58, color: 'rgba(255,255,255,0.85)', weight: 600 },
-              { text: repo.fullName, size: 74 },
+              { text: repo.fullName, size: 74, fit: 'shrink' },
               { text: repo.description || 'no description', size: 36, weight: 500, color: 'rgba(255,255,255,0.85)' },
             ],
             repo.color,
