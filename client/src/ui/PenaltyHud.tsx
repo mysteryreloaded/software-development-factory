@@ -1,8 +1,28 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { Key } from './Key';
-import { penaltyView, playerRole, subscribePenalty, type PenaltyView } from '../world/park/penaltyState';
+import { penaltyChargePower, penaltyView, playerRole, subscribePenalty, type PenaltyView } from '../world/park/penaltyState';
 
 // Playing a penalty shoot-out (a kick in progress): the score, whose kick it is, the power bar, and the controls.
+
+/** The charge bar while shooting: animates itself from `chargeAt`, off the synced snapshot so it isn't rebuilt every frame. */
+function ChargeMeter({ at }: { at: number }) {
+  const fill = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const p = penaltyChargePower(at);
+      if (fill.current) fill.current.style.transform = `scaleX(${p})`;
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  }, [at]);
+  return (
+    <div className="charge">
+      <div ref={fill} className="charge-fill" />
+    </div>
+  );
+}
 
 function penaltyStatus(v: PenaltyView): string {
   if (v.stage === 'walkup') return `${v.opponentName} is on the way out to the park…`;
@@ -26,11 +46,7 @@ export function PenaltyHud() {
           <span>{v.opponentName}</span>
         </div>
         {status && <div className="hud-pong-status">{status}</div>}
-        {v.you === 'shooter' && v.stage === 'live' && (
-          <div className="charge">
-            <div className="charge-fill" style={{ transform: `scaleX(${v.power})` }} />
-          </div>
-        )}
+        {v.you === 'shooter' && v.stage === 'live' && v.chargeAt !== null && <ChargeMeter at={v.chargeAt} />}
       </div>
       <div className="hud-hint hud-pong-keys">
         {playerRole() === 'keeper' ? (

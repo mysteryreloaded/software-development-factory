@@ -18,7 +18,7 @@ const WINDUP_MS = [900, 1700] as const;
 const RESULT_MS = 1600;
 const OVER_MS = 4000;
 /** Full power, held this long. */
-const CHARGE_MS = 900;
+export const CHARGE_MS = 900;
 /** How far either side of the posts (and above the bar) you may aim: beyond this is an obvious, instant miss. */
 const OVER_AIM = 1.6;
 
@@ -61,6 +61,7 @@ export const forcePenaltyDive = (dive: Dive | null) => void (forcedDive = dive);
 export const penaltyMatch = () => match;
 
 export function penaltyChanged() {
+  cached = null;
   for (const fn of listeners) fn();
 }
 
@@ -184,6 +185,7 @@ export function penaltyCharge(on: boolean) {
   if (on && !match.charging) {
     match.charging = true;
     match.chargeAt = performance.now();
+    penaltyChanged();
   } else if (!on && match.charging) {
     match.charging = false;
     strike(match.aim.x, match.aim.y, match.power);
@@ -303,9 +305,14 @@ export interface PenaltyView {
   score: { player: number; opponent: number };
   kicksShown: ('goal' | 'miss')[];
   power: number;
+  /** When charging, performance.now() the charge began (for the HUD's own rAF-driven meter); null otherwise. */
+  chargeAt: number | null;
   winner: Side | null;
   gamePoint: boolean;
 }
+
+/** Power right now, 0..1, from when a charge began; pure, so a per-frame HUD meter can read it without a snapshot. */
+export const penaltyChargePower = (chargeAt: number, now = performance.now()) => Math.min(1, (now - chargeAt) / CHARGE_MS);
 
 /** Where the camera sits while you play: behind the ball to shoot, at the keeper's eye (tracking your shuffle) to save. */
 export function penaltyCamera(): { x: number; y: number; z: number; yaw: number; pitch: number } | null {
@@ -323,12 +330,16 @@ export function penaltyCamera(): { x: number; y: number; z: number; yaw: number;
   return { x, y: 1.7, z, yaw: facing(x, z, g.spotX, g.z), pitch: 0 };
 }
 
+let cached: PenaltyView | null = null;
+
+/** The match as the HUD shows it (the same object until something changes), or null with nobody playing. */
 export function penaltyView(): PenaltyView | null {
   const m = match;
   if (!m) return null;
+  if (cached) return cached;
   const score = (side: Side) => m.kicks.filter((k) => k.side === side && k.scored).length;
   const next = shootoutState(m.kicks);
-  return {
+  cached = {
     opponentName: m.opponentName,
     you: playerRole() ?? 'shooter',
     stage: m.stage,
@@ -336,7 +347,9 @@ export function penaltyView(): PenaltyView | null {
     score: { player: score('player'), opponent: score('opponent') },
     kicksShown: m.kicks.map((k) => (k.scored ? 'goal' : 'miss')),
     power: m.power,
+    chargeAt: m.charging ? m.chargeAt : null,
     winner: m.winner,
     gamePoint: next.winner === null && m.kicks.length >= 4,
   };
+  return cached;
 }
