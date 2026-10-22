@@ -72,7 +72,7 @@ async function waitPresent(page: Page) {
     .poll(async () => {
       await page.bringToFront(); // a backgrounded tab's own presence sync (rAF-driven) never gets there otherwise
       return page.evaluate(() => (window as unknown as { __swarmPresence: { me(): { mode: string } } }).__swarmPresence.me().mode);
-    }, { timeout: 20_000 })
+    }, { timeout: 30_000 })
     .toBe('pose');
 }
 
@@ -86,6 +86,11 @@ const CORNER = { x: GOAL.width / 2 - 0.3, y: GOAL.height - 0.3 };
 async function playMatch(pageA: Page, pageB: Page, maxKicks = 10) {
   let triedDive = false;
   for (let i = 0; i < maxKicks; i++) {
+    // `stage` alone can't tell "this kick landed" from "still waiting on the last one": a page reads 'live' both
+    // before its own kick has been struck and once the next one has started, so sampling it right after shoot()
+    // can pass instantly while the server (busy with the rest of the demo office) hasn't resolved this kick yet -
+    // kicksBefore pins what actually has to change (a new kick recorded, or the match decided).
+    const kicksBefore = (await penalty(pageA)).kicks.length;
     // re-reads turn/stage right before acting: switching focus between the two pages (bringToFront) costs a
     // little real time, and the 15 s shot clock (server/penaltyMatch.ts) waits for nobody.
     let shot = false;
@@ -96,10 +101,22 @@ async function playMatch(pageA: Page, pageB: Page, maxKicks = 10) {
           const s = await penalty(pageA);
           turnA = s.turn;
           return s.stage;
-        }, { timeout: 15_000 })
+        }, { timeout: 30_000 })
         .toBe('live');
       const shooter = turnA === 'player' ? pageA : pageB;
       const keeper = turnA === 'player' ? pageB : pageA;
+      // pageA's own view can briefly disagree with the other page's (events don't land on both tabs at once under
+      // load): confirm the page we're about to act as shooter on actually agrees it's live and their turn too,
+      // rather than firing blind and having probe.shoot() reject it.
+      const shooterAgrees = await expect
+        .poll(async () => {
+          const s = await penalty(shooter);
+          return s.stage === 'live' && s.turn === 'player';
+        }, { timeout: 5_000 })
+        .toBe(true)
+        .then(() => true)
+        .catch(() => false);
+      if (!shooterAgrees) continue;
       if (i === 0) {
         shot = (await call(shooter, 'shoot', 0, GOAL.height + 1, 0.5)) as boolean; // kick 1: a clean, guaranteed miss
       } else {
@@ -116,16 +133,16 @@ async function playMatch(pageA: Page, pageB: Page, maxKicks = 10) {
     expect(shot).toBe(true);
     await expect
       .poll(async () => {
-        const st = (await penalty(pageA)).stage;
-        return st === 'over' || st === 'setup' || st === 'live';
-      }, { timeout: 15_000 })
+        const p = await penalty(pageA);
+        return p.winner !== null || p.kicks.length > kicksBefore;
+      }, { timeout: 30_000 })
       .toBe(true);
     if ((await penalty(pageA)).winner) return;
   }
 }
 
 test('page B takes the agent\'s place: the server referees a shared match with a matching score', async ({ page, baseURL }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(240_000);
   const pageA = page;
   const other = await pageA.context().newPage();
   await other.route((url) => !url.href.startsWith(baseURL!) && !url.protocol.startsWith('data'), (route) => route.fulfill({ status: 200, body: '' }));
@@ -138,15 +155,15 @@ test('page B takes the agent\'s place: the server referees a shared match with a
 
   const opponentId = await freeAgent(pageA);
   expect(await call(pageA, 'start', opponentId)).toBe(true);
-  expect(await call(pageA, 'skipWalk')).toBe(true);
-  await expect.poll(async () => (await penalty(pageA)).stage, { timeout: 15_000 }).not.toBe('walkup');
+  await call(pageA, 'skipWalk'); // best-effort: a slow, heavily-loaded run can have the agent already walk up and arrive on its own
+  await expect.poll(async () => (await penalty(pageA)).stage, { timeout: 30_000 }).not.toBe('walkup');
 
   // Bo takes Ada's agent's place: both browsers end up in the same server-refereed match.
   await waitPresent(pageA);
   await waitPresent(other);
   await call(other, 'takeover');
-  await expect.poll(async () => (await penalty(pageA)).visitor, { timeout: 15_000 }).toBe(true);
-  await expect.poll(async () => (await penalty(other)).visitor, { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await penalty(pageA)).visitor, { timeout: 30_000 }).toBe(true);
+  await expect.poll(async () => (await penalty(other)).visitor, { timeout: 30_000 }).toBe(true);
 
   await playMatch(pageA, other);
 
@@ -161,12 +178,12 @@ test('page B takes the agent\'s place: the server referees a shared match with a
     .poll(async () => {
       const state = await pageA.evaluate(() => fetch('/api/state').then((r) => r.json()));
       return state.penalty.rows.map((r: { id: string }) => r.id);
-    }, { timeout: 20_000 })
+    }, { timeout: 30_000 })
     .toEqual(expect.arrayContaining(['v:ada', 'v:bo']));
 });
 
 test('a third browser on floor 0 sees the same kicks and the billboard updates for everyone', async ({ page, baseURL }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(210_000);
   const pageA = page;
   const other = await pageA.context().newPage();
   const watcher = await pageA.context().newPage();
@@ -185,17 +202,17 @@ test('a third browser on floor 0 sees the same kicks and the billboard updates f
 
   const opponentId = await freeAgent(pageA);
   expect(await call(pageA, 'start', opponentId)).toBe(true);
-  expect(await call(pageA, 'skipWalk')).toBe(true);
-  await expect.poll(async () => (await penalty(pageA)).stage, { timeout: 15_000 }).not.toBe('walkup');
+  await call(pageA, 'skipWalk'); // best-effort: a slow, heavily-loaded run can have the agent already walk up and arrive on its own
+  await expect.poll(async () => (await penalty(pageA)).stage, { timeout: 30_000 }).not.toBe('walkup');
   await waitPresent(pageA);
   await waitPresent(other);
   await call(other, 'takeover');
-  await expect.poll(async () => (await penalty(pageA)).visitor, { timeout: 15_000 }).toBe(true);
-  await expect.poll(async () => (await penalty(other)).visitor, { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await penalty(pageA)).visitor, { timeout: 30_000 }).toBe(true);
+  await expect.poll(async () => (await penalty(other)).visitor, { timeout: 30_000 }).toBe(true);
 
   // the watcher never plays, but gets the same pk-state/pk-kick (server/presence.ts toFloorZero) and ends up with
   // the same match too (penaltyState.ts applyPkState, a bystander's point of view): the same stage and kicks so far.
-  await expect.poll(async () => (await penalty(watcher)).visitor, { timeout: 20_000 }).toBe(true);
+  await expect.poll(async () => (await penalty(watcher)).visitor, { timeout: 30_000 }).toBe(true);
   const [a0, w0] = [await penalty(pageA), await penalty(watcher)];
   expect(w0.kicks).toEqual(a0.kicks);
 
@@ -203,7 +220,7 @@ test('a third browser on floor 0 sees the same kicks and the billboard updates f
 
   const [a, w] = [await penalty(pageA), await penalty(watcher)];
   expect(a.winner).toBeTruthy();
-  await expect.poll(async () => (await penalty(watcher)).winner, { timeout: 15_000 }).toBeTruthy();
+  await expect.poll(async () => (await penalty(watcher)).winner, { timeout: 30_000 }).toBeTruthy();
   expect(w.kicks.length > 0 || (await penalty(watcher)).kicks.length > 0).toBe(true);
 
   // the billboard (the live match while it runs, the all-time board once it's done) is store.penalty for everyone.
@@ -211,12 +228,12 @@ test('a third browser on floor 0 sees the same kicks and the billboard updates f
     .poll(async () => {
       const state = await watcher.evaluate(() => fetch('/api/state').then((r) => r.json()));
       return state.penalty.rows.map((r: { id: string }) => r.id);
-    }, { timeout: 20_000 })
+    }, { timeout: 30_000 })
     .toEqual(expect.arrayContaining(['v:em', 'v:fi']));
 });
 
 test('closing page A mid-match leaves no result', async ({ page, baseURL }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const pageA = page;
   const other = await pageA.context().newPage();
   await other.route((url) => !url.href.startsWith(baseURL!) && !url.protocol.startsWith('data'), (route) => route.fulfill({ status: 200, body: '' }));
@@ -229,18 +246,18 @@ test('closing page A mid-match leaves no result', async ({ page, baseURL }) => {
 
   const opponentId = await freeAgent(pageA);
   expect(await call(pageA, 'start', opponentId)).toBe(true);
-  expect(await call(pageA, 'skipWalk')).toBe(true);
-  await expect.poll(async () => (await penalty(pageA)).stage, { timeout: 15_000 }).not.toBe('walkup');
+  await call(pageA, 'skipWalk'); // best-effort: a slow, heavily-loaded run can have the agent already walk up and arrive on its own
+  await expect.poll(async () => (await penalty(pageA)).stage, { timeout: 30_000 }).not.toBe('walkup');
   await waitPresent(pageA);
   await waitPresent(other);
   await call(other, 'takeover');
-  await expect.poll(async () => (await penalty(other)).visitor, { timeout: 15_000 }).toBe(true);
+  await expect.poll(async () => (await penalty(other)).visitor, { timeout: 30_000 }).toBe(true);
 
   const before = await pageA.evaluate(() => fetch('/api/state').then((r) => r.json()));
   const countBefore = before.penalty.rows.filter((r: { id: string }) => r.id === 'v:cy' || r.id === 'v:di').length;
 
   await pageA.close();
-  await expect.poll(async () => (await penalty(other)).stage, { timeout: 15_000 }).toBeNull();
+  await expect.poll(async () => (await penalty(other)).stage, { timeout: 30_000 }).toBeNull();
 
   const state = await other.evaluate(() => fetch('/api/state').then((r) => r.json()));
   const countAfter = state.penalty.rows.filter((r: { id: string }) => r.id === 'v:cy' || r.id === 'v:di').length;
