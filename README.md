@@ -104,7 +104,7 @@ More in [How it works](docs/how-it-works.md#agents-terminals).
 | mouse / left click, playing ping-pong | move the paddle (swing it for pace and spin) / toss and serve |
 | `G` | drop what you're holding, or peel the whiteboard sticky you aim at off the board |
 | `R` | reload a blaster |
-| `-` / `+` | the jukebox softer or louder |
+| `-` / `+` | the jukebox softer or louder (all the way down turns it off) |
 | `T` (hold) | the emote wheel: wave, thumbs up, clap, point, laugh |
 | `X` | ping where you aim, for everyone on the floor |
 | `V` (hold, in a message box) | talk instead of typing |

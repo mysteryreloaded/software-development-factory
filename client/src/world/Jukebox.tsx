@@ -11,6 +11,7 @@ import { useKeyName } from '../ui/controls';
 import { roundRect, SANS } from './draw';
 import { useCanvasTexture, useInteractable } from './interact';
 import { SONGS, beatAt, beatPulse, firstSongFor, holidayTrack, isFocusSong, moodOf, nextSong, noteAge, parseStation, stationSongs, trackFor, type Song, type Station } from './jukeboxSongs';
+import { clampJukeboxLevel, louder, nextLevel, OFF_LEVEL, powerToggle, softer } from './jukeboxPower';
 import { HALF_D, JUKEBOX } from './layout';
 import { themeSongs } from './themes/active';
 import { markBloom } from './gfx/bloomMarks';
@@ -18,30 +19,23 @@ import { glow, toon } from './materials';
 import { Ball, Box, Cyl } from './Toon';
 
 // Every floor's jukebox: it plays through the playlist (jukeboxSongs.ts) by itself, each floor starting on its own song.
-// Aim at it and press E for the next song, or at its red button to stop and start the music (remembered in this
-// browser). Its − and + buttons (or −/+ and the mouse wheel while you look at it) set its volume, shown on the
-// now-playing card and remembered per floor. Its Focus button switches the floor between All songs and the Focus
-// station (lo-fi and ambient only), also remembered per floor: E and the next song stay on the station. It bounces,
-// spins its record, cycles its neon and puffs music notes on the beat. Only the current floor is drawn, so there's one
-// jukebox at a time; each floor remembers the song it's on for the session.
+// Every jukebox starts off (level 0: silent, still, unlit) whenever the office opens; turning one on or off (the red
+// button, or − all the way down) only lasts the session. Aim at it and press E for the next song (switching it on at
+// its last level if it was off), or at its red button to turn it on or off. Its − and + buttons (or −/+ and the mouse
+// wheel while you look at it) step its level 0-6, shown on the now-playing card and, above 0, remembered per floor in
+// this browser to restore on power-on or E. Its Focus button switches the floor between All songs and the Focus
+// station (lo-fi and ambient only, no effect while off), also remembered per floor: E and the next song stay on the
+// station. While on it bounces, spins its record, cycles its neon and puffs music notes on the beat; while off,
+// none of that moves or changes colour. Only the current floor is drawn, so there's one jukebox at a time; each
+// floor remembers the song and level it's on for the session (jukeboxPower.ts has the level's own rules).
 
-const ON_KEY = 'cubefarm:jukebox';
 const VOL_KEY = 'cubefarm:jukebox:vol:';
 const STATION_KEY = 'cubefarm:jukebox:station:';
 
-function loadOn() {
-  try {
-    return localStorage.getItem(ON_KEY) !== 'off';
-  } catch {
-    return true;
-  }
-}
-
-let on = loadOn();
 let floorNow: number | null = null;
 const songs = new Map<number, number>(); // floor → playlist index
-const volumes = new Map<number, number>(); // floor → volume level, loaded from this browser on first use
-const stations = new Map<number, Station>(); // floor → station, likewise
+const levels = new Map<number, number>(); // floor → level this session, 0 (off) until turned on; every floor starts off
+const stations = new Map<number, Station>(); // floor → station, loaded from this browser on first use
 const spot: Vec3 = { x: 0, y: 1, z: 0 };
 const listeners = new Set<() => void>();
 
@@ -88,17 +82,34 @@ function stationFor(floor: number): Station {
   return s;
 }
 
-function volumeFor(floor: number) {
-  let v = volumes.get(floor);
+/** The level this session: 0 (off) until turned on, never read from storage. */
+function levelFor(floor: number): number {
+  let v = levels.get(floor);
   if (v === undefined) {
-    try {
-      v = clampMusicLevel(localStorage.getItem(VOL_KEY + floor));
-    } catch {
-      v = clampMusicLevel(null);
-    }
-    volumes.set(floor, v);
+    v = OFF_LEVEL;
+    levels.set(floor, v);
   }
   return v;
+}
+
+/** The last level above 0 this floor played at, remembered in this browser, to restore on power-on or E (default 3). */
+function lastLevelFor(floor: number) {
+  try {
+    return clampMusicLevel(localStorage.getItem(VOL_KEY + floor));
+  } catch {
+    return clampMusicLevel(null);
+  }
+}
+
+function setLevel(floor: number, v: number) {
+  levels.set(floor, v);
+  if (v > OFF_LEVEL) {
+    try {
+      localStorage.setItem(VOL_KEY + floor, String(v));
+    } catch {
+      // storage may be unavailable; the level just won't be remembered
+    }
+  }
 }
 
 function emit() {
@@ -108,9 +119,10 @@ function emit() {
 /** Plays the current floor's song from the top (or stops, when the jukebox is off). */
 function start() {
   const floor = floorNow;
-  if (floor !== null) setMusicLevel(volumeFor(floor));
-  if (floor === null || !on) stopMusic();
+  const level = floor === null ? OFF_LEVEL : levelFor(floor);
+  if (floor === null || level === OFF_LEVEL) stopMusic();
   else {
+    setMusicLevel(level);
     playTrack(holidayNow(floor) ?? trackFor(songIndex(floor)), spot, () => {
       advance(floor);
       start();
@@ -143,26 +155,29 @@ function volumeClick(level: number, moved: boolean) {
 
 export type JukeboxOp = 'next' | 'toggle' | 'station' | 'vol+' | 'vol-';
 
-/** Sets the current floor's jukebox volume (1-6), remembered per floor in this browser. */
+/** Sets the current floor's jukebox level (0 off, 1-6 on), remembered per floor in this browser (0 isn't). */
 export function setJukeboxVolume(n: number) {
   if (floorNow === null) return;
-  const from = volumeFor(floorNow);
-  const v = clampMusicLevel(n);
+  const floor = floorNow;
+  const from = levelFor(floor);
+  const v = clampJukeboxLevel(n);
+  if (from === OFF_LEVEL && v === OFF_LEVEL) return; // off, pressed -: no sound
   volumeClick(v, v !== from);
   if (v === from) return;
-  volumes.set(floorNow, v);
-  try {
-    localStorage.setItem(VOL_KEY + floorNow, String(v));
-  } catch {
-    // storage may be unavailable; the level just won't be remembered
+  setLevel(floor, v);
+  if (from === OFF_LEVEL) {
+    needle(); // switching on: the song starts fresh
+    start();
+    return;
   }
-  setMusicLevel(v);
+  if (v === OFF_LEVEL) stopMusic();
+  else setMusicLevel(v);
   emit();
 }
 
 /**
- * Switches the current floor between All songs and Focus, remembered per floor. Turning Focus on during a lively song
- * moves on to the next focus song; otherwise the song plays on.
+ * Switches the current floor between All songs and Focus (only while it's on), remembered per floor. Turning Focus on
+ * during a lively song moves on to the next focus song; otherwise the song plays on.
  */
 function toggleStation() {
   if (floorNow === null) return;
@@ -177,36 +192,38 @@ function toggleStation() {
   const now = songIndex(floor);
   if (station === 'focus' && !isFocusSong(SONGS[now])) {
     songs.set(floor, nextSong(now, station));
-    if (on) needle();
+    needle();
     start();
   } else emit();
 }
 
 /**
- * E on the jukebox: the next song on its station (switching it on if it was off), its red button: music on or off,
- * Focus: the station, − and +: volume.
+ * E on the jukebox: the next song on its station (switching it on at the last level if it was off), its red button:
+ * the last level or off, Focus: the station (does nothing while off), − and +: one level softer or louder.
  */
 export function jukeboxAction(op: JukeboxOp) {
   if (floorNow === null) return;
+  const floor = floorNow;
   if (op === 'vol+' || op === 'vol-') {
-    setJukeboxVolume(volumeFor(floorNow) + (op === 'vol+' ? 1 : -1));
+    const level = levelFor(floor);
+    setJukeboxVolume(op === 'vol+' ? louder(level) : softer(level));
     return;
   }
-  clunk();
+  const level = levelFor(floor);
   if (op === 'station') {
+    if (level === OFF_LEVEL) return; // off: Focus does nothing, no sound
+    clunk();
     toggleStation();
     return;
   }
+  clunk();
   if (op === 'next') {
-    advance(floorNow);
-    on = true;
-  } else on = !on;
-  try {
-    localStorage.setItem(ON_KEY, on ? 'on' : 'off');
-  } catch {
-    // storage may be unavailable; the choice just won't be remembered
+    advance(floor);
+    setLevel(floor, nextLevel(level, lastLevelFor(floor)));
+  } else {
+    setLevel(floor, powerToggle(level, lastLevelFor(floor)));
   }
-  if (on) needle();
+  if (levelFor(floor) > OFF_LEVEL) needle();
   start();
 }
 
@@ -223,14 +240,19 @@ export interface JukeboxSnapshot {
   /** Seconds into the song and the beat, while it plays. */
   time: number | null;
   beat: number | null;
-  /** The volume level, 1 to `levels`, and whether the music is ducked under an alert or a voice right now. */
+  /** The level, 0 (off) to `levels`, and whether the music is ducked under an alert or a voice right now. */
   volume: number | null;
   levels: number;
   ducked: boolean;
   /** The lo-fi texture's vinyl bed playing right now, and the WebAudio nodes the music holds (its chain, its notes in flight). */
   crackle: boolean;
   nodes: { chain: number; notes: number };
+  /** What the drawn jukebox looks like right now, so a test can see that none of it moves or changes colour while off. */
+  still: { neon: string; record: number; bounce: number; window: boolean };
 }
+
+/** The frame loop's last word on `still`, read by the probe (outside React). */
+const stillNow = { neon: '#6c757d', record: 0, bounce: 1, window: false };
 
 if (typeof window !== 'undefined' && !Object.getOwnPropertyDescriptor(window, '__swarmJukebox')) {
   Object.defineProperty(window, '__swarmJukebox', {
@@ -241,19 +263,21 @@ if (typeof window !== 'undefined' && !Object.getOwnPropertyDescriptor(window, '_
       const s = floorNow === null ? null : songNow(floorNow);
       const station = floorNow === null ? null : stationFor(floorNow);
       const nodes = musicNodes();
+      const level = floorNow === null ? null : levelFor(floorNow);
       return {
-        on,
+        on: level !== null && level > OFF_LEVEL,
         floor: floorNow,
         station,
         stationSize: station ? stationSongs(station).length : 0,
         song: s && index !== null ? { id: s.id, title: s.title, artist: s.artist, index, mood: moodOf(s) } : null,
         time: sec,
         beat: t && sec !== null ? beatAt(t, sec) : null,
-        volume: floorNow === null ? null : volumeFor(floorNow),
+        volume: level,
         levels: MAX_MUSIC_LEVEL,
         ducked: musicDucked(),
         crackle: nodes.crackle,
         nodes: { chain: nodes.chain, notes: nodes.notes },
+        still: { ...stillNow },
       };
     },
     enumerable: false,
@@ -274,6 +298,7 @@ const { w: W, d: D } = JUKEBOX;
 const BODY = '#d62828';
 const TRIM = '#ffd166';
 const INK = '#1f1d2b';
+const OFF_GREY = '#6c757d';
 const ARCH_Y = 1.0;
 const NOTES = [0, 1, 2, 3];
 const NOTE_LIFE = 3; // beats each note rises for
@@ -309,7 +334,10 @@ function musicNoteTexture() {
 }
 
 function useJukeboxView(floor: number) {
-  const read = () => ({ on, index: floorNow === null ? 0 : songIndex(floorNow), song: songNow(floorNow ?? floor), vol: volumeFor(floorNow ?? floor), station: stationFor(floorNow ?? floor) });
+  const read = () => {
+    const f = floorNow ?? floor;
+    return { on: levelFor(f) > OFF_LEVEL, index: floorNow === null ? 0 : songIndex(floorNow), song: songNow(f), vol: levelFor(f), station: stationFor(f) };
+  };
   const [view, setView] = useState(read);
   useEffect(() => {
     const fn = () => setView(read());
@@ -364,8 +392,8 @@ export function Jukebox({ x, floor }: { x: number; floor: number }) {
             { text: song.artist, size: 38, weight: 600 },
           ])
         : drawDisplay(ctx, '#495057', view.vol, [
-            { text: 'JUKEBOX', size: 66, weight: 800 },
-            { text: focus ? `Focus · press ${use} to play` : `press ${use} to play`, size: 40, weight: 600 },
+            { text: 'JUKEBOX · OFF', size: 54, weight: 800 },
+            { text: `press + or ${use} to play`, size: 36, weight: 600 },
           ]),
     [view.on, view.vol, song, focus, use],
   );
@@ -373,13 +401,13 @@ export function Jukebox({ x, floor }: { x: number; floor: number }) {
   const volume = `volume ${view.vol} of ${MAX_MUSIC_LEVEL}`;
   const nextLabel = focus ? `Next focus song · now playing ${song.title}` : `Next song · now playing ${song.title}`;
   const picker = useInteractable<THREE.Group>({ id: 'jukebox:next', label: view.on ? nextLabel : 'Play the jukebox', action: { kind: 'jukebox', op: 'next' } }, 3);
-  const power = useInteractable<THREE.Group>({ id: 'jukebox:power', label: view.on ? 'Stop the music' : 'Play music', action: { kind: 'jukebox', op: 'toggle' } }, 3);
+  const power = useInteractable<THREE.Group>({ id: 'jukebox:power', label: view.on ? 'Stop the music' : 'Turn the jukebox on', action: { kind: 'jukebox', op: 'toggle' } }, 3);
   const station = useInteractable<THREE.Group>(
     { id: 'jukebox:station', label: focus ? 'All songs · the Focus station is on (lo-fi & ambient)' : 'Focus station · lo-fi & ambient only', action: { kind: 'jukebox', op: 'station' } },
     3,
   );
-  const louder = useInteractable<THREE.Group>({ id: 'jukebox:vol+', label: `Louder · ${volume}`, action: { kind: 'jukebox', op: 'vol+' } }, 3);
-  const softer = useInteractable<THREE.Group>({ id: 'jukebox:vol-', label: `Softer · ${volume}`, action: { kind: 'jukebox', op: 'vol-' } }, 3);
+  const louderBtn = useInteractable<THREE.Group>({ id: 'jukebox:vol+', label: `Louder · ${volume}`, action: { kind: 'jukebox', op: 'vol+' } }, 3);
+  const softerBtn = useInteractable<THREE.Group>({ id: 'jukebox:vol-', label: `Softer · ${view.on ? volume : 'off'}`, action: { kind: 'jukebox', op: 'vol-' } }, 3);
 
   useFrame(() => {
     const t = nowPlaying();
@@ -390,8 +418,14 @@ export function Jukebox({ x, floor }: { x: number; floor: number }) {
     if (dance.current) dance.current.scale.set(1 - 0.015 * p, 1 + 0.035 * p, 1 - 0.015 * p);
     if (dome.current) dome.current.scale.setScalar(1 + 0.4 * p);
     if (record.current && playing) record.current.rotation.z = -Math.max(0, sec) * 3.5;
-    neonArch.color.setHSL((base + beat / 16) % 1, playing ? 0.9 : 0.15, playing ? 0.55 + 0.12 * p : 0.32);
-    neonSides.color.setHSL((base + 0.5 + beat / 16) % 1, playing ? 0.9 : 0.15, playing ? 0.55 + 0.12 * p : 0.32);
+    if (view.on) {
+      neonArch.color.setHSL((base + beat / 16) % 1, playing ? 0.9 : 0.15, playing ? 0.55 + 0.12 * p : 0.32);
+      neonSides.color.setHSL((base + 0.5 + beat / 16) % 1, playing ? 0.9 : 0.15, playing ? 0.55 + 0.12 * p : 0.32);
+    } else {
+      // Off: one fixed unlit grey, never the song's hue.
+      neonArch.color.set(OFF_GREY);
+      neonSides.color.set(OFF_GREY);
+    }
     for (let i = 0; i < NOTES.length; i++) {
       const s = notes.current[i];
       if (!s) continue;
@@ -404,6 +438,10 @@ export function Jukebox({ x, floor }: { x: number; floor: number }) {
       noteMats[i].opacity = 1 - k * k;
       noteMats[i].color.setHSL((base + i * 0.13) % 1, 0.85, 0.65);
     }
+    stillNow.neon = `#${neonArch.color.getHexString()}`;
+    stillNow.record = record.current?.rotation.z ?? 0;
+    stillNow.bounce = dance.current?.scale.y ?? 1;
+    stillNow.window = view.on;
   });
 
   return (
@@ -419,7 +457,7 @@ export function Jukebox({ x, floor }: { x: number; floor: number }) {
         </mesh>
         <Ball r={0.06} position={[0, ARCH_Y + 0.5, 0]} color={TRIM} outline shadow={false} />
         {/* the lit window in the arch, and the record spinning behind it */}
-        <mesh position={[0, ARCH_Y, D / 2 - 0.045]} material={glow('#fff3b0')}>
+        <mesh position={[0, ARCH_Y, D / 2 - 0.045]} material={view.on ? glow('#fff3b0') : toon(OFF_GREY)}>
           <circleGeometry args={[0.36, 24, 0, Math.PI]} />
         </mesh>
         <group ref={record} position={[0, ARCH_Y + 0.15, D / 2 - 0.04]}>
@@ -464,8 +502,8 @@ export function Jukebox({ x, floor }: { x: number; floor: number }) {
         {/* the Focus button, under the power button */}
         <FocusButton ref={station} on={focus} />
         {/* the volume buttons either side of the speaker: − on the left, + on the right */}
-        <VolumeButton ref={softer} x={-0.31} plus={false} />
-        <VolumeButton ref={louder} x={0.31} plus />
+        <VolumeButton ref={softerBtn} x={-0.31} plus={false} />
+        <VolumeButton ref={louderBtn} x={0.31} plus />
         {/* the speaker, thumping on the beat */}
         <mesh position={[0, 0.36, D / 2 - 0.045]} material={toon('#2b2d42')}>
           <circleGeometry args={[0.22, 24]} />
