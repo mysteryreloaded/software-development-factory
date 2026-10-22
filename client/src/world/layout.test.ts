@@ -4,6 +4,7 @@ import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BALCONY_TOP, BENCH, FLOOR_HEIGHT,
 import { APP_SCREEN, BOARD, CEO_DESK, CEO_ROOM, COFFEE_CORNER, coffeeCorner, collide, decorSlots, DESK_RUGS, ELEVATOR, elevatorDoorway, GONG, GONG_SPOT, gongRect, HALF_D, LOBBY_RUG, lobbyColliders, MANAGER_DESK, MANAGER_KIOSK, MANAGER_KIOSK_SPOT, managerKioskRect, MANAGER_ROOM, MISSION, missionColumn, missionRects, officeColliders, PLAYER_RADIUS, RECEPTION, rect, shellColliders, SPAWN, surfaceAt, WAITING, WAITING_TABLE, type Rect } from './layout.ts';
 import { DESK, DESK_ROWS, EAST_DESKS, EAST_ROTATION, MAX_DESKS, SEATS, deskPosition, deskRotation, isEastDesk } from './layout.ts';
 import { spot, walkways } from './walkways.ts';
+import { DRUM_RADIUS, drumColliders } from './revolvingDoor.ts';
 
 const R = 0.3;
 const box: Rect = { minX: 0, maxX: 2, minZ: 0, maxZ: 2 };
@@ -283,6 +284,8 @@ describe('surfaceAt', () => {
 describe('outside: side doors, windows and balconies', () => {
   const KINDS = ['office', 'lobby'] as const;
   const all = (kind: (typeof KINDS)[number]) => (kind === 'office' ? officeColliders() : lobbyColliders());
+  // The lobby's west side has no balcony or patio any more (#41): a revolving door leads straight out to the grounds.
+  const balconySides = (kind: (typeof KINDS)[number]) => SIDES.filter((side) => !(kind === 'lobby' && side === 'west'));
   const contains = (b: Rect, c: Rect) => c.minX >= b.minX - 1e-9 && c.maxX <= b.maxX + 1e-9 && c.minZ >= b.minZ - 1e-9 && c.maxZ <= b.maxZ + 1e-9;
   const touches = (b: Rect, c: Rect) => b.minX < c.maxX && b.maxX > c.minX && b.minZ < c.maxZ && b.maxZ > c.minZ;
 
@@ -341,7 +344,7 @@ describe('outside: side doors, windows and balconies', () => {
 
   it.each(KINDS)('lets you walk from the %s floor straight out of each door to the railing, and back', (kind) => {
     const rects = all(kind);
-    for (const side of SIDES) {
+    for (const side of balconySides(kind)) {
       const s = sideSign(side);
       const z = SIDE_OPENINGS[kind][side].door;
       const inside = { x: s * (HALF_W - 2), z };
@@ -368,8 +371,11 @@ describe('outside: side doors, windows and balconies', () => {
   it.each(KINDS)("keeps the room's furniture out of the way of the %s doors", (kind) => {
     const shell = shellColliders(kind);
     const outside = outsideColliders(kind);
+    // the lobby's west revolving door (#41) is centred on the post, so half its drum sits in the doorway's own
+    // space: it's part of the doorway, like the shell wall, not furniture placed too close to it
+    const drum = kind === 'lobby' ? drumColliders(sideSign('west') * (HALF_W + WALL_T / 2), SIDE_OPENINGS.lobby.west.door) : [];
     const same = (b: Rect, c: Rect) => b.minX === c.minX && b.maxX === c.maxX && b.minZ === c.minZ && b.maxZ === c.maxZ;
-    const furniture = all(kind).filter((b) => !shell.some((w) => same(w, b)) && !outside.some((o) => same(o, b)));
+    const furniture = all(kind).filter((b) => !shell.some((w) => same(w, b)) && !outside.some((o) => same(o, b)) && !drum.some((d) => same(d, b)));
     for (const side of SIDES) {
       const s = sideSign(side);
       const z = SIDE_OPENINGS[kind][side].door;
@@ -380,7 +386,7 @@ describe('outside: side doors, windows and balconies', () => {
   });
 
   it.each(KINDS)('builds each %s balcony: a railing round it toys never fly over, planters and a bench out of the way', (kind) => {
-    for (const side of SIDES) {
+    for (const side of balconySides(kind)) {
       const s = sideSign(side);
       const floor = balconyFloor(side);
       expect(floor.maxX - floor.minX).toBeCloseTo(BALCONY.depth + WALL_T);
@@ -423,6 +429,38 @@ describe('outside: side doors, windows and balconies', () => {
       expect(outsideColliders('office')).toEqual(expect.arrayContaining([t]));
       expect(balconyFurniture('lobby', side).table).toBeNull();
     }
+  it("drops the lobby's west patio (rail, planters, bench) for the revolving door's grounds, but keeps every office's (#41)", () => {
+    const west = balconyFurniture('lobby', 'west');
+    const lobbyWestStuff = [...balconyRailing('west'), ...west.planters, west.bench];
+    expect(outsideColliders('lobby')).toEqual(expect.not.arrayContaining(lobbyWestStuff));
+    expect(lobbyColliders()).toEqual(expect.not.arrayContaining(lobbyWestStuff));
+
+    const officeWest = balconyFurniture('office', 'west');
+    const officeWestStuff = [...balconyRailing('west'), ...officeWest.planters, officeWest.bench];
+    expect(outsideColliders('office')).toEqual(expect.arrayContaining(officeWestStuff));
+    // the lobby's east patio (candidates use it) is untouched
+    const east = balconyFurniture('lobby', 'east');
+    expect(outsideColliders('lobby')).toEqual(expect.arrayContaining([...balconyRailing('east'), ...east.planters, east.bench]));
+  });
+
+  it("solid on the revolving door's drum sides, so the player can't walk through its glass (#41)", () => {
+    const x = sideSign('west') * (HALF_W + WALL_T / 2);
+    const z = SIDE_OPENINGS.lobby.west.door;
+    const drum = drumColliders(x, z);
+    expect(drum).toHaveLength(2);
+    expect(lobbyColliders()).toEqual(expect.arrayContaining(drum));
+    // centred on the post, not stuck out onto the plaza past anything drawn (#41 round 3)
+    for (const r of drum) {
+      expect(r.minX).toBeGreaterThan(x - DRUM_RADIUS);
+      expect(r.maxX).toBeLessThan(x + DRUM_RADIUS);
+    }
+    // stepping into one of the drum's solid sides pushes the player back out of it
+    const side = drum[0];
+    const px = (side.minX + side.maxX) / 2;
+    const pz = (side.minZ + side.maxZ) / 2;
+    expect(collide(px, pz, lobbyColliders(), R)).not.toEqual({ x: px, z: pz });
+    // the open middle between the two sides stays walkable
+    expect(collide(x - DRUM_RADIUS, z, lobbyColliders(), R)).toEqual({ x: x - DRUM_RADIUS, z });
   });
 
   it('hangs the balcony lamps along the middle of each balcony, under the balcony above', () => {

@@ -5,7 +5,9 @@ import { PreviewPill, PreviewSettings } from './AppViewer';
 import { agentsOnRepo, pendingRequests, useStore, type ManagerTab } from '../store';
 import { CEO_ID, DEFAULT_MAX_AGENTS, FLOOR_SEATS, type AgentCli, type EffortLevel, type OfficeUpdateView, type RepoView } from '../../../shared/types';
 import { MESSAGE_MAX } from '../../../shared/message';
+import { MAX_FILES } from '../../../shared/attachments';
 import { CLAUDE_MODELS, modelSuggestions } from '../../../shared/models';
+import { AttachButton, AttachmentChips, usePendingAttachments } from './AttachButton';
 import { CliOptions, CliSelect, cliName, EFFORTS, EffortSelect, LookEditor, LookSelect, ModelInput, NameInput, PromptPreview } from './AgentSettings';
 import { canPostpone, canUpdateNow, drainDeadline, officeUpdateText } from '../officeUpdate';
 import { confirmDialog } from './Confirm';
@@ -264,6 +266,7 @@ function CeoTab() {
   const openOverlay = useStore((s) => s.openOverlay);
   const [text, setText] = useState('');
   const scroller = useRef<HTMLDivElement>(null);
+  const attach = usePendingAttachments();
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -272,10 +275,14 @@ function CeoTab() {
   const working = ceo.status === 'working';
   const pending = pendingRequests(requests);
   const send = (t: string) => {
-    if (!t.trim()) return;
+    if (attach.busy) return;
+    const ids = attach.ids();
+    if (!t.trim() && ids.length === 0) return;
     setText('');
-    void attempt(() => api.messageCeo(t));
+    attach.reset();
+    void attempt(() => api.messageCeo(t, ids));
   };
+  const canSend = (text.trim().length > 0 || attach.files.length > 0) && !attach.busy;
   const decided = requests.filter((r) => r.status !== 'pending').slice(-6).reverse();
   return (
     <div className="tab-grid">
@@ -317,6 +324,7 @@ function CeoTab() {
               ))}
             </div>
           )}
+          <AttachmentChips files={attach.files} remove={attach.remove} />
           <form
             className="row"
             onSubmit={(e) => {
@@ -324,9 +332,19 @@ function CeoTab() {
               send(text);
             }}
           >
-            <input value={text} onChange={(e) => setText(e.target.value)} placeholder={`Message ${ceo.name} (or press P anywhere for your phone)…`} maxLength={MESSAGE_MAX} />
+            <AttachButton onFiles={attach.add} disabled={attach.files.length >= MAX_FILES} />
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onPaste={(e) => {
+                const files = Array.from(e.clipboardData?.files ?? []);
+                if (files.length) attach.add(files);
+              }}
+              placeholder={`Message ${ceo.name} (or press P anywhere for your phone)…`}
+              maxLength={MESSAGE_MAX}
+            />
             <MicButton kind="console" value={text} onChange={setText} onSend={send} />
-            <button className="btn" disabled={!text.trim()}>
+            <button className="btn" disabled={!canSend}>
               Send
             </button>
           </form>

@@ -11,6 +11,8 @@ import { useTouch } from '../world/touch';
 type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'onChange' | 'rows'> & {
   value: string;
   onChange: (value: string) => void;
+  /** Pasting one or more files adds them as attachments (#48) instead of (or alongside) any pasted text. */
+  onFiles?: (files: File[]) => void;
 };
 
 /** Whether this Enter keystroke should send the message (vs. just typing a newline). */
@@ -19,7 +21,7 @@ export function enterSends(x: { touch: boolean; shiftKey: boolean; isComposing: 
   return true;
 }
 
-export function MessageBox({ value, onChange, className, onKeyDown, ...rest }: Props) {
+export function MessageBox({ value, onChange, className, onKeyDown, onFiles, onPaste, ...rest }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const touch = useTouch((s) => s.on);
 
@@ -41,6 +43,11 @@ export function MessageBox({ value, onChange, className, onKeyDown, ...rest }: P
       className={`msg-box ${className ?? ''}`}
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onPaste={(e) => {
+        onPaste?.(e);
+        const files = Array.from(e.clipboardData?.files ?? []);
+        if (files.length && onFiles) onFiles(files);
+      }}
       onKeyDown={(e) => {
         onKeyDown?.(e);
         if (e.defaultPrevented || e.key !== 'Enter') return;

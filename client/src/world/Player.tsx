@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { loadView, pendingRequests, saveView, unreadMessages, useStore, type Focus } from '../store';
 import { api } from '../api';
 import { EYE_HEIGHT, ROOF, SPAWN, collide, surfaceAt, type Rect } from './layout';
+import { isWalkable } from './outside/grounds';
 import { interactables } from './interact';
 import { shutDoorways } from './doors';
 import { LOOK_RADIANS_PER_PX, createLookFilter, filterLookDelta, resetLookFilter, useLookPrefs } from './look';
@@ -255,7 +256,12 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
     const saved = restored.current ? null : loadView();
     restored.current = true;
     perched.current = null; // a perch left behind on the old floor doesn't stand you at its exit here
-    if (saved && saved.floor === floor) {
+    // a view saved out on the lobby's grounds (#41) restores you there; one that's since fallen off them (the old
+    // west patio, say) falls back to the spawn instead of leaving you stuck somewhere unwalkable
+    if (saved && saved.floor === 0 && !isWalkable(saved.x, saved.z)) {
+      camera.position.set(SPAWN.x, EYE_HEIGHT, SPAWN.z);
+      look.current = { yaw: SPAWN.yaw, pitch: -0.05 };
+    } else if (saved && saved.floor === floor) {
       camera.position.set(saved.x, EYE_HEIGHT, saved.z);
       look.current = { yaw: saved.yaw, pitch: saved.pitch };
     } else {

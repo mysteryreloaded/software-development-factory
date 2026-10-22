@@ -536,6 +536,17 @@ export interface HireRequestView {
   decidedBy: 'manager' | 'auto' | null;
 }
 
+/** A file attached to a phone message (#48), as the bubble shows it: GET /api/uploads/:id serves its bytes. */
+export interface AttachmentView {
+  id: string;
+  name: string;
+  mime: string;
+  kind: 'image' | 'video' | 'doc';
+  size: number;
+  width?: number;
+  height?: number;
+}
+
 /** One message in the phone thread between the manager and the CEO. */
 export interface PhoneMessage {
   id: number;
@@ -544,6 +555,7 @@ export interface PhoneMessage {
   at: number;
   requestId?: string; // a hire / let-go proposal this message is about
   voice?: Exclude<VoiceProvider, 'off'>; // who read it aloud when it arrived (absent: nobody), for the phone's ▶ replay
+  attachments?: AttachmentView[]; // files the manager attached (#48); absent for none
 }
 
 export type CeoJobKind = 'onboard' | 'plan' | 'review' | 'chat' | 'triage' | 'code-review';

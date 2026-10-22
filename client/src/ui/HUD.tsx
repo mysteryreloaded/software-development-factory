@@ -154,74 +154,111 @@ export function HUD() {
 
   return (
     <div className="hud">
-      <div className="hud-floor" style={{ ['--accent' as string]: roof ? '#7cc6fe' : (repo?.color ?? '#ff8a5b') }}>
-        <div className="floor-num">{roof ? 'R' : repo ? repo.floor : 'G'}</div>
-        <div>
-          <div className="floor-name">{roof ? `${settings.companyName || 'cubefarm'} · Roof terrace` : repo ? repo.fullName : `${settings.companyName || 'cubefarm'} · Lobby`}</div>
-          <div className="floor-sub">
-            {roof
-              ? 'deck chairs, the barbecue and the telescope'
-              : repo && prs
-                ? `${floorAgents.length} agents · ${floorAgents.filter((a) => a.status === 'working' || a.status === 'preparing').length} working · ${prs.inQa} in QA · ${prs.ready} ready to merge${prs.needsYou ? ` · ${prs.needsYou} need${prs.needsYou === 1 ? 's' : ''} you` : ''}`
-                : `${repos.length} floor${repos.length === 1 ? '' : 's'} connected`}
+      <div className="hud-top">
+        {/* The 4 boxes that can genuinely grow unbounded (the status pills, the office/usage/doctor chips and the
+            GitHub-error banner can all stack up at once): its own scrollable budget, separate from
+            .aim-cards/.hud-hint/.toasts below, so a short landscape phone's agent card doesn't inherit a clip
+            sized for these alone (issue #44 round 4). */}
+        <div className="hud-top-scroll">
+          <div className="hud-floor" style={{ ['--accent' as string]: roof ? '#7cc6fe' : (repo?.color ?? '#ff8a5b') }}>
+            <div className="floor-num">{roof ? 'R' : repo ? repo.floor : 'G'}</div>
+            <div>
+              <div className="floor-name" title={roof ? `${settings.companyName || 'cubefarm'} · Roof terrace` : repo ? repo.fullName : `${settings.companyName || 'cubefarm'} · Lobby`}>
+                {roof ? `${settings.companyName || 'cubefarm'} · Roof terrace` : repo ? repo.fullName : `${settings.companyName || 'cubefarm'} · Lobby`}
+              </div>
+              <div
+                className="floor-sub"
+                title={
+                  roof
+                    ? 'deck chairs, the barbecue and the telescope'
+                    : repo && prs
+                      ? `${floorAgents.length} agents · ${floorAgents.filter((a) => a.status === 'working' || a.status === 'preparing').length} working · ${prs.inQa} in QA · ${prs.ready} ready to merge${prs.needsYou ? ` · ${prs.needsYou} need${prs.needsYou === 1 ? 's' : ''} you` : ''}`
+                      : `${repos.length} floor${repos.length === 1 ? '' : 's'} connected`
+                }
+              >
+                {roof
+                  ? 'deck chairs, the barbecue and the telescope'
+                  : repo && prs
+                    ? `${floorAgents.length} agents · ${floorAgents.filter((a) => a.status === 'working' || a.status === 'preparing').length} working · ${prs.inQa} in QA · ${prs.ready} ready to merge${prs.needsYou ? ` · ${prs.needsYou} need${prs.needsYou === 1 ? 's' : ''} you` : ''}`
+                    : `${repos.length} floor${repos.length === 1 ? '' : 's'} connected`}
+              </div>
+            </div>
+            <OverviewButton />
+          </div>
+
+          <div className="hud-status">
+            {demo && <span className="pill pill-demo">DEMO</span>}
+            <span className={`pill ${replaying ? 'pill-replay' : connected ? 'pill-ok' : restarting ? 'pill-demo' : 'pill-bad'}`}>{replaying ? '▶ replay' : connected ? '● live' : restarting ? '○ restarting' : '○ reconnecting'}</span>
+            <span className="pill">
+              ⚙️ {settings.sessionLimit ? `${running}/${settings.sessionLimit}` : running} sessions
+            </span>
+            <CoinChip />
+            {user && <span className="pill">🐙 {user}</span>}
+            <PhotoButton />
+          </div>
+
+          <div className="hud-chips">
+            <OfficeUpdateChip />
+            <UsageChip />
+            <DoctorChip />
+          </div>
+
+          {!ghReady && ghError && <div className="hud-banner">⚠️ {ghError}</div>}
+        </div>
+
+        {/* The aim card (and the crosshair/held hints, which share its spot — they're about the same thing you're
+            looking at or holding) and the toasts: on a portrait phone these flow with the boxes above too (one
+            shared column and scrollable max-height, on .hud-top itself there). On a short landscape phone there
+            isn't room to share that budget (the card needs to show in full — issue #44 round 4), so .hud-top
+            doesn't clip there and .aim-cards/.toasts instead get their own spot with their own budget (each
+            one's own mobile rules); .hud-top-scroll above still clips just the boxes before this on a landscape
+            phone, so they can't grow into the touch controls either way. */}
+        <div className="hud-top-lower">
+          <div className="aim-cards">
+            <AgentCard />
+            {started && !overlay && !travel && onFoot && <CareerPeek />}
+            {started && !overlay && onFoot && (focus || sip) && (
+              <div className="hud-hint">
+                {touchOn ? (
+                  'Tap '
+                ) : (
+                  <>
+                    <Key action="interact" /> {!held && <>/ <kbd>Click</kbd> </>}
+                  </>
+                )}
+                {sip ? (held?.kind === 'sausage' ? 'Take a bite' : 'Sip coffee') : (dropLabel ?? focus?.label)}
+                {!touchOn && !held && focus?.action.kind === 'card' && focus.action.peel && (
+                  <>
+                    {' '}
+                    · <Key action="drop" /> / hold <kbd>Click</kbd> take it
+                  </>
+                )}
+                {!touchOn && !sip && focus?.action.kind === 'jukebox' && (
+                  <>
+                    {' '}
+                    · <Key action="volumeDown" /> <Key action="volumeUp" /> / <kbd>Scroll</kbd> volume
+                  </>
+                )}
+              </div>
+            )}
+            {started && !overlay && !travel && onFoot && <HeldHint />}
+          </div>
+
+          <div className="toasts">
+            {toasts.map((t) => (
+              <div key={t.id} className={`toast toast-${t.level}`} onClick={() => dismiss(t.id)}>
+                {t.text}
+              </div>
+            ))}
           </div>
         </div>
-        <OverviewButton />
-      </div>
-
-      <div className="hud-status">
-        {demo && <span className="pill pill-demo">DEMO</span>}
-        <span className={`pill ${replaying ? 'pill-replay' : connected ? 'pill-ok' : restarting ? 'pill-demo' : 'pill-bad'}`}>{replaying ? '▶ replay' : connected ? '● live' : restarting ? '○ restarting' : '○ reconnecting'}</span>
-        <span className="pill">
-          ⚙️ {settings.sessionLimit ? `${running}/${settings.sessionLimit}` : running} sessions
-        </span>
-        <CoinChip />
-        {user && <span className="pill">🐙 {user}</span>}
-        <PhotoButton />
       </div>
 
       <WorkersPanel />
-      <div className="hud-chips">
-        <OfficeUpdateChip />
-        <UsageChip />
-        <DoctorChip />
-      </div>
-
-      {!ghReady && ghError && <div className="hud-banner">⚠️ {ghError}</div>}
 
       {/* the centre dot (Settings → Accessibility) is a bolder crosshair that stays through the elevator's fade too */}
       {started && !overlay && (!travel || centerDot) && onFoot && !scope && held?.kind !== 'paddle' && <div className={`crosshair ${focus ? 'crosshair-hot' : ''} ${centerDot ? 'crosshair-dot' : ''}`} />}
       {started && !overlay && !travel && onFoot && <RoofHud />}
-      {/* the cards for whoever you're looking at, docked at the left edge: the middle is their screen */}
-      <div className="aim-cards">
-        <AgentCard />
-        {started && !overlay && !travel && onFoot && <CareerPeek />}
-      </div>
-      {started && !overlay && onFoot && (focus || sip) && (
-        <div className="hud-hint">
-          {touchOn ? (
-            'Tap '
-          ) : (
-            <>
-              <Key action="interact" /> {!held && <>/ <kbd>Click</kbd> </>}
-            </>
-          )}
-          {sip ? (held?.kind === 'sausage' ? 'Take a bite' : 'Sip coffee') : (dropLabel ?? focus?.label)}
-          {!touchOn && !held && focus?.action.kind === 'card' && focus.action.peel && (
-            <>
-              {' '}
-              · <Key action="drop" /> / hold <kbd>Click</kbd> take it
-            </>
-          )}
-          {!touchOn && !sip && focus?.action.kind === 'jukebox' && (
-            <>
-              {' '}
-              · <Key action="volumeDown" /> <Key action="volumeUp" /> / <kbd>Scroll</kbd> volume
-            </>
-          )}
-        </div>
-      )}
-      {started && !overlay && !travel && onFoot && <HeldHint />}
       {started && !overlay && !locked && !travel && onFoot && !touchOn && <div className="hud-resume">Click to look around</div>}
       {started && !(settings.setupDone && settings.tutorialStep >= 0) && (
         <div className="hud-help">
@@ -245,13 +282,6 @@ export function HUD() {
       <PresenceHud />
       <PhoneButton />
       <VoiceIndicator />
-      <div className="toasts">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.level}`} onClick={() => dismiss(t.id)}>
-            {t.text}
-          </div>
-        ))}
-      </div>
     </div>
   );
 }

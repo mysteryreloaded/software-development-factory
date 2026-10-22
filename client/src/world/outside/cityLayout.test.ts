@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { floorElevation } from '../layout';
 import { CAR_RANGE, carPose, carRoutes, CITY, cityLayout, CORRIDOR_HALF, HOME_FOOTPRINT, MAX_CARS, waterTowers, type CityBox } from './cityLayout';
+import { PAVED_STREET } from './grounds';
 
 const city = cityLayout();
 const everything = (c = city): CityBox[] => [...c.buildings, ...c.boxes, ...c.cylinders, ...c.cones];
@@ -52,6 +53,19 @@ describe('cityLayout', () => {
     expect(floorElevation(0)).toBe(0);
     expect(floorElevation(3)).toBeGreaterThan(floorElevation(1));
   });
+
+  it('leaves our neighbour park flat, with no trees or fountain, and every other park unchanged (#41)', () => {
+    const homeBlock = city.parks.find((p) => p.x.max <= -CITY.homeHalfX && p.x.min > -CITY.homeHalfX - CITY.pitch - 1 && p.z.min === -CITY.homeHalfZ);
+    expect(homeBlock).toBeDefined();
+    const inHome = (b: CityBox) => b.x > homeBlock!.x.min && b.x < homeBlock!.x.max && b.z > homeBlock!.z.min && b.z < homeBlock!.z.max;
+    expect(city.cones.some(inHome)).toBe(false);
+    expect(city.cylinders.some(inHome)).toBe(false);
+    // other parks keep their fountain and trees
+    const otherParks = city.parks.filter((p) => p !== homeBlock);
+    expect(otherParks.length).toBeGreaterThan(0);
+    const inAnyOther = (b: CityBox) => otherParks.some((p) => b.x > p.x.min && b.x < p.x.max && b.z > p.z.min && b.z < p.z.max);
+    expect(city.cylinders.some(inAnyOther)).toBe(true);
+  });
 });
 
 describe('cars', () => {
@@ -89,6 +103,18 @@ describe('cars', () => {
     const b = carPose(car, 1, { x: 0, z: 0, yaw: 0 });
     const da = car.axis === 'z' ? b.z - a.z : b.x - a.x;
     expect(da * car.dir).toBeCloseTo(car.speed);
+  });
+
+  it('never drives the street paved over for the lobby grounds (#41)', () => {
+    expect(cars.length).toBe(MAX_CARS); // the dozen, one per lane, car budget is unchanged
+    for (const car of cars) {
+      for (let t = 0; t < 400; t += 3.7) {
+        carPose(car, t, pose);
+        const inPavedX = pose.x > PAVED_STREET.minX && pose.x < PAVED_STREET.maxX;
+        const inPavedZ = pose.z > PAVED_STREET.minZ && pose.z < PAVED_STREET.maxZ;
+        expect(inPavedX && inPavedZ, `${JSON.stringify(car)} at t=${t}`).toBe(false);
+      }
+    }
   });
 });
 
