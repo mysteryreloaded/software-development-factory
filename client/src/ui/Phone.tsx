@@ -300,8 +300,6 @@ function ReplayButton({ m }: { m: PhoneMessage }) {
   );
 }
 
-const QUICK = ["What's everyone working on?", 'Should a team grow?', 'Plan the next milestone for the busiest floor.'];
-
 /** The hands-free conversation's switch: after the CEO's spoken reply, the phone listens for up to 8 s. */
 function HandsFreeToggle({ ceoName }: { ceoName: string }) {
   const listen = useStore((s) => s.settings.listen);
@@ -443,13 +441,6 @@ export function Chat({ autoFocus = true }: { autoFocus?: boolean }) {
             </div>
           </div>
         )}
-      </div>
-      <div className="quick">
-        {QUICK.map((q) => (
-          <button key={q} className="quick-chip" onClick={() => send(q)}>
-            {q}
-          </button>
-        ))}
       </div>
       <AttachmentChips files={attach.files} remove={attach.remove} />
       <form

@@ -13,6 +13,8 @@ import { hazeRange, weatherSky } from '../weather/weatherRules';
 import { weather } from '../weather/weatherState';
 import { carPose, carRoutes, CITY, cityLayout, CORRIDOR_HALF, MAX_CARS, waterTowers, type CityBox } from './cityLayout';
 import { bollardXs, bollardZs, PAVED_STREET, parkFenceLines } from './grounds';
+import { ParkOpponent } from '../park/ParkOpponent';
+import { Pitch } from '../park/Pitch';
 
 // ---------- the park fence and the paved street's bollards (#41) ----------
 
@@ -595,6 +597,10 @@ export function City() {
       ))}
       <ParkFence />
       <Bollards />
+      {/* the pitch and its billboard show from every floor's own windows; only the walk itself is lobby-only (#46):
+          ParkOpponent claims and drives the opponent's body itself, which only matters while you're down here */}
+      <Pitch />
+      {floor === 0 && <ParkOpponent />}
     </group>
   );
 }

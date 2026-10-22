@@ -27,6 +27,8 @@ export interface Remote {
   samples: Sample[];
   clock: PoseClock;
   held: VisitorHeld | null;
+  /** A smoke-break seat id ('office-west:0', #59), while they're sitting at one; null otherwise. */
+  seat: string | null;
   emote: { e: EmoteId; at: number } | null;
   /** Off to another floor: walking into the elevator from where they stood, since `at` (performance.now()). */
   leaving: { x: number; z: number; h: number; at: number } | null;
@@ -90,6 +92,22 @@ export const drawnVisitors = (): readonly string[] => drawn;
 export const remoteOf = (id: string) => remotes.get(id);
 export const activePings = (): readonly Ping[] => pings;
 export const myLastEmote = () => myEmote;
+/** This tab's own id on the server, once it's said hello (#223); '' before then. */
+export const myVisitorId = () => you;
+
+/** Other visitors on `floor` claiming seat `seatId` (a smoke-break bench, #59), lexically smallest id first. */
+export function visitorsAtSeat(floor: number, seatId: string): string[] {
+  const ids: string[] = [];
+  for (const [id, r] of remotes) if (r.floor === floor && r.seat === seatId) ids.push(id);
+  return ids.sort();
+}
+
+/** Everyone else sitting at a smoke-break seat right now (#59), for the probe. */
+export function seatedVisitors(): { id: string; floor: number; seat: string; held: VisitorHeld | null }[] {
+  const out: { id: string; floor: number; seat: string; held: VisitorHeld | null }[] = [];
+  for (const [id, r] of remotes) if (r.seat) out.push({ id, floor: r.floor, seat: r.seat, held: r.held });
+  return out;
+}
 
 // ---------- from the server (store.ts apply) ----------
 
@@ -103,7 +121,7 @@ export function takeRoster(ev: Extract<ServerEvent, { type: 'visitors' }>, myFlo
     seen.add(v.id);
     const r = remotes.get(v.id);
     if (!r) {
-      remotes.set(v.id, { ...v, samples: [], clock: newClock(), held: null, emote: null, leaving: null, arriving: null });
+      remotes.set(v.id, { ...v, samples: [], clock: newClock(), held: null, seat: null, emote: null, leaving: null, arriving: null });
       continue;
     }
     r.name = v.name;
@@ -142,6 +160,11 @@ export function takePose(ev: Extract<ServerEvent, { type: 'visitorPose' }>, myFl
   pushSample(r.samples, { t: poseTime(r.clock, ev.ts, now), x: ev.x, z: ev.z, h: ev.h, p: ev.p });
   if (heldKey(r.held) !== heldKey(ev.held)) {
     r.held = ev.held;
+    changed = true;
+  }
+  const seat = ev.s ?? null;
+  if (r.seat !== seat) {
+    r.seat = seat;
     changed = true;
   }
   if (changed) bump();

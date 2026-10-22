@@ -3,7 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { markBloom } from '../gfx/bloomMarks';
 import { useStore } from '../../store';
-import { ELEVATOR, BALCONY, BALCONY_OUT, FLOOR_HEIGHT, HALF_D, HALF_W, PLANTER, SIDES, WALL_T, balconyFurniture, decorSlots, sideSign } from '../layout';
+import { ELEVATOR, BALCONY, BALCONY_OUT, balconySides, FLOOR_HEIGHT, HALF_D, HALF_W, PLANTER, SIDES, WALL_T, balconyFurniture, decorSlots, sideSign } from '../layout';
 import { toon } from '../materials';
 import { playerAt, wallCut } from '../camera/rig';
 import { bodies } from '../people';
@@ -310,6 +310,7 @@ function SnowCover({ kind, floor, top }: { kind: 'office' | 'lobby'; floor: numb
     for (let f = 0; f <= Math.max(top, floor) + 1; f++) {
       const y = (f - floor) * FLOOR_HEIGHT;
       for (const side of SIDES) {
+        if (f === 0 && side === 'west') continue; // the ground's west side is the revolving door's grounds, not a balcony (#41, #78)
         const s = sideSign(side);
         // a drift that's deeper against the railing
         parts.push(part(box(deep, 0.04, len), '#f8fbff', [s * (HALF_W + WALL_T + deep / 2 + 0.02), y + 0.02, 0]));
@@ -317,7 +318,7 @@ function SnowCover({ kind, floor, top }: { kind: 'office' | 'lobby'; floor: numb
         if (f <= Math.max(top, floor)) parts.push(part(box(BALCONY.railT + 0.08, 0.05, len + 0.2), '#f8fbff', [s * (BALCONY_OUT - BALCONY.railT / 2), y + BALCONY.rail + 0.02, 0]));
       }
     }
-    for (const side of SIDES) {
+    for (const side of balconySides(kind)) {
       for (const p of balconyFurniture(kind, side).planters) parts.push(part(box(PLANTER.w + 0.02, 0.06, PLANTER.l), '#f8fbff', [(p.minX + p.maxX) / 2, PLANTER.h + 0.02, (p.minZ + p.maxZ) / 2]));
     }
     return mergeParts(parts);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FLOOR_SEATS } from '../../../shared/types';
-import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BALCONY_TOP, BENCH, FLOOR_HEIGHT, HALF_W, PLANTER, SIDE_DOOR, SIDE_OPENINGS, SIDES, SMOKE_GAP, WALL_H, WALL_T, WINDOW, balconyFloor, balconyFurniture, balconyRailing, floorElevation, inBuilding, outsideAt, outsideColliders, sideDoorway, sideSign, toyOnlyAt } from './layout.ts';
+import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BALCONY_TOP, balconySides, BENCH, FLOOR_HEIGHT, HALF_W, PLANTER, SIDE_DOOR, SIDE_OPENINGS, SIDES, SMOKE_GAP, WALL_H, WALL_T, WINDOW, balconyFloor, balconyFurniture, balconyRailing, floorElevation, inBuilding, outsideAt, outsideColliders, sideDoorway, sideSign, toyOnlyAt } from './layout.ts';
 import { APP_SCREEN, BOARD, CEO_DESK, CEO_ROOM, COFFEE_CORNER, coffeeCorner, collide, decorSlots, DESK_RUGS, ELEVATOR, elevatorDoorway, GONG, GONG_SPOT, gongRect, HALF_D, LOBBY_RUG, lobbyColliders, MANAGER_DESK, MANAGER_KIOSK, MANAGER_KIOSK_SPOT, managerKioskRect, MANAGER_ROOM, MISSION, missionColumn, missionRects, officeColliders, PLAYER_RADIUS, RECEPTION, rect, shellColliders, SPAWN, surfaceAt, WAITING, WAITING_TABLE, type Rect } from './layout.ts';
 import { DESK, DESK_ROWS, EAST_DESKS, EAST_ROTATION, MAX_DESKS, SEATS, deskPosition, deskRotation, isEastDesk } from './layout.ts';
 import { spot, walkways } from './walkways.ts';
@@ -284,8 +284,6 @@ describe('surfaceAt', () => {
 describe('outside: side doors, windows and balconies', () => {
   const KINDS = ['office', 'lobby'] as const;
   const all = (kind: (typeof KINDS)[number]) => (kind === 'office' ? officeColliders() : lobbyColliders());
-  // The lobby's west side has no balcony or patio any more (#41): a revolving door leads straight out to the grounds.
-  const balconySides = (kind: (typeof KINDS)[number]) => SIDES.filter((side) => !(kind === 'lobby' && side === 'west'));
   const contains = (b: Rect, c: Rect) => c.minX >= b.minX - 1e-9 && c.maxX <= b.maxX + 1e-9 && c.minZ >= b.minZ - 1e-9 && c.maxZ <= b.maxZ + 1e-9;
   const touches = (b: Rect, c: Rect) => b.minX < c.maxX && b.maxX > c.minX && b.minZ < c.maxZ && b.maxZ > c.minZ;
 
@@ -443,6 +441,11 @@ describe('outside: side doors, windows and balconies', () => {
     // the lobby's east patio (candidates use it) is untouched
     const east = balconyFurniture('lobby', 'east');
     expect(outsideColliders('lobby')).toEqual(expect.arrayContaining([...balconyRailing('east'), ...east.planters, east.bench]));
+  });
+
+  it('balconySides: only the lobby drops a side, and only its west one (#41, #78)', () => {
+    expect(balconySides('lobby')).toEqual(['east']);
+    expect(balconySides('office')).toEqual(SIDES);
   });
 
   it("solid on the revolving door's drum sides, so the player can't walk through its glass (#41)", () => {

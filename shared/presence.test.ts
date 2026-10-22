@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BOUNDS, cleanColor, cleanHeld, cleanName, cleanText, NAME_MAX, parsePresenceEvent, wrapAngle } from './presence.ts';
+import { BOUNDS, cleanColor, cleanHeld, cleanName, cleanPose, cleanSeat, cleanText, NAME_MAX, parsePresenceEvent, wrapAngle } from './presence.ts';
 
 describe('cleanName', () => {
   it('trims, collapses whitespace and caps the length', () => {
@@ -54,6 +54,30 @@ describe('cleanText, cleanColor, cleanHeld', () => {
     expect(cleanHeld({ k: 'sticky', id: 'x' })).toBeNull();
     expect(cleanHeld({ k: 'ball', id: '<script>' })).toBeNull();
     expect(cleanHeld('ball')).toBeNull();
+  });
+
+  it('cleans and clamps a joint (#59), and rejects junk', () => {
+    expect(cleanHeld({ k: 'joint', id: 'j1', s: 99, l: 5, r: -1 })).toEqual({ k: 'joint', id: 'j1', s: 8, l: 1, r: 0 });
+    expect(cleanHeld({ k: 'joint', id: 'j1' })).toEqual({ k: 'joint', id: 'j1', s: 0, l: 0, r: 0 });
+    expect(cleanHeld({ k: 'joint', id: '<bad>' })).toBeNull();
+  });
+
+  it('keeps a valid smoke-break seat id, and drops anything else (#59)', () => {
+    expect(cleanSeat('office-west:0')).toBe('office-west:0');
+    expect(cleanSeat('office-east:1')).toBe('office-east:1');
+    expect(cleanSeat('roof:0')).toBe('roof:0');
+    expect(cleanSeat('office-west:2')).toBeUndefined();
+    expect(cleanSeat('patio:0')).toBeUndefined();
+    expect(cleanSeat(42)).toBeUndefined();
+    expect(cleanSeat(undefined)).toBeUndefined();
+  });
+
+  it('carries a seat on a pose only when it is valid, and old poses (without one) are unchanged', () => {
+    const base = { ts: 1, f: 1, x: 0, z: 0, h: 0, p: 0 };
+    expect(cleanPose({ ...base, s: 'office-west:0' })).toMatchObject({ s: 'office-west:0' });
+    expect(cleanPose({ ...base, s: 'office-west:0' })).not.toHaveProperty('held', undefined);
+    expect(cleanPose({ ...base, s: 'nowhere:0' })?.s).toBeUndefined();
+    expect(cleanPose(base)).toEqual({ ts: 1, f: 1, x: 0, z: 0, h: 0, p: 0, held: null });
   });
 });
 

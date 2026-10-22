@@ -170,9 +170,18 @@ export class PresenceHub {
     const now = this.now();
     const dt = this.lastTick ? Math.min(0.5, (now - this.lastTick) / 1000) : TICK_MS / 1000;
     this.lastTick = now;
+    // Smoke-break seats already held (#59), floor 1 only (the only floor fakes take one on): other fakes, and real
+    // visitors' own relayed pose.s. Grown as each fake below sits, so two fakes don't pick the same seat this tick.
+    const takenSeats = new Set<string>();
     for (const p of this.peers.values()) {
-      if (p.walker) this.stepFake(p, dt);
-      else if (p.dirty && due(p.relayedAt, now, RELAY_GAP_MS)) this.relayNow(p);
+      if (p.walker?.smoke) takenSeats.add(`${p.walker.smoke.nook}:${p.walker.smoke.seat}`);
+      else if (!p.walker && p.floor === 1 && p.pose?.s) takenSeats.add(p.pose.s);
+    }
+    for (const p of this.peers.values()) {
+      if (p.walker) {
+        this.stepFake(p, dt, takenSeats);
+        if (p.walker.smoke) takenSeats.add(`${p.walker.smoke.nook}:${p.walker.smoke.seat}`);
+      } else if (p.dirty && due(p.relayedAt, now, RELAY_GAP_MS)) this.relayNow(p);
     }
   }
 
@@ -283,9 +292,9 @@ export class PresenceHub {
     for (const p of this.peers.values()) this.sendRoster(p, all);
   }
 
-  private stepFake(p: Peer, dt: number) {
+  private stepFake(p: Peer, dt: number, takenSeats: ReadonlySet<string>) {
     const w = p.walker!;
-    const step = stepWalker(w, dt, this.liveFloor, Math.random);
+    const step = stepWalker(w, dt, this.liveFloor, Math.random, takenSeats);
     if (w.floor === null) return;
     if (step.moved || p.floor !== w.floor) this.move(p, 'visible', w.floor, poseOf(w));
     if (step.emote) this.toFloor(p, { type: 'visitorEmote', id: p.id, e: step.emote });

@@ -76,6 +76,16 @@ describe('sending our pose', () => {
     expect(poseChanged(pose({ held: { k: 'mug', id: 'm', s: 3 } }), pose({ held: { k: 'mug', id: 'm', s: 2 } }))).toBe(true); // a sip
   });
 
+  it('notices a smoke-break seat taken or left, and a joint lighting, rolling or losing a puff while standing still (#59)', () => {
+    expect(poseChanged(pose(), pose({ s: 'office-west:0' }))).toBe(true);
+    expect(poseChanged(pose({ s: 'office-west:0' }), pose({ s: 'office-west:1' }))).toBe(true);
+    expect(poseChanged(pose({ s: 'office-west:0' }), pose({ s: 'office-west:0' }))).toBe(false);
+    const rolling = pose({ s: 'office-west:0', held: { k: 'joint', id: 'j', s: 8, l: 0, r: 1 } });
+    const lit = pose({ s: 'office-west:0', held: { k: 'joint', id: 'j', s: 8, l: 1, r: 0 } });
+    expect(poseChanged(rolling, lit)).toBe(true);
+    expect(poseChanged(lit, pose({ s: 'office-west:0', held: { k: 'joint', id: 'j', s: 7, l: 1, r: 0 } }))).toBe(true); // a puff
+  });
+
   it('stays well under 10 KB/s per client with four visitors walking non-stop', () => {
     // three others, each relayed at most 10 times a second, plus our own 10 a second out
     const msg = JSON.stringify({ type: 'visitorPose', id: 'a1b2c3d4', ts: 1234567890123, f: 12, x: -13.37, z: 10.25, h: -2.718, p: -0.314, held: { k: 'mug', id: 'mug-ceo-12', s: 3 } });

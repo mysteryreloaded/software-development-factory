@@ -3683,27 +3683,6 @@ input.inline:focus {
     opacity: 1;
   }
 }
-.quick {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 6px 10px 0;
-  background: #fff;
-}
-.quick-chip {
-  flex: none;
-  font-family: var(--font);
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 4px 10px;
-  border: 1.5px solid rgba(31, 29, 43, 0.3);
-  border-radius: 999px;
-  background: #fff;
-  cursor: pointer;
-}
-.quick-chip:hover {
-  border-color: var(--accent);
-}
 .chat-input {
   display: flex;
   align-items: flex-end;
@@ -4725,10 +4704,6 @@ input.inline:focus {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-.pocket .quick {
-  flex-wrap: wrap;
-  overflow: visible;
 }
 .pocket .md pre {
   white-space: pre-wrap;

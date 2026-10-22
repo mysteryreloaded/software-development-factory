@@ -38,6 +38,7 @@ import { roofAction } from './roof/roofState';
 import { parseSmokePerchId, runSmokeBreakOp, smokeBreakFocus, smokeFocusAt, type SmokeFocus } from './smokeBreak';
 import { greet } from './Chatter';
 import { joinPong, pongCamera, pongMouse, tickPaddle } from './toys/pongState';
+import { penaltyAim, penaltyAimDive, penaltyCamera, penaltyCharge, penaltyCommitDive, penaltyShuffle, playerRole, requestPenaltyMatch } from './park/penaltyState';
 import { gesture, touchInput, useTouch } from './touch';
 import { groundedJump, jumpHeight, startJump, stepJump } from './jump';
 
@@ -131,6 +132,10 @@ export function runFocusAction(focus: Focus, via: 'key' | 'click' = 'key') {
   }
   if (focus.action.kind === 'pong') {
     joinPong(focus.action.end); // a paddle in hand: the mouse and the view are the match's now
+    return;
+  }
+  if (focus.action.kind === 'penalty') {
+    if (!requestPenaltyMatch()) s.pushToast('info', "Everyone's busy, try again later");
     return;
   }
   if (focus.action.kind === 'theme') {
@@ -349,12 +354,14 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       if (document.pointerLockElement !== gl.domElement) return requestLook();
       const s = useStore.getState();
       if (!s.started || s.overlay || s.travel || isConfirmOpen()) return;
+      if (s.held?.kind === 'penalty') return playerRole() === 'keeper' ? penaltyCommitDive() : penaltyCharge(true);
       // The coffee machine takes a click with your hands full (that's how the mug goes in), and a decoration goes where you click.
       if (s.held && s.focus?.action.kind !== 'coffee' && s.held.kind !== 'decor') startCharge();
       else if (s.focus && !pressBoard(s.focus)) runFocusAction(s.focus, 'click'); // on a sticky, holding peels it off
     };
     const onMouseUp = (e: MouseEvent) => {
       if (e.button !== 0 || photoActive()) return;
+      if (useStore.getState().held?.kind === 'penalty') return penaltyCharge(false);
       throwHeld();
       releaseBoard((f) => runFocusAction(f, 'click'));
     };
@@ -390,6 +397,10 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       if (!d) return;
       const { sensitivity, invertY } = useLookPrefs.getState();
       if (useStore.getState().held?.kind === 'paddle') return pongMouse(d[0], d[1], sensitivity); // playing: the mouse moves the paddle
+      if (useStore.getState().held?.kind === 'penalty') {
+        // playing penalties: the mouse aims the shot (shooter) or the dive (keeper)
+        return playerRole() === 'keeper' ? penaltyAimDive(d[0], d[1], sensitivity) : penaltyAim(d[0], d[1], sensitivity);
+      }
       const p = perch();
       const k = LOOK_RADIANS_PER_PX * sensitivity * (p?.look ?? 1);
       look.current.yaw -= d[0] * k;
@@ -429,6 +440,10 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
           triggerJump();
         }
         if (action === 'throw' && !e.repeat && !s.travel) startCharge();
+        if (action === 'throw' && !e.repeat && !s.travel) {
+          if (s.held?.kind === 'penalty') penaltyCharge(true);
+          else startCharge();
+        }
         // G puts a sticky down where you aim (or back on the board), peels the one you aim at off, or drops what you hold
         if (action === 'drop' && !e.repeat && !placeSticky(s.focus, true) && !peelAimed(s.focus)) dropHeld();
         if (action === 'reload' && !e.repeat && !s.travel) reloadHeld();
@@ -462,7 +477,10 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
     };
     const onKeyUp = (e: KeyboardEvent) => {
       keys.current.delete(e.code);
-      if (isBound(bindings(), 'throw', e.code) && !photoActive()) throwHeld(); // in photo mode F freezes and thaws
+      if (isBound(bindings(), 'throw', e.code) && !photoActive()) {
+        if (useStore.getState().held?.kind === 'penalty') penaltyCharge(false);
+        else throwHeld(); // in photo mode F freezes and thaws
+      }
     };
     const onBlur = () => {
       keys.current.clear();
@@ -609,6 +627,26 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       walk.x = 0;
       walk.z = 0;
       footstepsFollow(bob.current, false, false, surfaceAt('office', camera.position.x, camera.position.z));
+      if (s.focus) s.setFocus(null);
+      return;
+    }
+
+    // Playing penalties: the camera is behind the ball (shooting) or at the keeper's eye (saving); A/D shuffles the
+    // keeper along the line, the mouse (above) aims the shot or the dive, and you don't walk anywhere.
+    if (s.held?.kind === 'penalty') {
+      const v = penaltyCamera();
+      if (v) {
+        if (playerRole() === 'keeper') penaltyShuffle(strafe * 1.8 * dt);
+        camera.position.set(v.x, v.y, v.z);
+        camera.rotation.set(v.pitch, v.yaw, 0, 'YXZ');
+        look.current = { yaw: v.yaw, pitch: v.pitch };
+        playerAt.x = v.x;
+        playerAt.z = v.z;
+        playerAt.yaw = v.yaw;
+      }
+      walk.x = 0;
+      walk.z = 0;
+      footstepsFollow(bob.current, false, false, 'lobby');
       if (s.focus) s.setFocus(null);
       return;
     }
