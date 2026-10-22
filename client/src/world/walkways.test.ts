@@ -4,7 +4,7 @@ import { BOARD, PLAYER_RADIUS, SEATS, coffeeCorner, elevatorDoorway, lobbyCollid
 import { BALCONY, BALCONY_OUT, HALF_W, SIDE_OPENINGS, SIDES, sideSign } from './layout';
 import { DOG_R, dogPlaces } from './toys/dogPlaces';
 import { clear, segmentClear, type Pt } from './toys/roombaBrain';
-import { WALK_R, WALK_SPEED, findPath, spot, standable, steer, walkways, type Body, type FloorKind, type Mover, type Walkways } from './walkways';
+import { WALK_R, WALK_SPEED, findPath, legClear, spot, standable, steer, walkways, type Body, type FloorKind, type Mover, type Walkways } from './walkways';
 
 const FLOORS: FloorKind[] = ['office', 'lobby'];
 const DT = 1 / 60;
@@ -130,14 +130,18 @@ describe('findPath', () => {
         const path = findPath(w, home, to);
         expect(path, `${home.id} → ${to.id}`).not.toBeNull();
         let at: Pt = home;
+        // a smoke-break spot (#58) is out on the balcony, past the indoor bound segmentClear enforces: legClear
+        // checks the same rects (officeColliders() already has the balcony's bench and table) without it
+        const clearOf = to.id.startsWith('smoke-') ? legClear : segmentClear;
         for (const p of path!) {
-          expect(segmentClear(solid, at, p, WALK_R), `${home.id} → ${to.id}`).toBe(true);
+          expect(clearOf(solid, at, p, WALK_R), `${home.id} → ${to.id}`).toBe(true);
           at = p;
         }
         expect(at).toEqual({ x: to.x, z: to.z });
-        // short and smooth: a few straight legs, not much longer than as the crow flies
-        expect(path!.length, `${home.id} → ${to.id}`).toBeLessThanOrEqual(7);
-        expect(length(home, path!), `${home.id} → ${to.id}`).toBeLessThan(Math.hypot(to.x - home.x, to.z - home.z) * 1.5 + 3);
+        // short and smooth: a few straight legs, not much longer than as the crow flies (a smoke-break spot's door
+        // may be well off from its bench, a real detour: it gets a looser budget)
+        expect(path!.length, `${home.id} → ${to.id}`).toBeLessThanOrEqual(to.id.startsWith('smoke-') ? 9 : 7);
+        expect(length(home, path!), `${home.id} → ${to.id}`).toBeLessThan(Math.hypot(to.x - home.x, to.z - home.z) * 1.5 + (to.id.startsWith('smoke-') ? 10 : 3));
       }
     }
   });

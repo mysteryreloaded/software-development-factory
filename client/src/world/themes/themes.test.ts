@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { THEME_IDS, type ThemeId } from '../../../../shared/themes';
 import { DECOR_SLOT_AT, DESK, ELEVATOR, HALF_D, HALF_W, BALCONY, BALCONY_OUT, decorRuns, decorSlots, deskPosition, isEastDesk, lobbyColliders, officeColliders, SEATS, type Rect } from '../layout';
 import { segmentClear } from '../toys/roombaBrain';
-import { findPath, walkways, WALK_R, type FloorKind } from '../walkways';
+import { findPath, legClear, walkways, WALK_R, type FloorKind } from '../walkways';
 import { costumeFor, decorColliders, FOOTPRINT, placeDecor, THEMES } from './themes';
 
 const KINDS: FloorKind[] = ['office', 'lobby'];
@@ -111,8 +111,11 @@ describe('decorations stay out of the way', () => {
       const path = findPath(w, elevator, s);
       expect(path, s.id).not.toBeNull();
       let at = { x: elevator.x, z: elevator.z };
+      // a smoke-break spot (#58) is out on the balcony, past segmentClear's indoor bound; legClear checks the same
+      // rects without it (decorations never reach out there anyway)
+      const clearOf = s.id.startsWith('smoke-') ? legClear : segmentClear;
       for (const p of path!) {
-        expect(segmentClear(solids, at, p, WALK_R), `walk to ${s.id}`).toBe(true);
+        expect(clearOf(solids, at, p, WALK_R), `walk to ${s.id}`).toBe(true);
         at = p;
       }
     }

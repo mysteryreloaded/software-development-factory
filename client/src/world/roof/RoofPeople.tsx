@@ -7,9 +7,10 @@ import { smooth, type Gesture } from '../body';
 import { Character } from '../Character';
 import { HURRY_SPEED, isFree, nextWaypoint } from '../errands';
 import { DECK_CHAIRS, HALF_D, deckChairFront, deckChairSeat } from '../layout';
-import { bodyState, placeBody, say, seatBody, setBody } from '../people';
+import { bodyState, placeBody, say, seatBody, setBody, setHandJoint } from '../people';
 import { nightFactor } from '../sky/time';
 import { dayTime } from '../sky/useDayTime';
+import { agentAtSeat, nook, NPC_SMOKE, nookStub, playerSeatsAt, setAgentSeat } from '../smokeBreak';
 import { CABIN, DOORS_SECONDS } from '../socials';
 import { clear, type Pt } from '../toys/roombaBrain';
 import { steer, WALK_R, WALK_SPEED } from '../walkways';
@@ -38,6 +39,8 @@ interface Walker {
   id: string;
   kind: VisitKind;
   chair: number;
+  /** A smoke bench seat (#58) instead of a deck chair; null for a deck chair or a call. */
+  bench: 0 | 1 | null;
   stage: Stage;
   t: number;
   path: Pt[];
@@ -50,10 +53,32 @@ interface Walker {
   waited: number;
   ghost: number;
   quietAt: number;
+  /** The bench's own roll → light → puff timeline, in seconds since they sat down; -1 while not smoking. */
+  smoke: number;
+  puffsLeft: number;
+  /** The last timeline stage applied (so each one only fires its side effect once); -1 before they've sat down. */
+  stageIdx: number;
 }
 
 /** A walk from `from` to `to` round the furniture (straight there when the grid has no way). */
 const route = (from: Pt, to: Pt): Pt[] => findRoofPath(from, to) ?? [to];
+
+/** Standing in the gap by the roof's smoke bench (world/smokeBreak.ts), seat 0 or 1: where a bench visitor stands
+ * (and faces), like every other errand's stand-in for actually sitting on arbitrary furniture. */
+function benchStand(seat: 0 | 1): Pt {
+  const n = nook('roof');
+  return { x: (n.gap.minX + n.gap.maxX) / 2, z: n.seats[seat].z };
+}
+
+/** A visitor on the roof's smoke bench (#58): upright, not reclined, rolling and lighting one and taking six puffs. */
+function Bencher({ agent, seat }: { agent: Agent; seat: 0 | 1 }) {
+  const spot = benchStand(seat);
+  return (
+    <group position={[spot.x, 0, spot.z]} rotation={[0, nook('roof').yaw, 0]}>
+      <Character agent={agent} />
+    </group>
+  );
+}
 
 /** A visitor on a break, drawn in their deck chair: they lean back with it while they sit. */
 function Lounger({ agent, chair }: { agent: Agent; chair: number }) {
@@ -90,7 +115,7 @@ function Caller({ agent }: { agent: Agent }) {
 export function RoofPeople() {
   const camera = useThree((s) => s.camera);
   const agents = useStore((s) => s.agents);
-  const [drawn, setDrawn] = useState<{ id: string; kind: VisitKind; chair: number }[]>([]);
+  const [drawn, setDrawn] = useState<{ id: string; kind: VisitKind; chair: number; bench: 0 | 1 | null }[]>([]);
   const walkers = useMemo(() => new Map<string, Walker>(), []);
   const run = useMemo(() => ({ roll: ROLL.every, mounted: Date.now(), dirty: false }), []);
 
@@ -110,7 +135,13 @@ export function RoofPeople() {
   const comeUp = (a: Agent | undefined, seconds?: number) => {
     if (!a || !isFree(a.status)) return false;
     const kind: VisitKind = a.role === 'ceo' ? 'call' : 'break';
-    const v = planVisit(roofVisits(), a.id, kind, Date.now(), Math.random(), { chairs: DECK_CHAIRS.xs.length, playerChair: useRoof.getState().sitting, ride: ROLL.ride, stay: seconds });
+    const v = planVisit(roofVisits(), a.id, kind, Date.now(), Math.random(), {
+      chairs: DECK_CHAIRS.xs.length,
+      playerChair: useRoof.getState().sitting,
+      playerBenchSeats: playerSeatsAt('roof'),
+      ride: ROLL.ride,
+      stay: seconds,
+    });
     if (v) startVisit(v);
     return !!v;
   };
@@ -173,6 +204,49 @@ export function RoofPeople() {
     return false;
   };
 
+  const ROLL_END = NPC_SMOKE.roll;
+  const LIGHT_END = ROLL_END + NPC_SMOKE.light;
+  const CYCLE = NPC_SMOKE.puffGesture + NPC_SMOKE.puffGap;
+
+  /** One frame of the bench's roll → light → puff timeline (w.smoke: seconds since they sat down). True once the
+   * last puff is spent and they're ready to stub out and go. */
+  const tickBenchSmoke = (w: Walker, dt: number): boolean => {
+    w.smoke += dt;
+    const t = w.smoke;
+    let gesture: Gesture = 'roll';
+    let stageIdx = 0;
+    if (t >= ROLL_END && t < LIGHT_END) {
+      gesture = 'light';
+      stageIdx = 1;
+    } else if (t >= LIGHT_END) {
+      const pt = t - LIGHT_END;
+      const cycle = Math.floor(pt / CYCLE);
+      if (cycle >= NPC_SMOKE.puffs) return true;
+      const within = pt - cycle * CYCLE;
+      gesture = within < NPC_SMOKE.puffGesture ? 'puff' : 'none';
+      stageIdx = 2 + cycle * 2 + (gesture === 'puff' ? 0 : 1);
+    }
+    if (stageIdx !== w.stageIdx) {
+      w.stageIdx = stageIdx;
+      if (stageIdx === 1) setHandJoint(w.id, { lit: true, puffsLeft: w.puffsLeft, exhaleAt: 0 });
+      else if (gesture === 'puff') {
+        w.puffsLeft = Math.max(0, w.puffsLeft - 1);
+        setHandJoint(w.id, { lit: w.puffsLeft > 0, puffsLeft: w.puffsLeft, exhaleAt: performance.now() });
+      }
+    }
+    const spot = benchStand(w.bench!);
+    setBody(w.id, { mode: 'standing', x: spot.x, z: spot.z, heading: nook('roof').yaw, gesture });
+    return false;
+  };
+
+  /** Lets go of the bench seat and the ashtray gets its stub, however the bench visit ends. */
+  const endBenchSmoke = (w: Walker) => {
+    if (w.bench == null) return;
+    setAgentSeat('roof', w.bench, null);
+    if (w.stageIdx >= 0) nookStub('roof'); // only once they'd actually rolled one
+    setHandJoint(w.id, null);
+  };
+
   useFrame((_, delta) => {
     const dt = Math.min(delta, 0.1);
     const now = Date.now();
@@ -185,14 +259,39 @@ export function RoofPeople() {
       if (walkers.has(v.id) || !s.agents[v.id]) continue;
       const stage = visitStage(v, now);
       if (stage === 'down') continue;
-      const w: Walker = { id: v.id, kind: v.kind, chair: v.chair, stage: 'riding', t: 0, path: [], wp: 0, leg: 0, hold: -1, hurry: false, waited: 0, ghost: 0, quietAt: 0 };
+      const w: Walker = {
+        id: v.id,
+        kind: v.kind,
+        chair: v.chair,
+        bench: v.bench,
+        stage: 'riding',
+        t: 0,
+        path: [],
+        wp: 0,
+        leg: 0,
+        hold: -1,
+        hurry: false,
+        waited: 0,
+        ghost: 0,
+        quietAt: 0,
+        smoke: 0,
+        puffsLeft: NPC_SMOKE.puffs,
+        stageIdx: -1,
+      };
       if (stage === 'up' && (now - v.arrive > ALREADY_UP || now - run.mounted < 1000)) {
         // they were up here before you
         if (v.kind === 'call') {
           placeBody(v.id, CALL_SPOTS[0].x, CALL_SPOTS[0].z, WEST);
           setBody(v.id, { gesture: 'call' });
           w.stage = 'call';
-        } else w.stage = 'seated';
+        } else {
+          w.stage = 'seated';
+          if (w.bench != null) {
+            const spot = benchStand(w.bench);
+            placeBody(v.id, spot.x, spot.z, nook('roof').yaw);
+            setAgentSeat('roof', w.bench, v.id);
+          } else seatBody(v.id);
+        }
       }
       show(w, true);
     }
@@ -201,6 +300,7 @@ export function RoofPeople() {
       const a = s.agents[w.id];
       const v = visits.find((x) => x.id === w.id);
       if (!a || (!v && w.stage === 'riding')) {
+        if (!a) endBenchSmoke(w);
         seatBody(w.id);
         show(w, false);
         continue;
@@ -225,17 +325,26 @@ export function RoofPeople() {
           break;
         case 'doors':
           if (w.t < DOORS_SECONDS) break;
-          w.path = [LIFT, ...route(LIFT, w.kind === 'call' ? CALL_SPOTS[0] : deckChairFront(w.chair))];
+          w.path = [LIFT, ...route(LIFT, w.kind === 'call' ? CALL_SPOTS[0] : w.bench != null ? benchStand(w.bench) : deckChairFront(w.chair))];
           w.wp = 0;
           w.hurry = busy;
           w.stage = 'walk';
           break;
         case 'walk':
           if (busy && !w.hurry && st) leave(w, true, st);
-          else if (follow(w, dt, w.kind === 'call' ? 'call' : 'none', w.kind === 'call' ? WEST : NORTH)) {
+          else if (follow(w, dt, w.kind === 'call' ? 'call' : 'none', w.kind === 'call' ? WEST : w.bench != null ? nook('roof').yaw : NORTH)) {
             if (w.kind === 'call') {
               w.stage = 'call';
               w.t = 0;
+            } else if (w.bench != null) {
+              // the seat may have gone to someone else a moment ago: back up and sit a while longer
+              if (agentAtSeat('roof', w.bench) != null) {
+                leave(w, false, st!);
+                break;
+              }
+              setAgentSeat('roof', w.bench, w.id);
+              w.smoke = 0;
+              w.stage = 'seated';
             } else {
               seatBody(w.id); // the last steps to beside the chair, and down into it
               w.stage = 'sitting';
@@ -250,6 +359,18 @@ export function RoofPeople() {
           }
           break;
         case 'seated':
+          if (w.bench != null) {
+            if ((over || busy) && st) {
+              endBenchSmoke(w);
+              leave(w, busy, benchStand(w.bench));
+              break;
+            }
+            if (tickBenchSmoke(w, dt)) {
+              endBenchSmoke(w);
+              leave(w, false, benchStand(w.bench));
+            }
+            break;
+          }
           if ((over || busy) && st) leave(w, busy, deckChairFront(w.chair));
           break;
         case 'call': {
@@ -303,7 +424,7 @@ export function RoofPeople() {
 
     if (run.dirty) {
       run.dirty = false;
-      setDrawn([...walkers.values()].filter((w) => w.stage !== 'riding').map((w) => ({ id: w.id, kind: w.kind, chair: w.chair })));
+      setDrawn([...walkers.values()].filter((w) => w.stage !== 'riding').map((w) => ({ id: w.id, kind: w.kind, chair: w.chair, bench: w.bench })));
     }
   });
 
@@ -312,7 +433,8 @@ export function RoofPeople() {
       {drawn.map((d) => {
         const a = agents[d.id];
         if (!a) return null;
-        return d.kind === 'call' ? <Caller key={d.id} agent={a} /> : <Lounger key={d.id} agent={a} chair={d.chair} />;
+        if (d.kind === 'call') return <Caller key={d.id} agent={a} />;
+        return d.bench != null ? <Bencher key={d.id} agent={a} seat={d.bench} /> : <Lounger key={d.id} agent={a} chair={d.chair} />;
       })}
     </group>
   );

@@ -11,8 +11,10 @@ export interface RoofVisit {
   /** When they step out of the elevator up top, and when they head back down. */
   arrive: number;
   leave: number;
-  /** Their deck chair on a break; -1 for a call. */
+  /** Their deck chair on a break; -1 for a call, or for a break on the smoke bench instead (`bench`). */
   chair: number;
+  /** The roof's smoke bench seat (#58) they're on instead of a deck chair; null for a deck chair or a call. */
+  bench: 0 | 1 | null;
 }
 
 export const ROOF_BREAK = {
@@ -26,6 +28,8 @@ export const ROOF_BREAK = {
   /** How likely a roof break is among the idle errands someone fancies (rare), and the CEO's call among theirs. */
   weight: 0.12,
   callWeight: 0.35,
+  /** A break visitor takes the smoke bench instead of a deck chair about this often, when a seat there is free. */
+  benchChance: 1 / 3,
 };
 
 const SECOND = 1000;
@@ -41,9 +45,18 @@ export function visitStage(v: RoofVisit, now: number): 'riding' | 'up' | 'down' 
 
 /** A deck chair for a new visitor: one nobody is in or heading for (the player's included), or -1 when all are taken. */
 export function freeChair(visits: readonly RoofVisit[], chairs: number, playerChair: number | null, rand: number): number {
-  const taken = new Set(visits.filter((v) => v.kind === 'break').map((v) => v.chair));
+  const taken = new Set(visits.filter((v) => v.kind === 'break' && v.bench == null).map((v) => v.chair));
   if (playerChair !== null) taken.add(playerChair);
   const free = Array.from({ length: chairs }, (_, i) => i).filter((i) => !taken.has(i));
+  return free.length ? free[Math.min(free.length - 1, Math.floor(rand * free.length))] : -1;
+}
+
+/** The smoke bench's free seat (0 or 1) for a new break visitor, or -1 when both are taken (another visit's, or the
+ * player's own, from the office's smoke-break registry via `playerSeats`). */
+export function freeBenchSeat(visits: readonly RoofVisit[], playerSeats: readonly (0 | 1)[], rand: number): 0 | 1 | -1 {
+  const taken = new Set<0 | 1>(visits.filter((v) => v.kind === 'break' && v.bench != null).map((v) => v.bench as 0 | 1));
+  for (const s of playerSeats) taken.add(s);
+  const free = ([0, 1] as const).filter((s) => !taken.has(s));
   return free.length ? free[Math.min(free.length - 1, Math.floor(rand * free.length))] : -1;
 }
 
@@ -64,15 +77,24 @@ export function planVisit(
   kind: VisitKind,
   now: number,
   rand: number,
-  o: { chairs: number; playerChair: number | null; ride?: number; stay?: number },
+  o: { chairs: number; playerChair: number | null; ride?: number; stay?: number; playerBenchSeats?: readonly (0 | 1)[] },
 ): RoofVisit | null {
   if (!roomFor(visits, id, kind, now)) return null;
   const on = visits.filter((v) => visitOn(v, now));
-  const chair = kind === 'break' ? freeChair(on, o.chairs, o.playerChair, rand) : -1;
-  if (kind === 'break' && chair < 0) return null;
+  let chair = -1;
+  let bench: 0 | 1 | null = null;
+  if (kind === 'break') {
+    const wantsBench = rand < ROOF_BREAK.benchChance;
+    const seat = wantsBench ? freeBenchSeat(on, o.playerBenchSeats ?? [], rand) : -1;
+    if (seat !== -1) bench = seat;
+    else {
+      chair = freeChair(on, o.chairs, o.playerChair, rand);
+      if (chair < 0) return null;
+    }
+  }
   const [lo, hi] = kind === 'call' ? ROOF_BREAK.call : ROOF_BREAK.stay;
   const arrive = now + (o.ride ?? ROOF_BREAK.ride) * SECOND;
-  return { id, kind, arrive, leave: arrive + Math.round((o.stay ?? lo + rand * (hi - lo)) * SECOND), chair };
+  return { id, kind, arrive, leave: arrive + Math.round((o.stay ?? lo + rand * (hi - lo)) * SECOND), chair, bench };
 }
 
 // ---------- who's up there now ----------

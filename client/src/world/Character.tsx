@@ -8,13 +8,14 @@ import { WALK_SPEED, gait, newBodyState, smooth, stepBody, type BodyTarget, type
 import { PARTS } from './characterParts';
 import { PROUD_FOR, blink, expressionFor, isDrowsy, newFace, prFaceOf, stepFace } from './face';
 import { fidgetProgress, fidgetWeight, newDeskLife, play, stepDeskLife, wake, type Fidget, type Mood } from './fidgets';
+import { markBloom } from './gfx/bloomMarks';
 import { FaceGlow } from './gfx/ScreenGlow';
 import { HeadParts, INK, Sleeve, TorsoWear, applyFace, torsoWidth } from './Figure';
 import { malletHolder } from './gongRunner';
 import { isCelebrating } from './gongState';
 import { toon } from './materials';
 import { FoodLook } from './food';
-import { bodyTarget, forcedExpression, handFood, handMug, isHidden, seatBody, setBody, subscribeMugs, trackBody, trackFace } from './people';
+import { bodyTarget, forcedExpression, handFood, handJoint, handMug, isHidden, seatBody, setBody, subscribeMugs, trackBody, trackFace } from './people';
 import { mergedAt, takeReaction, trackLife } from './reactionFeed';
 import { SpeechBubble } from './SpeechBubble';
 import { ThemeCostume } from './themes/ThemeCostume';
@@ -100,11 +101,76 @@ const GESTURES: Record<Gesture, { l: Arm | null; r: Arm | null; head: number }> 
   shake: { l: null, r: { pitch: -0.12, yaw: 0.15 }, head: 0.08 },
   // ping-pong: the free hand out for balance; the bat arm reaches for wherever the match puts the paddle (below)
   paddle: { l: { pitch: -0.5, yaw: 0.5 }, r: { pitch: -0.35, yaw: -0.25 }, head: 0.05 },
+  // a smoke break (#58): hands together over the lap rolling one, the lighter up to it, then it to the mouth
+  roll: { l: { pitch: -0.55, yaw: -0.5 }, r: { pitch: -0.55, yaw: 0.5 }, head: -0.3 },
+  light: { l: null, r: { pitch: 0.55, yaw: 0.6 }, head: 0.1 },
+  puff: { l: null, r: { pitch: 0.75, yaw: 0.85 }, head: 0.25 },
 };
 // The paddle in the right hand (arm space: the hand is at z -0.5): its handle, and the blade's centre further along.
 const BAT = { hand: -0.5, blade: -0.17 };
 // A merge party on their floor (gongState.ts) beats any gesture: arms up in a V, standing or walking, mug or not.
 const PARTY_ARMS = { l: POSES.cheer.l, r: POSES.cheer.r, head: POSES.cheer.headPitch };
+
+// ---------- a smoke break's joint in hand, and the puffs blown out (#58) ----------
+
+const jointEmber = markBloom(new THREE.MeshBasicMaterial({ color: '#ff7b3d' }));
+const PUFF_N = 3;
+const PUFF_LIFE = 1800; // ms
+
+let puffTex: THREE.CanvasTexture | null = null;
+function puffTexture() {
+  if (puffTex) return puffTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, 'rgba(255,255,255,0.8)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 32, 32);
+  puffTex = new THREE.CanvasTexture(c);
+  puffTex.colorSpace = THREE.SRGBColorSpace;
+  return puffTex;
+}
+
+/** A few puffs of smoke, drifting up from someone's head each time `exhaleAt` (people.ts's PersonJoint) bumps: a
+ * fixed, pooled sprite trio sharing one texture, no per-frame allocation. */
+function JointPuffs({ exhaleAt }: { exhaleAt: number }) {
+  const sprites = useRef<(THREE.Sprite | null)[]>([]);
+  const tex = useMemo(puffTexture, []);
+  const materials = useMemo(() => Array.from({ length: PUFF_N }, () => new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false, toneMapped: false })), [tex]);
+  useEffect(() => () => materials.forEach((m) => m.dispose()), [materials]);
+  const pool = useMemo(() => Array.from({ length: PUFF_N }, () => ({ born: 0, until: 0, dx: 0 })), []);
+  const seenAt = useRef(0);
+  useFrame(() => {
+    const now = performance.now();
+    if (exhaleAt && exhaleAt !== seenAt.current) {
+      seenAt.current = exhaleAt;
+      for (let i = 0; i < PUFF_N; i++) pool[i] = { born: now + i * 90, until: now + i * 90 + PUFF_LIFE, dx: (Math.random() - 0.5) * 0.08 };
+    }
+    for (let i = 0; i < PUFF_N; i++) {
+      const s = sprites.current[i];
+      const p = pool[i];
+      if (!s) continue;
+      if (now < p.born || now > p.until) {
+        s.visible = false;
+        continue;
+      }
+      const age = (now - p.born) / PUFF_LIFE;
+      s.visible = true;
+      s.position.set(p.dx * age, 0.14 + age * 0.3, 0.06);
+      s.scale.setScalar(0.05 + age * 0.12);
+      materials[i].opacity = 0.5 * (1 - age);
+    }
+  });
+  return (
+    <group>
+      {materials.map((m, i) => (
+        <sprite key={i} ref={(s) => void (sprites.current[i] = s)} material={m} visible={false} />
+      ))}
+    </group>
+  );
+}
 
 // ---------- little life at the desk (fidgets.ts) ----------
 // Each fidget is drawn as a seated pose laid over the status pose: arms it takes over (weight 1) and head, lean and
@@ -263,6 +329,7 @@ export function Character({
   const handCup = useRef<THREE.Group>(null);
   const carried = useSyncExternalStore(subscribeMugs, () => handMug(agent.id));
   const food = useSyncExternalStore(subscribeMugs, () => handFood(agent.id));
+  const joint = useSyncExternalStore(subscribeMugs, () => handJoint(agent.id));
   // Everything the body needs between frames, made once: the walk state, a gait to write into and the gesture arms.
   const move = useMemo(
     () => ({
@@ -654,6 +721,17 @@ export function Character({
                       </group>
                     </group>
                   )}
+                  {/* a smoke break's joint (#58), rolled and lit: a thin paper cylinder with a glowing tip */}
+                  {joint && (
+                    <group position={HAND_MUG.at} rotation={[0, -Math.PI / 2, 0]}>
+                      <Cyl r={0.006} h={0.09} position={[0, 0, -0.045]} rotation={[Math.PI / 2, 0, 0]} color="#f1e8d8" shadow={false} />
+                      {joint.lit && (
+                        <mesh position={[0, 0, -0.09]} material={jointEmber}>
+                          <sphereGeometry args={[0.009, 8, 6]} />
+                        </mesh>
+                      )}
+                    </group>
+                  )}
                   {/* a ping-pong paddle while they play (toys/pongState.ts): the blade stays square to the way they face */}
                   <group ref={bat} position={[0, 0, BAT.hand]} visible={false}>
                     <Cyl r={0.014} h={0.1} position={[0, 0, -0.05]} rotation={[Math.PI / 2, 0, 0]} color="#d4a373" shadow={false} />
@@ -676,6 +754,7 @@ export function Character({
             <HeadParts agent={agent} look={look} busy={busy} face={faceMesh} />
             <ThemeCostume agent={agent} look={look} part="head" />
             {chair && <FaceGlow id={agent.id} geometry={PARTS.head} />}
+            {joint && <JointPuffs exhaleAt={joint.exhaleAt} />}
           </group>
           {carrying && (
             <group ref={held} visible={false}>

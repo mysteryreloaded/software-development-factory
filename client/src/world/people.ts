@@ -163,6 +163,28 @@ export function setDeskMug(id: string, mug: PersonMug, seconds: number) {
   changed();
 }
 
+// ---------- the smoke break's joint in hand (#58) ----------
+
+/** A joint someone holds on a smoke break: lit once it's rolled and the lighter's been to it, how many puffs (of a
+ * fixed number for the errand) they've still got left, and performance.now() of the last one landing (Character.tsx
+ * sees it change and blows out a few puffs of smoke from their head). */
+export interface PersonJoint {
+  lit: boolean;
+  puffsLeft: number;
+  exhaleAt: number;
+}
+
+const joints = new Map<string, PersonJoint>();
+
+/** The joint in someone's hand on a smoke break; null for none. Redraws like the mugs. */
+export const handJoint = (id: string) => joints.get(id) ?? null;
+
+export function setHandJoint(id: string, joint: PersonJoint | null) {
+  if (joint) joints.set(id, joint);
+  else joints.delete(id);
+  changed();
+}
+
 // ---------- faces ----------
 
 /** Someone's face as Character.tsx last drew it: the expression, how far closed the eyes are (blinks), their look. */

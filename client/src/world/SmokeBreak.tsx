@@ -10,12 +10,14 @@ import { BENCH, type Rect } from './layout';
 import { markBloom } from './gfx/bloomMarks';
 import { playerAt } from './camera/rig';
 import { FIRST_PERSON } from './viewTags';
+import { useStore } from '../store';
 import {
   MAX_BUTTS,
   PUFFS,
   PUFF_MS,
   ROLL_MS,
   addButt,
+  agentAtSeat,
   inGap,
   newSmoke,
   nook,
@@ -25,6 +27,7 @@ import {
   standUpSmoke,
   tickSmoke,
   type NookId,
+  type SeatOwner,
   type SmokeState,
 } from './smokeBreak';
 
@@ -315,10 +318,16 @@ export function SmokeNook({ id, bench = false }: { id: NookId; bench?: boolean }
 
   const sitDown = () => {
     if (seatRef.current != null) return;
-    // the nearer free seat to where you're standing, not always the first
+    // the nearer seat to where you're standing isn't always free: an agent out on the smoke errand may hold it
     const d0 = Math.abs(playerAt.z - n.seats[0].z);
     const d1 = Math.abs(playerAt.z - n.seats[1].z);
-    const i: 0 | 1 = d0 <= d1 ? 0 : 1;
+    const near: 0 | 1 = d0 <= d1 ? 0 : 1;
+    const far: 0 | 1 = near === 0 ? 1 : 0;
+    if (agentAtSeat(id, near) != null && agentAtSeat(id, far) != null) {
+      useStore.getState().pushToast('info', "Someone's sitting there");
+      return;
+    }
+    const i: 0 | 1 = agentAtSeat(id, near) == null ? near : far;
     const seatXZ = n.seats[i];
     setPerch({
       id: `smoke:${id}:${i}`,
@@ -348,7 +357,17 @@ export function SmokeNook({ id, bench = false }: { id: NookId; bench?: boolean }
         sit: sitDown,
         press,
         label: () => smokeLabel(stateRef.current),
-        report: () => ({ seats: [seatRef.current === 0 ? 'you' : 'free', seatRef.current === 1 ? 'you' : 'free'], butts: buttsRef.current, stage: stateRef.current.stage, puffsLeft: stateRef.current.puffsLeft }),
+        stub: () => setButts((b) => addButt(b)),
+        report: () => ({
+          seats: [0, 1].map((i): SeatOwner => {
+            if (seatRef.current === i) return 'you';
+            const a = agentAtSeat(id, i as 0 | 1);
+            return a ? `agent:${a}` : 'free';
+          }) as [SeatOwner, SeatOwner],
+          butts: buttsRef.current,
+          stage: stateRef.current.stage,
+          puffsLeft: stateRef.current.puffsLeft,
+        }),
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [id],

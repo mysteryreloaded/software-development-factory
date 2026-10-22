@@ -64,6 +64,10 @@ export const MAX_BUTTS = 5;
 
 export type Stage = 'empty' | 'rolling' | 'ready' | 'lighting' | 'lit' | 'puffing' | 'out';
 
+/** An NPC's own timeline on a smoke break (world/smokeErrand.ts, roof/RoofPeople.tsx's bench visitors): roll, light,
+ * then six puffs about 20 s apart (two minutes in all), unlike the player's interactive stage machine above. */
+export const NPC_SMOKE = { roll: 6, light: 1, puffGesture: 1.5, puffGap: 18.5, puffs: 6 };
+
 export interface SmokeState {
   stage: Stage;
   puffsLeft: number;
@@ -131,20 +135,53 @@ export interface SmokeFocus {
   op: string;
 }
 
+/** A seat's holder, for the probe and the player's own toast: nobody, you, or an agent out on the smoke errand. */
+export type SeatOwner = 'free' | 'you' | `agent:${string}`;
+
 export interface NookHandle {
   /** The "Sit down" prompt for standing at (x, z), or null (already seated, or out of the gap). */
   focusAt(x: number, z: number): SmokeFocus | null;
-  /** Sits you down in the nearer free seat; a toast if both are taken. */
+  /** Sits you down in the nearer seat that isn't an agent's; a toast if both are taken (by an agent, or already you). */
   sit(): void;
   /** E while perched here: advances the stage machine. */
   press(): void;
   /** What E does right now, while perched here ("Roll one", "Take a puff · 5 left", ...). */
   label(): string;
+  /** A stubbed butt into this table's ashtray, for an agent's errand finishing one up (smokeErrand.ts). */
+  stub(): void;
   /** For the probe: seat occupancy and the ashtray. */
-  report(): { seats: ['free' | 'you', 'free' | 'you']; butts: number; stage?: Stage; puffsLeft?: number };
+  report(): { seats: [SeatOwner, SeatOwner]; butts: number; stage?: Stage; puffsLeft?: number };
 }
 
 const handles = new Map<NookId, NookHandle>();
+
+// ---------- agents' seats (smokeErrand.ts; world/roof/RoofPeople.tsx for the roof's bench) ----------
+
+const agentSeats = new Map<string, string>();
+const seatKey = (id: NookId, seat: 0 | 1) => `${id}:${seat}`;
+
+/** An agent sits down at (or gets up from, `agentId` null) nook `id`'s seat `seat`. */
+export function setAgentSeat(id: NookId, seat: 0 | 1, agentId: string | null) {
+  const k = seatKey(id, seat);
+  if (agentId) agentSeats.set(k, agentId);
+  else agentSeats.delete(k);
+}
+
+/** Who (if anyone) holds nook `id`'s seat `seat` on the smoke errand. */
+export const agentAtSeat = (id: NookId, seat: 0 | 1): string | null => agentSeats.get(seatKey(id, seat)) ?? null;
+
+/** A stub into nook `id`'s ashtray, from an agent's finished errand, while it's mounted. */
+export function nookStub(id: NookId) {
+  handles.get(id)?.stub();
+}
+
+/** Which of nook `id`'s seats the player is in right now (roof/roofBreaks.ts: never one of theirs for a new visit);
+ * empty while the nook isn't mounted (you're nowhere near it). */
+export function playerSeatsAt(id: NookId): (0 | 1)[] {
+  const h = handles.get(id);
+  if (!h) return [];
+  return h.report().seats.flatMap((s, i) => (s === 'you' ? [i as 0 | 1] : []));
+}
 
 /** The mounted nook `id` takes focus/E while it's here. */
 export function registerNook(id: NookId, h: NookHandle): () => void {
@@ -181,7 +218,7 @@ export function runSmokeBreakOp(op: string) {
 }
 
 /** For the probe and tests: every mounted nook's seats and ashtray. */
-export const smokeNookReports = (): { id: NookId; seats: ['free' | 'you', 'free' | 'you']; butts: number }[] =>
+export const smokeNookReports = (): { id: NookId; seats: [SeatOwner, SeatOwner]; butts: number }[] =>
   [...handles.entries()].map(([id, h]) => ({ id, ...h.report() }));
 
 /** The mounted nook (and seat) you're sitting at, from a perch id of the form `smoke:<nookId>:<seat>`. */

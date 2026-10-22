@@ -1,5 +1,6 @@
 import { kanbanColumnSpan, KANBAN_KEYS } from './draw';
-import { BOARD, CEO_DESK, COFFEE_CORNER, GONG_SPOT, HALF_D, HALF_W, JUKEBOX, MANAGER_DESK, PLAYER_RADIUS, PONG_TABLE, RECEPTION, SEATS, deskPosition, isEastDesk } from './layout';
+import { BOARD, CEO_DESK, COFFEE_CORNER, GONG_SPOT, HALF_D, HALF_W, JUKEBOX, MANAGER_DESK, PLAYER_RADIUS, PONG_TABLE, RECEPTION, SEATS, SIDES, SIDE_OPENINGS, deskPosition, isEastDesk, sideSign, type Rect, type Side } from './layout';
+import { nook, type NookId } from './smokeBreak';
 import { hoopRim } from './toys/hoopScore';
 import { clear, makeNav, planPath, roombaRects, type Nav, type Pt } from './toys/roombaBrain';
 
@@ -87,9 +88,24 @@ export function pongSpots(): Spot[] {
 // In front of the jukebox, picking a song.
 const jukeboxSpot = (x: number): Spot => ({ id: 'jukebox', x, z: HALF_D - JUKEBOX.d - 0.8, facing: SOUTH });
 
+/** A smoke break's two spots per office balcony (world/smokeBreak.ts): standing in the gap, by the free end of the
+ * bench (the errand's agents stand there rather than truly sitting, like every other errand away from a desk).
+ * `nook.yaw` is already a body heading (0 facing -Z, like a perch's); walkways' own spots face the other way round
+ * (0 east), so it's turned into that before `headingFor` turns it back. */
+function smokeSpots(): Spot[] {
+  const ids: NookId[] = ['office-west', 'office-east'];
+  return ids.flatMap((id) => {
+    const n = nook(id);
+    const gapX = (n.gap.minX + n.gap.maxX) / 2;
+    const facing = n.yaw > 0 ? WEST : EAST;
+    return n.seats.map((seat, i): Spot => ({ id: `smoke-${id}-${i}`, x: gapX, z: seat.z, facing }));
+  });
+}
+
 function officeSpots(): Spot[] {
   return [
     ...boardSpots(),
+    ...smokeSpots(),
     // the kitchenette counter (OfficeFloor.tsx, Props.tsx): the coffee machine sits 1.1 m north of its middle
     { id: 'coffee', x: HALF_W - 1.45, z: 5.9, facing: EAST },
     // the mug dispenser, 0.45 m south of the machine
@@ -162,15 +178,96 @@ export function spot(w: Walkways, id: string): Spot | undefined {
   return w.spots.find((s) => s.id === id) ?? w.homes.find((s) => s.id === id);
 }
 
-/** Whether a person can stand at (x, z). */
-export const standable = (w: Walkways, x: number, z: number) => clear(w.nav.rects, x, z, WALK_R);
+// ---------- onto the balconies (#58): the office nav stops at the side walls, so a walk out to a smoke-break spot
+// bridges the doorway by hand, through the gap between that side's bench and table (smokeBreak.ts), clear of both. ----------
+
+const NOOK_FOR_SIDE: Record<Side, NookId> = { west: 'office-west', east: 'office-east' };
+
+const sideFor = (x: number): Side => (x < 0 ? 'west' : 'east');
+
+/** Whether (x, z) is in a smoke-break nook's gap corridor (where its two spots stand): the rest of the balconies
+ * stay off-limits. */
+function inSmokeGap(x: number, z: number): boolean {
+  for (const side of SIDES) {
+    const n = nook(NOOK_FOR_SIDE[side]);
+    if (Math.abs(x - (n.gap.minX + n.gap.maxX) / 2) < 0.1 && z >= n.gap.minZ - 0.1 && z <= n.gap.maxZ + 0.1) return true;
+  }
+  return false;
+}
+
+/** Whether a person can stand at (x, z): the indoor grid, or (office only) a smoke-break spot out on a balcony. */
+export const standable = (w: Walkways, x: number, z: number) => (Math.abs(x) <= HALF_W ? clear(w.nav.rects, x, z, WALK_R) : w.floor === 'office' && inSmokeGap(x, z));
+
+/** Just inside a side door, where the indoor nav ends before stepping out onto the balcony. */
+function doorInside(side: Side): Pt {
+  return { x: sideSign(side) * (HALF_W - 0.5), z: SIDE_OPENINGS.office[side].door };
+}
+
+/** The gap corridor's x on `side` (between that bench and table): clear of both, the whole way along. */
+function gapX(side: Side): number {
+  const n = nook(NOOK_FOR_SIDE[side]);
+  return (n.gap.minX + n.gap.maxX) / 2;
+}
+
+/** From just inside `side`'s door out to `dest` (a balcony point), via the gap corridor. */
+function outFromDoor(side: Side, dest: Pt): Pt[] {
+  const doorZ = SIDE_OPENINGS.office[side].door;
+  const gx = gapX(side);
+  const out: Pt[] = [{ x: sideSign(side) * (HALF_W + 0.4), z: doorZ }];
+  out.push({ x: gx, z: doorZ });
+  if (Math.abs(doorZ - dest.z) > 0.05) out.push({ x: gx, z: dest.z });
+  out.push({ x: dest.x, z: dest.z }); // a plain point: the last waypoint is never a Spot's own id/facing
+  return out;
+}
+
+/** From a balcony point `from` back in to just inside `side`'s door. */
+function inToDoor(side: Side, from: Pt): Pt[] {
+  const doorZ = SIDE_OPENINGS.office[side].door;
+  const gx = gapX(side);
+  const pts: Pt[] = [];
+  if (Math.abs(from.z - doorZ) > 0.05) pts.push({ x: gx, z: from.z }, { x: gx, z: doorZ });
+  pts.push({ x: sideSign(side) * (HALF_W + 0.4), z: doorZ }, doorInside(side));
+  return pts;
+}
 
 /**
  * A walk from `from` to `to`: a few straight legs round the furniture, as waypoints after `from` ending at `to`.
- * Null when there's no way through.
+ * Null when there's no way through. Office only: a destination (or origin) out on a balcony bridges the doorway
+ * (#58's smoke break) on top of the indoor grid.
  */
 export function findPath(w: Walkways, from: Pt, to: Pt): Pt[] | null {
-  return planPath(w.nav, from, to);
+  // Only a smoke-break spot bridges the doorway: any other point out there stays unreachable, the nav clipping to
+  // the nearest indoor cell as it always has (the balconies are otherwise still off-limits).
+  const fromOut = w.floor === 'office' && Math.abs(from.x) > HALF_W && inSmokeGap(from.x, from.z);
+  const toOut = w.floor === 'office' && Math.abs(to.x) > HALF_W && inSmokeGap(to.x, to.z);
+  if (!fromOut && !toOut) return planPath(w.nav, from, to);
+  if (fromOut && toOut) {
+    const side = sideFor(from.x);
+    const gx = gapX(side);
+    return [{ x: gx, z: from.z }, { x: gx, z: to.z }, { x: to.x, z: to.z }];
+  }
+  if (toOut) {
+    const side = sideFor(to.x);
+    const indoor = planPath(w.nav, from, doorInside(side));
+    return indoor && [...indoor, ...outFromDoor(side, to)];
+  }
+  const side = sideFor(from.x);
+  const indoor = planPath(w.nav, doorInside(side), to);
+  return indoor && [...inToDoor(side, from), ...indoor];
+}
+
+/**
+ * Whether the straight line from `a` to `b` at radius `r` is clear of every rect: `toys/roombaBrain.ts`'s
+ * `segmentClear`, minus its indoor-only bound (so a smoke-break leg out on a balcony can be checked too).
+ */
+export function legClear(rects: Rect[], a: Pt, b: Pt, r = WALK_R): boolean {
+  const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 0.08));
+  for (let k = 0; k <= n; k++) {
+    const x = a.x + ((b.x - a.x) * k) / n;
+    const z = a.z + ((b.z - a.z) * k) / n;
+    for (const rect of rects) if (x > rect.minX - r && x < rect.maxX + r && z > rect.minZ - r && z < rect.maxZ + r) return false;
+  }
+  return true;
 }
 
 // ---------- getting along ----------
