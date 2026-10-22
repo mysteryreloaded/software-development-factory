@@ -23,9 +23,10 @@ test('holding Space jumps only once', async ({ page }) => {
   await page.keyboard.down('Space');
   try {
     await expect.poll(() => jumpHeight(page), { timeout: 60_000 }).toBeGreaterThan(0.2);
-    // Autorepeat keeps firing keydown with repeat: true while held; a second jump would show as airborne again
-    // right after this one lands, instead of staying grounded.
     await expect.poll(() => jumpAirborne(page), { timeout: 60_000 }).toBe(false);
+    // Space is still held: Playwright sends this second down() as a repeat (the browser's own autorepeat while a
+    // key stays physically down). If !e.repeat were missing, this would start a second jump.
+    await page.keyboard.down('Space');
     await page.waitForTimeout(300);
     expect(await jumpAirborne(page)).toBe(false);
     expect(await jumpHeight(page)).toBe(0);
@@ -42,12 +43,16 @@ test.describe('the on-screen Jump button, on a touch phone', () => {
     // (e2e/touch.spec.ts), not pocket mode (the 2D office a narrow/touch screen gets by default).
     await page.goto('/?touch=1&pocket=0');
     await enterOffice(page, { loaded: true });
+    // The first-run tour (ui/Tutorial.tsx) sits over the touch controls and would eat the tap otherwise
+    // (e2e/touch.spec.ts's own skipTour).
+    await page.evaluate(() => fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tutorialStep: -1 }) }));
+    await expect(page.locator('.tour')).toBeHidden();
     const cdp = await page.context().newCDPSession(page);
     const box = await page.locator('.touch-jump').boundingBox();
     if (!box) throw new Error('no .touch-jump');
     const point = { x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 };
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-    await expect.poll(() => jumpHeight(page), { message: 'jump height after tapping Jump' }).toBeGreaterThan(0.2);
+    await expect.poll(() => jumpHeight(page), { message: 'jump height after tapping Jump', timeout: 60_000 }).toBeGreaterThan(0.2);
   });
 });

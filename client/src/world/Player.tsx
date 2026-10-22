@@ -51,10 +51,10 @@ let canvasEl: HTMLCanvasElement | null = null;
 let jumpState = groundedJump();
 (window as unknown as Record<string, unknown>).__swarmJump = { height: () => jumpHeight(jumpState), airborne: () => jumpState.airborne };
 
-/** Takes off, unless already airborne, travelling (the elevator) or holding the pong paddle. */
+/** Takes off, unless already airborne, perched, travelling (the elevator) or holding the pong paddle. */
 export function triggerJump() {
   const s = useStore.getState();
-  if (s.travel || s.held?.kind === 'paddle') return;
+  if (s.travel || s.held?.kind === 'paddle' || perch()) return;
   jumpState = startJump(jumpState);
 }
 
