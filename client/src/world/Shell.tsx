@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { look } from './batch';
 import { Part } from './Batched';
 import { Outlines } from './Outlines';
-import { ELEVATOR, HALF_D, HALF_W, SIDE_DOOR, SIDE_OPENINGS, SIDES, WALL_H, WALL_T, WINDOW, sideSign, type Side } from './layout';
+import { CEILING_LAMPS, ELEVATOR, HALF_D, HALF_W, SIDE_DOOR, SIDE_OPENINGS, SIDES, WALL_H, WALL_T, WINDOW, sideSign, type Side } from './layout';
 import { drawGlass } from './draw';
 import { shade, toon } from './materials';
 import { boxesGeometry, merged, type BoxSpec } from './shapes';
@@ -135,11 +135,7 @@ export function Shell({ kind, accent, floorColor }: { kind: FloorKind; accent: s
   const wall = toon(WALL);
   const t = 0.3;
   const { doorHalf, doorHeight } = ELEVATOR;
-  const lights = useMemo(() => {
-    const out: [number, number, number][] = [];
-    for (let x = -12; x <= 12; x += 6) for (let z = -8; z <= 8; z += 5.5) out.push([x, WALL_H - 0.04, z]);
-    return out;
-  }, []);
+  const lights = useMemo(() => CEILING_LAMPS.map(([x, z]): [number, number, number] => [x, WALL_H - 0.04, z]), []);
   const floorTex = useMemo(() => {
     // cartoon wood planks
     const c = document.createElement('canvas');

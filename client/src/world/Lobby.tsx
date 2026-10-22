@@ -284,7 +284,7 @@ function CeoOffice() {
         draw={(ctx) => drawSign(ctx, 816, 120, [{ text: `CEO${ceo ? ` · ${ceo.name}` : ''}`, size: 52 }], CEO_ACCENT)}
         deps={[ceo?.name]}
       />
-      {ceo && <Desk agent={ceo} accent={CEO_ACCENT} repoId="" position={CEO_DESK_AT} />}
+      {ceo && <Desk slot={-1} agent={ceo} accent={CEO_ACCENT} repoId="" position={CEO_DESK_AT} />}
       {ceo && <ActivityIcon agent={ceo} />}
       <CeoBoard />
       <Plant position={[c.maxX - 0.7, 0, c.maxZ - 0.7]} scale={1.1} pot={CEO_ACCENT} />

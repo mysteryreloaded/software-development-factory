@@ -46,6 +46,13 @@ export const floorElevation = (floor: number) => Math.max(0, floor) * FLOOR_HEIG
 export const WALL_T = 0.3;
 const SHELL_T = 0.4;
 
+/** The ceiling lights' x, z (Shell.tsx), clear of the desks (deskLampRule.ts checks it stays that way). */
+export const CEILING_LAMPS: [number, number][] = (() => {
+  const out: [number, number][] = [];
+  for (let x = -12; x <= 12; x += 6) for (let z = -8; z <= 8; z += 5.5) out.push([x, z]);
+  return out;
+})();
+
 /** The side walls' windows: w wide along the wall, h tall, centred y up. */
 export const WINDOW = { w: 4.4, h: 1.8, y: 1.95 };
 /** A side wall's glass door: half its width and its height. */
