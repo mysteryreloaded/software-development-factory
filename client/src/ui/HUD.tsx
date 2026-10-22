@@ -263,10 +263,10 @@ export function HUD() {
       {started && !(settings.setupDone && settings.tutorialStep >= 0) && (
         <div className="hud-help">
           {touchOn ? (
-            '🕹️ walk · drag to look · tap to use'
+            '🕹️ walk · drag to look · tap to use · ⤴ jump'
           ) : (
             <>
-              <MoveKeys joined /> move · <Key action="run" /> run · <Key action="interact" /> / <kbd>Click</kbd> interact · <Key action="phone" /> phone · <Key action="emote" /> emote · <Key action="ping" /> ping · <Key action="photo" /> photo ·{' '}
+              <MoveKeys joined /> move · <Key action="run" /> run · <Key action="jump" /> jump · <Key action="interact" /> / <kbd>Click</kbd> interact · <Key action="phone" /> phone · <Key action="emote" /> emote · <Key action="ping" /> ping · <Key action="photo" /> photo ·{' '}
               <Key action="overview" /> overview · <Key action="workers" /> workers · <Key action="mute" /> mute · <Key action="help" /> help · <kbd>Esc</kbd> free mouse
             </>
           )}

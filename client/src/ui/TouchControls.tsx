@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { peelAimed, placeSticky } from '../world/boardHands';
-import { interact } from '../world/Player';
+import { interact, triggerJump } from '../world/Player';
 import { reloadHeld } from '../world/toys/gun';
 import { dropHeld, startCharge, throwHeld } from '../world/toys/hands';
 import { stick, touchInput } from '../world/touch';
@@ -83,6 +83,16 @@ export function TouchControls() {
   return (
     <div className="touch-controls">
       <Joystick />
+      <button
+        className="touch-btn touch-jump"
+        onPointerDown={(e) => {
+          e.preventDefault();
+          triggerJump();
+        }}
+        aria-label="Jump"
+      >
+        ⤴
+      </button>
       <div className="touch-buttons">
         {held?.kind === 'blaster' && (
           <button className="touch-btn" onClick={() => reloadHeld()} aria-label="Reload">

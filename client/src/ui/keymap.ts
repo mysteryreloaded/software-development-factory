@@ -8,6 +8,7 @@ export type ActionId =
   | 'left'
   | 'right'
   | 'run'
+  | 'jump'
   | 'interact'
   | 'throw'
   | 'drop'
@@ -49,6 +50,7 @@ export const ACTIONS: readonly ActionDef[] = [
   { id: 'left', label: 'Step left', group: 'Moving', scope: 'move', keys: ['KeyA', 'ArrowLeft'] },
   { id: 'right', label: 'Step right', group: 'Moving', scope: 'move', keys: ['KeyD', 'ArrowRight'] },
   { id: 'run', label: 'Run (hold)', group: 'Moving', scope: 'move', keys: ['ShiftLeft', 'ShiftRight'] },
+  { id: 'jump', label: 'Jump', group: 'Moving', scope: 'walk', keys: ['Space'] },
   { id: 'interact', label: 'Use, pick up, sip', group: 'Hands', scope: 'walk', keys: ['KeyE'] },
   { id: 'throw', label: 'Throw or fire (hold to charge)', group: 'Hands', scope: 'walk', keys: ['KeyF'] },
   { id: 'drop', label: 'Drop', group: 'Hands', scope: 'walk', keys: ['KeyG'] },
