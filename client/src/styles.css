@@ -418,6 +418,48 @@ input.inline:focus {
   font-weight: 600;
   max-width: 90vw;
 }
+/* Issue #85: the floor card, status pills and chips in .hud-top-scroll fade their own background to 20% opacity
+   so the 3D world shows through. Only `background`, never `opacity` (that would fade the text too); a light halo
+   keeps the text readable over a dark scene. High contrast restores solid backgrounds (below). */
+.hud-top-scroll .hud-floor {
+  background: color-mix(in srgb, var(--paper) 20%, transparent);
+}
+.hud-top-scroll .floor-name,
+.hud-top-scroll .floor-sub {
+  text-shadow: 0 0 3px var(--paper), 0 0 6px var(--paper);
+}
+.hud-top-scroll .pill {
+  background: color-mix(in srgb, #fff 20%, transparent);
+  text-shadow: 0 0 3px var(--paper), 0 0 6px var(--paper);
+}
+.hud-top-scroll .pill-ok {
+  background: color-mix(in srgb, #b9fbc0 20%, transparent);
+}
+.hud-top-scroll .pill-bad {
+  background: color-mix(in srgb, #ffc2d1 20%, transparent);
+}
+.hud-top-scroll .pill-demo {
+  background: color-mix(in srgb, #ffd166 20%, transparent);
+}
+.hud-top-scroll .pill-replay {
+  background: color-mix(in srgb, #ff8fa3 20%, transparent);
+}
+.hud-top-scroll .coin-pill {
+  background: color-mix(in srgb, #ffe8a3 20%, transparent);
+}
+.hud-top-scroll .office-chip {
+  background: color-mix(in srgb, #ffe8a3 20%, transparent);
+  text-shadow: 0 0 3px var(--paper), 0 0 6px var(--paper);
+}
+.hud-top-scroll .usage-chip-pacing {
+  background: color-mix(in srgb, #ffd6a5 20%, transparent);
+}
+.hud-top-scroll .usage-chip-paused {
+  background: color-mix(in srgb, #ffc2d1 20%, transparent);
+}
+.hud-top-scroll .doctor-chip {
+  background: color-mix(in srgb, #d9d2ff 20%, transparent);
+}
 @media (max-width: 700px), (max-height: 500px) {
   .hud-top {
     position: absolute;
@@ -5512,6 +5554,46 @@ html[data-high-contrast] .wk-head b {
 html[data-high-contrast] .floor-num {
   color: var(--ink);
   text-shadow: none;
+}
+/* Issue #85: high contrast keeps the solid backgrounds the 20% fade above gives up. */
+html[data-high-contrast] .hud-top-scroll .hud-floor {
+  background: var(--paper);
+}
+html[data-high-contrast] .hud-top-scroll .floor-name,
+html[data-high-contrast] .hud-top-scroll .floor-sub,
+html[data-high-contrast] .hud-top-scroll .pill,
+html[data-high-contrast] .hud-top-scroll .office-chip {
+  text-shadow: none;
+}
+html[data-high-contrast] .hud-top-scroll .pill {
+  background: #fff;
+}
+html[data-high-contrast] .hud-top-scroll .pill-ok {
+  background: #b9fbc0;
+}
+html[data-high-contrast] .hud-top-scroll .pill-bad {
+  background: #ffc2d1;
+}
+html[data-high-contrast] .hud-top-scroll .pill-demo {
+  background: #ffd166;
+}
+html[data-high-contrast] .hud-top-scroll .pill-replay {
+  background: #ff8fa3;
+}
+html[data-high-contrast] .hud-top-scroll .coin-pill {
+  background: #ffe8a3;
+}
+html[data-high-contrast] .hud-top-scroll .office-chip {
+  background: #ffe8a3;
+}
+html[data-high-contrast] .hud-top-scroll .usage-chip-pacing {
+  background: #ffd6a5;
+}
+html[data-high-contrast] .hud-top-scroll .usage-chip-paused {
+  background: #ffc2d1;
+}
+html[data-high-contrast] .hud-top-scroll .doctor-chip {
+  background: #d9d2ff;
 }
 html[data-high-contrast] .hud-resume {
   padding: 4px 12px;

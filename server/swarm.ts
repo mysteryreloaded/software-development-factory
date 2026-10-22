@@ -37,7 +37,7 @@ import { emptyHistory, loadHistory, opsView, recordChecks, recordCost, recordMer
 import { clampTrimIdleMin, DEFAULT_TRIM_IDLE_MIN, desksToTrim, formatBytes, freedMessage, idleSince, TRIM_SWEEP_MS } from './deskTrim.ts';
 import { cliLabel, isCli } from './clis.ts';
 import { machineName } from './machines.ts';
-import { MACHINES_DIR, type DeskTrim } from './workspace.ts';
+import { MACHINES_DIR, machineTmp, type DeskTrim } from './workspace.ts';
 import { envSecrets, Journal } from './journal.ts';
 import { sampleDay, seeded } from './journalSample.ts';
 import { addTenure, apply as applyLedger, buy as buyDecor, emptyLedger, grant as grantCoins, loadLedger, place as placeDecor, progressView, type CommandResult, type Effects, type LedgerEvent, type LedgerState } from './ledger.ts';
@@ -54,7 +54,7 @@ import { WeatherService } from './weather.ts';
 import { blockers, holdUps, waitsMessage } from '../shared/issues.ts';
 import { dayKey, journalFrame, legacyAgent, legacyRequest } from '../shared/journal.ts';
 import { cleanStyle, HAIR_COLORS, SKIN_TONES, type AgentStyle } from '../shared/looks.ts';
-import { attachedBlock, MAX_FILES } from '../shared/attachments.ts';
+import { attachedBlock, humanSize, MAX_FILES } from '../shared/attachments.ts';
 import { MESSAGE_MAX, messageProblem } from '../shared/message.ts';
 import { achievementDef, type ProgressView } from '../shared/progress.ts';
 import { parsePongResult, PONG_PLAYER, recordGame } from '../shared/pong.ts';
@@ -3227,30 +3227,52 @@ export class Swarm {
     }
   }
 
-  /** A message for an agent: sent into their running session, or a follow-up that resumes it. typed: the manager typed it at their CLI's prompt, where it's already running. */
-  async message(id: string, text: string, typed = false) {
+  /** Copies the manager's picked uploads (server/uploads.ts) into the agent's own machine temp folder — never the
+   * worktree, so nothing gets committed — where its file-reading tool can open them. */
+  private async attachAgentFiles(a: PersistedAgent, ids: string[]): Promise<{ path: string; view: AttachmentView }[]> {
+    if (ids.length === 0) return [];
+    if (ids.length > MAX_FILES) throw new HttpError(400, `Up to ${MAX_FILES} files per message.`);
+    const destDir = path.join(machineTmp(machineName(a.id)), 'attachments');
+    const out: { path: string; view: AttachmentView }[] = [];
+    for (const id of ids) {
+      const copied = await copyUpload(UPLOADS_DIR, id, destDir);
+      if (!copied) throw new HttpError(400, `Unknown attachment: ${id}`);
+      out.push(copied);
+    }
+    return out;
+  }
+
+  /** A message for an agent: sent into their running session, or a follow-up that resumes it. typed: the manager typed it at their CLI's prompt, where it's already running (no attachments on that path). */
+  async message(id: string, text: string, typed = false, ids: string[] = []) {
     const a = this.agent(id);
-    if (a.role === 'ceo') return this.messageCeo(text);
+    if (a.role === 'ceo') return this.messageCeo(text, ids);
     const repo = this.repo(a.repoId);
-    const problem = messageProblem(text);
-    if (problem) throw new HttpError(400, problem);
-    text = text.trim();
+    const t = text.trim();
+    if (!t && ids.length === 0) throw new HttpError(400, 'Empty message');
+    if (t) {
+      const problem = messageProblem(text);
+      if (problem) throw new HttpError(400, problem);
+    }
+    const attached = typed ? [] : await this.attachAgentFiles(a, ids);
+    const block = attachedBlock(attached.map((f) => ({ path: f.path, info: f.view })), 'agent');
+    const forAgent = [t, block].filter(Boolean).join('\n\n');
+    const chips = attached.map((f) => ({ kind: 'manager' as const, text: `📎 ${f.view.name} · ${humanSize(f.view.size)}` }));
     const rt = this.agentRt.get(id)!;
     if (rt.session) {
-      this.appendLog(a, [{ kind: 'manager', text: `▶ Manager: ${text}` }]);
-      if (!typed) rt.session.send(text);
+      this.appendLog(a, [{ kind: 'manager', text: `▶ Manager: ${forAgent}` }, ...chips]);
+      if (!typed) rt.session.send(forAgent);
       return;
     }
     if (a.status === 'preparing') throw new HttpError(409, `${a.name} is still setting up; try again in a moment`);
     if (!a.sessionId || !a.branch || a.task === 'qa') throw new HttpError(409, `${a.name} has no session to continue. Give them an issue or a PR to test instead.`);
     this.ensureSlot();
-    this.appendLog(a, [{ kind: 'manager', text: `▶ Manager: ${text}` }]);
+    this.appendLog(a, [{ kind: 'manager', text: `▶ Manager: ${forAgent}` }, ...chips]);
     const cwd = this.deskOf(a, repo);
     a.lastError = null;
     a.startedAt = Date.now();
     if (a.task === null) a.task = 'issue';
     const fixing = a.task === 'fix' && a.prNumber ? { pr: a.prNumber, headRef: a.branch } : undefined;
-    this.startAgentSession(a, repo, cwd, text, this.buildSystemAppend(a, repo, cwd, a.branch, fixing), a.sessionId, undefined, typed ? 'typed' : null);
+    this.startAgentSession(a, repo, cwd, forAgent, this.buildSystemAppend(a, repo, cwd, a.branch, fixing), a.sessionId, undefined, typed ? 'typed' : null);
   }
 
   updateSettings(patch: Partial<SwarmSettings>) {
@@ -4004,7 +4026,7 @@ export class Swarm {
       if (problem) throw new HttpError(400, problem);
     }
     const attached = await this.attachFiles(ids);
-    const block = attachedBlock(attached.map((f) => ({ path: f.path, info: f.view })));
+    const block = attachedBlock(attached.map((f) => ({ path: f.path, info: f.view })), 'ceo');
     const forCeo = [t, block].filter(Boolean).join('\n\n');
     const a = this.ceo();
     this.postMessage('manager', t, undefined, attached.map((f) => f.view));

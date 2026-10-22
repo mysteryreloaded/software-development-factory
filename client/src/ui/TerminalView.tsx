@@ -3,9 +3,11 @@ import { CareerCard } from './CareerCard';
 import { api } from '../api';
 import { isBusy, kanbanFor, agentsOnRepo, useStore } from '../store';
 import { AgentSetup } from './AgentSettings';
+import { AttachButton, AttachmentChips, usePendingAttachments } from './AttachButton';
 import { confirmDialog } from './Confirm';
 import { LiveTerminal } from './LiveTerminal';
 import { effectiveModel } from '../../../shared/models';
+import { MAX_FILES } from '../../../shared/attachments';
 import { assignChoices } from '../pocket/pocketData';
 import { agentLabel, workerCli } from './floorRows';
 import { MessageBox } from './MessageBox';
@@ -45,6 +47,7 @@ export function TerminalView({ agentId }: { agentId: string }) {
   const [text, setText] = useState('');
   const [pick, setPick] = useState('');
   const [busy, setBusy] = useState(false);
+  const attach = usePendingAttachments();
   const [showSetup, setShowSetup] = useState(false);
   const [showCareer, setShowCareer] = useState(false);
   const [, tick] = useState(0);
@@ -106,10 +109,13 @@ export function TerminalView({ agentId }: { agentId: string }) {
   const canMessage = working || (agent.task !== 'qa' && !!agent.branch && agent.status !== 'idle');
   const qaRec = agent.prNumber ? qaRecords[`${repo.id}#${agent.prNumber}`] : undefined;
   const send = (t: string) => {
+    if (attach.busy) return;
     const body = t.trim();
-    if (!body) return;
+    const ids = attach.ids();
+    if (!body && ids.length === 0) return;
     setText('');
-    void run(() => api.message(agent.id, body));
+    attach.reset();
+    void run(() => api.message(agent.id, body, ids));
   };
 
   return (
@@ -227,6 +233,7 @@ export function TerminalView({ agentId }: { agentId: string }) {
         )}
       </div>
 
+      <AttachmentChips files={attach.files} remove={attach.remove} />
       <form
         className="term-input"
         onSubmit={(e) => {
@@ -234,9 +241,11 @@ export function TerminalView({ agentId }: { agentId: string }) {
           send(text);
         }}
       >
+        <AttachButton onFiles={attach.add} disabled={!canMessage || attach.files.length >= MAX_FILES} />
         <MessageBox
           value={text}
           onChange={setText}
+          onFiles={attach.add}
           aria-label={`Message ${agent.name}`}
           title="Enter sends · Shift+Enter adds a new line"
           placeholder={
@@ -250,7 +259,7 @@ export function TerminalView({ agentId }: { agentId: string }) {
           autoFocus={!agent.terminal}
         />
         <MicButton kind="agent" value={text} onChange={setText} onSend={send} disabled={!canMessage} />
-        <button className="btn" disabled={busy || !canMessage || !text.trim()}>
+        <button className="btn" disabled={busy || attach.busy || !canMessage || (!text.trim() && attach.files.length === 0)}>
           Send
         </button>
       </form>
