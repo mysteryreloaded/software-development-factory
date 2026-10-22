@@ -9,6 +9,7 @@ import {
   issueOpen,
   MAX_ASKS,
   pullNow,
+  settledPulls,
   stillOpen,
   stoppedMessage,
   toAsk,
@@ -211,6 +212,41 @@ describe('toHold: closing a PR never puts its issue back in line by itself', () 
   it('never holds an issue that is closed, or anything after a merge', () => {
     expect(toHold(pull(198, 'CLOSED', 'swarm/issue-192-barbara', [192]), floor({ closedIssues: new Map([[192, T]]) }))).toEqual([]);
     expect(toHold(pull(198, 'MERGED', 'swarm/issue-192-barbara', [192]), f)).toEqual([]);
+  });
+});
+
+describe('settledPulls: the list brought in step with what was learned since (#70)', () => {
+  type Row = KnownPull & { mergedAt: string | null };
+  const row = (number: number, state: KnownPull['state'] = 'OPEN', mergedAt: string | null = null): Row => ({ ...pull(number), state, mergedAt });
+
+  it('settles an OPEN row whose learned state is MERGED, backfilling mergedAt from when the office learned it', () => {
+    const f = floor({ pulls: [row(198)], closedPulls: new Map([learned(pull(198, 'MERGED'), T + 5)]) });
+    expect(settledPulls([row(198)], f)).toEqual([row(198, 'MERGED', new Date(T + 5).toISOString())]);
+  });
+
+  it('keeps a mergedAt the list already set', () => {
+    const f = floor({ pulls: [row(198)], closedPulls: new Map([learned(pull(198, 'MERGED'), T + 5)]) });
+    expect(settledPulls([row(198, 'OPEN', '2026-01-01T00:00:00.000Z')], f)[0].mergedAt).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('settles an OPEN row whose learned state is CLOSED', () => {
+    const f = floor({ pulls: [row(198)], closedPulls: new Map([learned(pull(198, 'CLOSED'))]) });
+    expect(settledPulls([row(198)], f)).toEqual([row(198, 'CLOSED')]);
+  });
+
+  it('leaves a reopen alone: a closure older than the list, which still shows it OPEN', () => {
+    const f = floor({ pulls: [row(198)], closedPulls: new Map([learned(pull(198, 'CLOSED'), T - 5)]) });
+    expect(settledPulls([row(198)], f)).toEqual([row(198)]);
+  });
+
+  it('never touches an unrelated row', () => {
+    const f = floor({ pulls: [row(198), row(199)], closedPulls: new Map([learned(pull(198, 'MERGED'), T + 5)]) });
+    expect(settledPulls([row(199)], f)).toEqual([row(199)]);
+  });
+
+  it('returns the same array when nothing changes', () => {
+    const rows = [row(198), row(199)];
+    expect(settledPulls(rows, floor({ pulls: rows }))).toBe(rows);
   });
 });
 

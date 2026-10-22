@@ -49,6 +49,25 @@ export function pullNow(n: number, f: FloorState): KnownPull | null {
 }
 
 /**
+ * The list's OPEN pulls brought in step with what the office has learned since: one whose learned state is CLOSED or
+ * MERGED takes it, so a card never sits OPEN with no QA record between a merge (or close) and the next sync. A MERGED
+ * one with no `mergedAt` gets the moment the office learned it. Returns the same array when nothing changes.
+ */
+export function settledPulls<T extends { number: number; state: PullState; mergedAt?: string | null }>(pulls: readonly T[], f: FloorState): T[] {
+  let changed = false;
+  const out = pulls.map((p) => {
+    if (p.state !== 'OPEN') return p;
+    const learned = pullNow(p.number, f);
+    if (!learned || learned.state === 'OPEN') return p;
+    changed = true;
+    if (learned.state !== 'MERGED') return { ...p, state: learned.state };
+    const at = f.closedPulls.get(p.number)?.at;
+    return { ...p, state: learned.state, mergedAt: p.mergedAt ?? (at ? new Date(at).toISOString() : null) };
+  });
+  return changed ? out : (pulls as T[]);
+}
+
+/**
  * May an issue, QA or fix task start? live: GitHub's answer just now (null: it couldn't be asked). Without one, the
  * office's latest view decides, and what it can't tell counts as open: a task is never refused on a guess.
  */
