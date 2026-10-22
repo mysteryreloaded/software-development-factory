@@ -1162,7 +1162,9 @@ input.inline:focus {
        keeps it from growing down into this on a short screen. */
     bottom: calc(144px + env(safe-area-inset-bottom));
     left: max(16px, env(safe-area-inset-left));
-    max-width: calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right));
+    /* Issue #45: stay clear of .touch-buttons' column, which reaches up into this band when it's grown tall
+       (Throw/Drop above Use, held-ball) — a longer hint (now with "jump") must still stop short of it. */
+    max-width: min(calc(100vw - 32px - env(safe-area-inset-left) - env(safe-area-inset-right)), 250px);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3200,6 +3202,18 @@ input.inline:focus {
   border: 3px solid var(--ink);
   pointer-events: none;
 }
+/* Issue #45: a round Jump button right of the stick, its bottom level with the stick's own. */
+.touch-jump {
+  position: absolute;
+  left: calc(max(24px, env(safe-area-inset-left)) + 112px + 16px);
+  bottom: max(24px, env(safe-area-inset-bottom));
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  padding: 0;
+  font-size: 1.3rem;
+  pointer-events: auto;
+}
 .touch-buttons {
   position: absolute;
   right: max(16px, env(safe-area-inset-right));
@@ -3244,6 +3258,13 @@ input.inline:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Issue #45: on the narrowest portrait phones, a wide Use label's left edge would reach under the Jump button
+   (right of the stick, styles.css's .touch-jump); a shorter cap leaves it room without touching Use's own height. */
+@media (max-width: 400px) {
+  .touch-btn-use {
+    max-width: 90px;
+  }
 }
 .voice-speaking {
   position: absolute;
@@ -3661,27 +3682,6 @@ input.inline:focus {
     transform: translateY(-4px);
     opacity: 1;
   }
-}
-.quick {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  padding: 6px 10px 0;
-  background: #fff;
-}
-.quick-chip {
-  flex: none;
-  font-family: var(--font);
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 4px 10px;
-  border: 1.5px solid rgba(31, 29, 43, 0.3);
-  border-radius: 999px;
-  background: #fff;
-  cursor: pointer;
-}
-.quick-chip:hover {
-  border-color: var(--accent);
 }
 .chat-input {
   display: flex;
@@ -4704,10 +4704,6 @@ input.inline:focus {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-}
-.pocket .quick {
-  flex-wrap: wrap;
-  overflow: visible;
 }
 .pocket .md pre {
   white-space: pre-wrap;

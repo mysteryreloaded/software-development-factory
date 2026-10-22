@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CEO_ID, DEFAULT_DOG_NAME, DEFAULT_MAX_AGENTS, type AgentView, type CeoInfo, type CliView, type DoctorFinding, type HireRequestView, type LogLine, type NotifyChannelsView, type OfficeUpdateView, type OpsView, type PhoneMessage, type PongRow, type PrPreviewView, type QaView, type RepoView, type ServerEvent, type SwarmSettings, type TickerItem, type UsageView, type VisitorView, type VoiceCacheView, type WorldSnapshot } from '../../shared/types';
+import { CEO_ID, DEFAULT_DOG_NAME, DEFAULT_MAX_AGENTS, type AgentView, type CeoInfo, type CliView, type DoctorFinding, type HireRequestView, type LogLine, type NotifyChannelsView, type OfficeUpdateView, type OpsView, type PenaltyBoard, type PhoneMessage, type PongRow, type PrPreviewView, type QaView, type RepoView, type ServerEvent, type SwarmSettings, type TickerItem, type UsageView, type VisitorView, type VoiceCacheView, type WorldSnapshot } from '../../shared/types';
 import { blockers } from '../../shared/issues';
 import { latestListed } from '../../shared/watch';
 import { DEFAULT_WEATHER, DEFAULT_WORLD_EVENTS, EMPTY_WEATHER_VIEW, type WeatherView } from '../../shared/outside';
@@ -68,7 +68,9 @@ export interface Focus {
     /** E on a holiday theme's thing (themes/active.ts). */
     | { kind: 'theme'; id: string }
     /** Pick up a paddle at that end of the ping-pong table (toys/pongState.ts). */
-    | { kind: 'pong'; end: 'west' | 'east' };
+    | { kind: 'pong'; end: 'west' | 'east' }
+    /** Play a penalty shoot-out against a free agent, from the park's penalty spot (world/park/penaltyState.ts). */
+    | { kind: 'penalty' };
 }
 
 /** What the player is carrying. Other items (a blaster, say) join the union with their own kind. */
@@ -85,7 +87,9 @@ export type Held =
   /** A decoration on its way to a slot (#210): from the floor's decor box (from null) or from the slot it stood in. */
   | { kind: 'decor'; id: string; item: DecorItem; from: string | null }
   /** A ping-pong paddle, playing at that end of the table (toys/pongState.ts): mouse and camera belong to the match. */
-  | { kind: 'paddle'; id: 'west' | 'east' };
+  | { kind: 'paddle'; id: 'west' | 'east' }
+  /** Playing a penalty shoot-out (world/park/penaltyState.ts): mouse and camera belong to the match, as shooter or keeper. */
+  | { kind: 'penalty'; id: 'match' };
 
 export interface Toast {
   id: number;
@@ -131,6 +135,7 @@ interface State {
   ticker: TickerItem[]; // the floors' recent activity lines, oldest first (world/ActivityTicker.tsx)
   notifyChannels: NotifyChannelsView; // which chat apps have a webhook saved (hints only) and how many devices get push
   pong: Record<string, PongRow[]>; // each floor's ping-pong leaderboard by repo id, best first
+  penalty: PenaltyBoard; // the park's penalty shoot-out board (#46), office-wide
   restarting: boolean; // the connection dropped because the office is restarting to update
   visitors: VisitorView[]; // everyone else appearing in the office, any floor (presence; their poses skip the store)
   replaying: boolean; // the time-lapse (replay.ts) is showing a recorded day: live events wait, live actions are off
@@ -260,6 +265,7 @@ export const useStore = create<State>((set, get) => ({
   ticker: [],
   notifyChannels: { webhooks: { ntfy: { set: false, hint: '' } }, pushDevices: 0 },
   pong: {},
+  penalty: { rows: [], hardest: null },
   restarting: false,
   visitors: [],
   replaying: false,
@@ -330,6 +336,7 @@ export const useStore = create<State>((set, get) => ({
           notifyChannels: d.notifyChannels ?? get().notifyChannels,
           progress: d.progress ?? { floors: {}, achievements: [], coffees: 0, merges: 0 },
           pong: d.pong ?? {},
+          penalty: d.penalty ?? { rows: [], hardest: null },
           restarting: false,
           floor: floorExists ? get().floor : 0,
         });
@@ -539,6 +546,9 @@ export const useStore = create<State>((set, get) => ({
         break;
       case 'pong':
         set({ pong: { ...get().pong, [ev.repoId]: ev.board } });
+        break;
+      case 'penalty':
+        set({ penalty: ev.board });
         break;
     }
   },

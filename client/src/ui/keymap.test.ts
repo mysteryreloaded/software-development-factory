@@ -19,6 +19,7 @@ describe('default bindings', () => {
     const b = defaultBindings();
     expect(b.forward).toEqual(['KeyW', 'ArrowUp']);
     expect(b.run).toEqual(['ShiftLeft', 'ShiftRight']);
+    expect(b.jump).toEqual(['Space']);
     expect(b.interact).toEqual(['KeyE']);
     expect(b.throw).toEqual(['KeyF']);
     expect(b.drop).toEqual(['KeyG']);

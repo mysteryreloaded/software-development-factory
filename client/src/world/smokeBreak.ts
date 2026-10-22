@@ -4,6 +4,7 @@
 
 import { PLAYER_RADIUS, ROOF_SMOKE_BENCH, ROOF_SMOKE_TABLE, SIDES, balconyFurniture, type Rect } from './layout';
 import { leavePerch, perch } from './perch';
+import type { VisitorHeld } from '../../../shared/types';
 
 export type NookId = 'office-west' | 'office-east' | 'roof';
 
@@ -227,6 +228,32 @@ export function parseSmokePerchId(perchId: string): { nookId: NookId; seat: 0 | 
   return m ? { nookId: m[1] as NookId, seat: Number(m[2]) as 0 | 1 } : null;
 }
 
+/** A relayed presence pose's seat id (shared/presence.ts's `s`, #59): `<nookId>:<seat>`, no `smoke:` prefix. */
+export function parseSeatId(id: string): { nookId: NookId; seat: 0 | 1 } | null {
+  const m = /^(office-west|office-east|roof):([01])$/.exec(id);
+  return m ? { nookId: m[1] as NookId, seat: Number(m[2]) as 0 | 1 } : null;
+}
+
+/**
+ * This tab's own smoke break, for Presence.tsx to relay (#59): the seat id, and the joint others see in your hand
+ * (rolling, lit, puffs left) once you've rolled one; null while you're not sitting at a nook at all.
+ */
+export function mySmokeHeld(): { seat: string; held: VisitorHeld | null } | null {
+  const parsed = parseSmokePerchId(perch()?.id ?? '');
+  if (!parsed) return null;
+  const r = handles.get(parsed.nookId)?.report();
+  const seat = `${parsed.nookId}:${parsed.seat}`;
+  if (!r || !r.stage || r.stage === 'empty') return { seat, held: null };
+  const held: VisitorHeld = {
+    k: 'joint',
+    id: 'joint',
+    s: r.puffsLeft ?? 0,
+    l: r.stage === 'lit' || r.stage === 'puffing' ? 1 : 0,
+    r: r.stage === 'rolling' ? 1 : 0,
+  };
+  return { seat, held };
+}
+
 // ---------- the probe (window.__swarmSmokeBreak / __swarmSmokeBreakDo, for QA and Playwright) ----------
 
 function probeMe() {
@@ -236,6 +263,20 @@ function probeMe() {
   return { nook: parsed.nookId, seat: parsed.seat, stage: r.stage ?? null, puffsLeft: r.puffsLeft ?? null, lit: r.stage === 'lit' || r.stage === 'puffing' };
 }
 
+/** Other visitors seen smoking right now (#59), for the e2e probe. Presence.tsx wires this in (setSmokeVisitorsProbe),
+ * so this file itself never imports presence code: demoVisitors.ts (server-side) pulls in this file for its pure
+ * nook geometry and stage timings, and must not drag browser-only presence state along with it. */
+export interface SmokeVisitor {
+  id: string;
+  nook: NookId;
+  seat: 0 | 1;
+  puffsLeft: number | null;
+  lit: boolean;
+  rolling: boolean;
+}
+let visitorsProbe: (() => SmokeVisitor[]) | null = null;
+export const setSmokeVisitorsProbe = (fn: () => SmokeVisitor[]) => void (visitorsProbe = fn);
+
 if (typeof window !== 'undefined') {
   const probe = {
     get nooks() {
@@ -243,6 +284,9 @@ if (typeof window !== 'undefined') {
     },
     get me() {
       return probeMe();
+    },
+    get visitors() {
+      return visitorsProbe ? visitorsProbe() : [];
     },
   };
   (window as unknown as Record<string, unknown>).__swarmSmokeBreak = probe;

@@ -38,12 +38,26 @@ import { roofAction } from './roof/roofState';
 import { parseSmokePerchId, runSmokeBreakOp, smokeBreakFocus, smokeFocusAt, type SmokeFocus } from './smokeBreak';
 import { greet } from './Chatter';
 import { joinPong, pongCamera, pongMouse, tickPaddle } from './toys/pongState';
+import { penaltyAim, penaltyAimDive, penaltyCamera, penaltyCharge, penaltyCommitDive, penaltyShuffle, playerRole, requestPenaltyMatch } from './park/penaltyState';
 import { gesture, touchInput, useTouch } from './touch';
+import { groundedJump, jumpHeight, startJump, stepJump } from './jump';
 
 /** How fast the right stick moves the ping-pong paddle, full over (in mouse pixels a second). */
 const PAD_PADDLE = 600;
 
 let canvasEl: HTMLCanvasElement | null = null;
+
+// One Player is ever mounted, so the jump arc lives at module scope: TouchControls.tsx's Jump button (and
+// __swarmJump, for e2e) reach it the same way interact() below is reached.
+let jumpState = groundedJump();
+(window as unknown as Record<string, unknown>).__swarmJump = { height: () => jumpHeight(jumpState), airborne: () => jumpState.airborne };
+
+/** Takes off, unless already airborne, perched, travelling (the elevator) or holding the pong paddle. */
+export function triggerJump() {
+  const s = useStore.getState();
+  if (s.travel || s.held?.kind === 'paddle' || perch()) return;
+  jumpState = startJump(jumpState);
+}
 
 // After an action, mouse presses are swallowed for a moment, so the second half of a double click
 // (or a click right after E) can't land on the panel's backdrop and close it, or confirm a hire.
@@ -118,6 +132,10 @@ export function runFocusAction(focus: Focus, via: 'key' | 'click' = 'key') {
   }
   if (focus.action.kind === 'pong') {
     joinPong(focus.action.end); // a paddle in hand: the mouse and the view are the match's now
+    return;
+  }
+  if (focus.action.kind === 'penalty') {
+    if (!requestPenaltyMatch()) s.pushToast('info', "Everyone's busy, try again later");
     return;
   }
   if (focus.action.kind === 'theme') {
@@ -336,12 +354,14 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       if (document.pointerLockElement !== gl.domElement) return requestLook();
       const s = useStore.getState();
       if (!s.started || s.overlay || s.travel || isConfirmOpen()) return;
+      if (s.held?.kind === 'penalty') return playerRole() === 'keeper' ? penaltyCommitDive() : penaltyCharge(true);
       // The coffee machine takes a click with your hands full (that's how the mug goes in), and a decoration goes where you click.
       if (s.held && s.focus?.action.kind !== 'coffee' && s.held.kind !== 'decor') startCharge();
       else if (s.focus && !pressBoard(s.focus)) runFocusAction(s.focus, 'click'); // on a sticky, holding peels it off
     };
     const onMouseUp = (e: MouseEvent) => {
       if (e.button !== 0 || photoActive()) return;
+      if (useStore.getState().held?.kind === 'penalty') return penaltyCharge(false);
       throwHeld();
       releaseBoard((f) => runFocusAction(f, 'click'));
     };
@@ -377,6 +397,10 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       if (!d) return;
       const { sensitivity, invertY } = useLookPrefs.getState();
       if (useStore.getState().held?.kind === 'paddle') return pongMouse(d[0], d[1], sensitivity); // playing: the mouse moves the paddle
+      if (useStore.getState().held?.kind === 'penalty') {
+        // playing penalties: the mouse aims the shot (shooter) or the dive (keeper)
+        return playerRole() === 'keeper' ? penaltyAimDive(d[0], d[1], sensitivity) : penaltyAim(d[0], d[1], sensitivity);
+      }
       const p = perch();
       const k = LOOK_RADIANS_PER_PX * sensitivity * (p?.look ?? 1);
       look.current.yaw -= d[0] * k;
@@ -411,7 +435,15 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
         // − and + turn the jukebox down and up while you look at it.
         if (action === 'volumeDown' && s.focus?.action.kind === 'jukebox') jukeboxAction('vol-');
         if (action === 'volumeUp' && s.focus?.action.kind === 'jukebox') jukeboxAction('vol+');
+        if (action === 'jump' && !e.repeat) {
+          e.preventDefault(); // Space never clicks a focused button or scrolls the page
+          triggerJump();
+        }
         if (action === 'throw' && !e.repeat && !s.travel) startCharge();
+        if (action === 'throw' && !e.repeat && !s.travel) {
+          if (s.held?.kind === 'penalty') penaltyCharge(true);
+          else startCharge();
+        }
         // G puts a sticky down where you aim (or back on the board), peels the one you aim at off, or drops what you hold
         if (action === 'drop' && !e.repeat && !placeSticky(s.focus, true) && !peelAimed(s.focus)) dropHeld();
         if (action === 'reload' && !e.repeat && !s.travel) reloadHeld();
@@ -445,7 +477,10 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
     };
     const onKeyUp = (e: KeyboardEvent) => {
       keys.current.delete(e.code);
-      if (isBound(bindings(), 'throw', e.code) && !photoActive()) throwHeld(); // in photo mode F freezes and thaws
+      if (isBound(bindings(), 'throw', e.code) && !photoActive()) {
+        if (useStore.getState().held?.kind === 'penalty') penaltyCharge(false);
+        else throwHeld(); // in photo mode F freezes and thaws
+      }
     };
     const onBlur = () => {
       keys.current.clear();
@@ -547,6 +582,8 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
     const running = anyHeld(b, 'run', k) || padRun.current || touchInput.run;
     const speed = running ? 6.5 : 3.6;
     tickSip();
+    jumpState = stepJump(jumpState, dt);
+    const airborne = jumpState.airborne;
 
     // another view has the camera (camera/rig.ts): you stay where you were standing
     if (rigOwnsCamera()) {
@@ -590,6 +627,26 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       walk.x = 0;
       walk.z = 0;
       footstepsFollow(bob.current, false, false, surfaceAt('office', camera.position.x, camera.position.z));
+      if (s.focus) s.setFocus(null);
+      return;
+    }
+
+    // Playing penalties: the camera is behind the ball (shooting) or at the keeper's eye (saving); A/D shuffles the
+    // keeper along the line, the mouse (above) aims the shot or the dive, and you don't walk anywhere.
+    if (s.held?.kind === 'penalty') {
+      const v = penaltyCamera();
+      if (v) {
+        if (playerRole() === 'keeper') penaltyShuffle(strafe * 1.8 * dt);
+        camera.position.set(v.x, v.y, v.z);
+        camera.rotation.set(v.pitch, v.yaw, 0, 'YXZ');
+        look.current = { yaw: v.yaw, pitch: v.pitch };
+        playerAt.x = v.x;
+        playerAt.z = v.z;
+        playerAt.yaw = v.yaw;
+      }
+      walk.x = 0;
+      walk.z = 0;
+      footstepsFollow(bob.current, false, false, 'lobby');
       if (s.focus) s.setFocus(null);
       return;
     }
@@ -641,15 +698,15 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       camera.position.z = p.z;
       moving = true;
     }
-    bob.current += moving ? dt * speed * tilt * 2.2 : 0;
+    bob.current += moving && !airborne ? dt * speed * tilt * 2.2 : 0;
     // Head bob and the head tipping back for a sip can be turned off (Settings → Accessibility, motion comfort).
     const comfort = getA11y();
     if (p) {
       camera.position.set(p.x, p.y, p.z);
       p.yaw = yaw;
       p.pitch = pitch;
-    } else camera.position.y = EYE_HEIGHT + (moving && comfort.headBob ? Math.sin(bob.current) * 0.035 : 0);
-    footstepsFollow(bob.current, moving, speed > 5, surfaceAt(floor === ROOF ? 'roof' : floor === 0 ? 'lobby' : 'office', camera.position.x, camera.position.z));
+    } else camera.position.y = EYE_HEIGHT + jumpHeight(jumpState) + (moving && !airborne && comfort.headBob ? Math.sin(bob.current) * 0.035 : 0);
+    footstepsFollow(bob.current, moving && !airborne, speed > 5, surfaceAt(floor === ROOF ? 'roof' : floor === 0 ? 'lobby' : 'office', camera.position.x, camera.position.z));
     camera.rotation.set(pitch + (p?.tilt ?? 0) + (comfort.cameraShake ? sipPose.head : 0), yaw, 0, 'YXZ');
     playerAt.x = camera.position.x;
     playerAt.z = camera.position.z;

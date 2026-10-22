@@ -32,7 +32,7 @@ async function phoneBox(page: Page): Promise<Box> {
   return box;
 }
 
-/** The demo's live CEO chatter (a new message, a quick-reply row) can reflow the chat tab between two reads: poll
+/** The demo's live CEO chatter (a new message) can reflow the chat tab between two reads: poll
  * until two reads 300ms apart agree, so a measurement isn't caught mid-reflow and later blamed on the tab switch. */
 async function stableBox(page: Page): Promise<Box> {
   let prev = await phoneBox(page);

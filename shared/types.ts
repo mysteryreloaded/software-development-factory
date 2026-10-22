@@ -578,6 +578,22 @@ export interface PongRow {
   lastAt: number; // epoch ms of their last game
 }
 
+/** One player on the office-wide penalty shoot-out board (shared/penalty.ts PenaltyRow). */
+export interface PenaltyRow {
+  id: string; // 'player' for the manager (shared/penalty.ts PENALTY_PLAYER), else an agent id
+  name: string;
+  wins: number;
+  losses: number;
+  goals: number;
+  lastAt: number;
+}
+
+/** The office-wide penalty board: the all-time top rows and the fastest goal ever scored. */
+export interface PenaltyBoard {
+  rows: PenaltyRow[];
+  hardest: { id: string; name: string; kmh: number; at: number } | null;
+}
+
 export interface WorldSnapshot {
   user: string | null; // gh login
   ghReady: boolean;
@@ -608,6 +624,7 @@ export interface WorldSnapshot {
   notifyChannels: NotifyChannelsView;
   progress: ProgressView; // coins, decorations and achievements (#210)
   pong: Record<string, PongRow[]>; // each floor's ping-pong leaderboard by repo id, best first
+  penalty: PenaltyBoard; // the park's penalty shoot-out board (#46), office-wide
 }
 
 /** What changed about an agent since the office last sent it, with its id; every field for one it never sent. */
@@ -653,6 +670,7 @@ export type ServerEvent =
   | { type: 'progress'; progress: ProgressView }
   | { type: 'reward'; reward: RewardView }
   | { type: 'pong'; repoId: string; board: PongRow[] }
+  | { type: 'penalty'; board: PenaltyBoard }
   | { type: 'toast'; level: 'info' | 'success' | 'error'; text: string }
   // Presence (shared/presence.ts): relayed between the office's tabs, never persisted.
   | { type: 'visitors'; you: string; visitors: VisitorView[] }
@@ -681,16 +699,22 @@ export interface VisitorView {
   floor: number; // 0 = lobby, -1 = the roof
 }
 
-/** What a visitor carries, as the others draw it. `s`: a mug's sips left (0–3). */
+/**
+ * What a visitor carries, as the others draw it. `s`: a mug's sips left (0–3), or (a joint, #59) puffs left (0–8).
+ * `l`/`r` (a joint only): lit, rolling (0 or 1).
+ */
 export interface VisitorHeld {
-  k: 'ball' | 'mug' | 'blaster';
+  k: 'ball' | 'mug' | 'blaster' | 'joint';
   id: string;
   s?: number;
+  l?: 0 | 1;
+  r?: 0 | 1;
 }
 
 /**
  * Where a visitor stands: floor, position (metres), heading (yaw, 0 facing -Z), look pitch and what they hold. `ts`:
  * when, on the sender's own clock (ms), so others space their poses as they were sent, not as they happened to arrive.
+ * `s` (#59): a smoke-break seat id ('office-west:0', 'office-east:1', 'roof:0'); while seated, drawn there whatever x/z.
  */
 export interface VisitorPose {
   ts: number;
@@ -700,6 +724,7 @@ export interface VisitorPose {
   h: number;
   p: number;
   held: VisitorHeld | null;
+  s?: string;
 }
 
 export type EmoteId = 'wave' | 'thumbs' | 'clap' | 'point' | 'laugh';

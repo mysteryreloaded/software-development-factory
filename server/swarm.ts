@@ -58,6 +58,7 @@ import { attachedBlock, MAX_FILES } from '../shared/attachments.ts';
 import { MESSAGE_MAX, messageProblem } from '../shared/message.ts';
 import { achievementDef, type ProgressView } from '../shared/progress.ts';
 import { parsePongResult, PONG_PLAYER, recordGame } from '../shared/pong.ts';
+import { parsePenaltyResult, recordShootout } from '../shared/penalty.ts';
 import { effectiveModel } from '../shared/models.ts';
 import { DEFAULT_WEATHER, DEFAULT_WORLD_EVENTS, weatherSettings, worldEventSettings } from '../shared/outside.ts';
 import { DEFAULT_THEME_SETTINGS, dueGreeting, themeSettings } from '../shared/themes.ts';
@@ -83,6 +84,7 @@ import type {
   LogLine,
   OfficeUpdateView,
   OpsView,
+  PenaltyBoard,
   PhoneMessage,
   PongRow,
   PreviewConfig,
@@ -220,6 +222,7 @@ interface Persisted {
   held: HeldIssue[];
   progress: LedgerState; // coins, decorations, achievements and careers (ledger.ts)
   pong: Record<string, PongRow[]>; // each floor's ping-pong leaderboard, by repo id
+  penalty: PenaltyBoard; // the park's penalty shoot-out board (#46), office-wide
 }
 
 interface Shot {
@@ -501,6 +504,7 @@ export class Swarm {
     held: [],
     progress: emptyLedger(),
     pong: {},
+    penalty: { rows: [], hardest: null },
   };
   /**
    * The CEO's office tools. Every session gets its own server: one can only be connected to one session at a time, so
@@ -683,6 +687,7 @@ export class Swarm {
         held: loaded.held ?? [],
         progress: loadLedger(loaded.progress),
         pong: loaded.pong && typeof loaded.pong === 'object' ? loaded.pong : {},
+        penalty: loaded.penalty && Array.isArray(loaded.penalty.rows) ? loaded.penalty : { rows: [], hardest: null },
       };
       for (const m of this.state.messages) this.messageSeq = Math.max(this.messageSeq, m.id + 1);
       if (!EFFORTS.includes(this.state.settings.defaultEffort)) this.state.settings.defaultEffort = 'medium';
@@ -1074,6 +1079,7 @@ export class Swarm {
       officeUpdate: this.officeHead ? this.officeUpdateView() : undefined,
       progress: this.progressView(),
       pong: this.state.pong,
+      penalty: this.state.penalty,
     };
   }
 
@@ -4781,6 +4787,30 @@ export class Swarm {
     const board = recordGame(this.state.pong[repoId] ?? [], { players: [a, b], score: game.score, at: Date.now() });
     this.state.pong[repoId] = board;
     this.broadcast({ type: 'pong', repoId, board });
+    this.save();
+    return board;
+  }
+
+  // ---------- penalties ----------
+
+  /**
+   * A penalty shoot-out in the park finished (the client plays it): onto the office-wide board it goes. The
+   * opponent is any agent, on any floor, or the CEO; `winner` and `kicks` must really add up to a finished shoot-out.
+   */
+  recordPenalty(body: unknown) {
+    const result = parsePenaltyResult(body);
+    if ('error' in result) throw new HttpError(400, result.error);
+    const opponent = result.opponentId === CEO_ID ? this.state.agents.find((a) => a.id === CEO_ID) : this.state.agents.find((a) => a.id === result.opponentId);
+    if (!opponent) throw new HttpError(400, `${result.opponentId} isn't an agent`);
+    const board = recordShootout(this.state.penalty, {
+      player: { name: this.state.settings.managerName.trim() || 'Manager' },
+      opponent: { id: opponent.id, name: opponent.name },
+      winner: result.winner,
+      kicks: result.kicks,
+      at: Date.now(),
+    });
+    this.state.penalty = board;
+    this.broadcast({ type: 'penalty', board });
     this.save();
     return board;
   }
