@@ -1,5 +1,6 @@
 import { useStore } from './store';
 import type { PongResult } from '../../shared/pong';
+import type { ParsedPenaltyResult } from '../../shared/penalty';
 import type { AgentStyle } from '../../shared/looks';
 import type { AgentCli, AgentPromptView, AgentView, AttachmentView, DoctorFinding, DoctorFix, EffortLevel, GhRepoSummary, NotifyChannel, NotifyChannelsView, NotifyWebhook, OfficeUpdateView, PreviewView, ProjectFolderView, PrPreviewView, RepoView, SwarmSettings, UsageView, VoiceCacheView, VoiceOption } from '../../shared/types';
 import type { JournalChunk, JournalDayView } from '../../shared/journal';
@@ -135,6 +136,8 @@ export const api = {
   phoneRead: (at: number) => call('POST', '/api/phone/read', { at }),
   /** A finished ping-pong game on a floor, for its leaderboard (shared/pong.ts parsePongResult). */
   pongResult: (repoId: string, result: PongResult) => call('POST', `${r(repoId)}/pong`, result),
+  /** A finished penalty shoot-out in the park, for the office-wide board (shared/penalty.ts parsePenaltyResult). */
+  penaltyResult: (result: ParsedPenaltyResult) => call('POST', '/api/penalty', result),
   /** Decides a team change: a hire with the manager's changes to the new agent, if any. */
   approveRequest: (id: string, overrides: AgentSetupPatch & { name?: string; note?: string } = {}) => call('POST', `/api/requests/${id}/approve`, overrides),
   rejectRequest: (id: string, note?: string) => call('POST', `/api/requests/${id}/reject`, { note }),

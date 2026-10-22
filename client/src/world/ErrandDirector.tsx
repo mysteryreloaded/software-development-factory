@@ -50,6 +50,7 @@ import './pongErrands';
 import './toyErrands';
 import './events/watch';
 import './roof/roofErrand';
+import './park/parkErrand';
 import type { Pt } from './toys/roombaBrain';
 import { findPath, spot as spotById, standable, steer, walkways, type Body, type FloorKind, type Spot } from './walkways';
 

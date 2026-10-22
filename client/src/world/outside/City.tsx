@@ -13,6 +13,8 @@ import { hazeRange, weatherSky } from '../weather/weatherRules';
 import { weather } from '../weather/weatherState';
 import { carPose, carRoutes, CITY, cityLayout, CORRIDOR_HALF, MAX_CARS, waterTowers, type CityBox } from './cityLayout';
 import { bollardXs, bollardZs, PAVED_STREET, parkFenceLines } from './grounds';
+import { ParkOpponent } from '../park/ParkOpponent';
+import { Pitch } from '../park/Pitch';
 
 // ---------- the park fence and the paved street's bollards (#41) ----------
 
@@ -595,6 +597,8 @@ export function City() {
       ))}
       <ParkFence />
       <Bollards />
+      <Pitch />
+      <ParkOpponent />
     </group>
   );
 }
