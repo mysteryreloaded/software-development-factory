@@ -38,6 +38,10 @@ describe('kickOutcome', () => {
     expect(flightMsOf(kmh)).toBeGreaterThan(500);
   });
 
+  it('a shot clock timeout (kmh 0, server/penaltyMatch.ts SHOT_TIMEOUT_MS) resolves at once, not Infinity', () => {
+    expect(flightMsOf(0)).toBe(0);
+  });
+
   it('a stationary keeper (no dive) never reaches a shot placed away from the centre', () => {
     const out = kickOutcome({ x: 3, y: 0.3, power: 0.6 }, null);
     expect(out.result).toBe('goal');

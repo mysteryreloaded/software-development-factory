@@ -82,8 +82,9 @@ const spot: { floor: number; x: number; z: number; yaw: number; pitch: number } 
 const CORNER = { x: GOAL.width / 2 - 0.3, y: GOAL.height - 0.3 };
 
 /** Drives the match to the end (or `maxKicks`): whichever page's probe says it's their turn shoots. Once, the
- * keeper dives early to CORNER just before the shooter strikes there too, to show an early guess saves a hard shot. */
-async function playMatch(pageA: Page, pageB: Page, maxKicks = 10) {
+ * keeper dives early to CORNER just before the shooter strikes there too, to show an early guess saves a hard shot.
+ * Returns pageA's own decisive snapshot (captured the instant `winner` was first seen, not re-read afterward). */
+async function playMatch(pageA: Page, pageB: Page, maxKicks = 14): Promise<PenaltyProbeState> {
   let triedDive = false;
   for (let i = 0; i < maxKicks; i++) {
     // `stage` alone can't tell "this kick landed" from "still waiting on the last one": a page reads 'live' both
@@ -131,14 +132,23 @@ async function playMatch(pageA: Page, pageB: Page, maxKicks = 10) {
       }
     }
     expect(shot).toBe(true);
+    // Wait not just for this kick to land (kicks.length grows) but for the clock to move past judging it ('result'
+    // lasts RESULT_MS): `winner` is only set on the way out of 'result', a tick after kicks.length already grew, so
+    // stopping as soon as kicks.length grows can capture `winner` still null on the very kick that decided it - then
+    // the next loop iteration waits forever for a next kick that was never coming. Capture the snapshot that settles
+    // this as a side effect too: a decided match self-clears OVER_MS after `winner` is set (a hard deadline
+    // regardless of focus), so re-reading state afterward instead of using what the poll already saw risks the race.
+    let snap: PenaltyProbeState | null = null;
     await expect
       .poll(async () => {
-        const p = await penalty(pageA);
-        return p.winner !== null || p.kicks.length > kicksBefore;
+        snap = await penalty(pageA);
+        if (snap.winner !== null) return true; // decided
+        return snap.kicks.length > kicksBefore && snap.stage !== 'result'; // landed, and past judging it: genuinely continuing
       }, { timeout: 30_000 })
       .toBe(true);
-    if ((await penalty(pageA)).winner) return;
+    if (snap!.winner) return snap!;
   }
+  throw new Error(`playMatch: no winner after ${maxKicks} kicks`);
 }
 
 test('page B takes the agent\'s place: the server referees a shared match with a matching score', async ({ page, baseURL }) => {
@@ -165,11 +175,12 @@ test('page B takes the agent\'s place: the server referees a shared match with a
   await expect.poll(async () => (await penalty(pageA)).visitor, { timeout: 30_000 }).toBe(true);
   await expect.poll(async () => (await penalty(other)).visitor, { timeout: 30_000 }).toBe(true);
 
-  await playMatch(pageA, other);
-
-  const [a, b] = [await penalty(pageA), await penalty(other)];
+  const a = await playMatch(pageA, other);
   expect(a.winner).toBeTruthy();
-  expect(b.winner).toBeTruthy();
+  // other's own copy of the same decided match, lagging a little behind pageA's (WS delivery isn't simultaneous):
+  // poll for it rather than a single read, but only briefly - it self-clears OVER_MS after `winner` is set there too.
+  await expect.poll(async () => (await penalty(other)).winner, { timeout: 30_000 }).toBeTruthy();
+  const b = await penalty(other);
   // each browser is always its own "player": the scores mirror each other exactly.
   expect(a.view!.score).toEqual({ player: b.view!.score.opponent, opponent: b.view!.score.player });
   expect(a.kicks.some((k) => !k.scored)).toBe(true); // the early dive's save (or the deliberate over-the-bar miss)
@@ -213,15 +224,14 @@ test('a third browser on floor 0 sees the same kicks and the billboard updates f
   // the watcher never plays, but gets the same pk-state/pk-kick (server/presence.ts toFloorZero) and ends up with
   // the same match too (penaltyState.ts applyPkState, a bystander's point of view): the same stage and kicks so far.
   await expect.poll(async () => (await penalty(watcher)).visitor, { timeout: 30_000 }).toBe(true);
-  const [a0, w0] = [await penalty(pageA), await penalty(watcher)];
+  const [a0, w0] = await Promise.all([penalty(pageA), penalty(watcher)]);
   expect(w0.kicks).toEqual(a0.kicks);
 
-  await playMatch(pageA, other);
-
-  const [a, w] = [await penalty(pageA), await penalty(watcher)];
+  const a = await playMatch(pageA, other);
   expect(a.winner).toBeTruthy();
   await expect.poll(async () => (await penalty(watcher)).winner, { timeout: 30_000 }).toBeTruthy();
-  expect(w.kicks.length > 0 || (await penalty(watcher)).kicks.length > 0).toBe(true);
+  const w = await penalty(watcher);
+  expect(w.kicks.length > 0).toBe(true);
 
   // the billboard (the live match while it runs, the all-time board once it's done) is store.penalty for everyone.
   await expect

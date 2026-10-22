@@ -248,12 +248,16 @@ export class PresenceHub {
     const resolved = this.penalty.tick();
     if (!resolved) return;
     this.toFloorZero({ type: 'pk-kick', ...resolved });
-    if (this.penalty.view.phase === 'done') {
-      const result = this.penalty.result();
+    // 'done' broadcasts (the winner, one tick) before clearDone() wipes it back to 'empty': clearing first would
+    // send 'empty' instead, which applyPkState (penaltyState.ts) reads as a forfeit and discards the match with
+    // no result, right on its decisive kick.
+    const done = this.penalty.view.phase === 'done';
+    const result = done ? this.penalty.result() : null;
+    this.broadcastPenalty();
+    if (done) {
       this.penalty.clearDone();
       if (result) this.onPenaltyResult?.(result);
     }
-    this.broadcastPenalty();
   }
 
   /** The demo's fake visitors: how many wander about (0 to MAX_FAKES). */

@@ -1,7 +1,8 @@
 // A penalty shoot-out in the park, as plain module state (like toys/pongState.ts): the opponent, the running score,
 // whose kick it is, the live aim/charge/dive while it's being taken, and window.__swarmPenalty. ParkOpponent.tsx
-// ticks it once a frame and walks the opponent; Player.tsx reads it to steer the mouse and keys while you're playing;
-// ui/PenaltyHud.tsx reads it to show the score. The outcome itself (shared/penalty.ts) is pure; this is the clock.
+// ticks it once a frame and walks the opponent (a visitor match also keeps its own plain-interval clock running,
+// see ensureVisitorClock below); Player.tsx reads it to steer the mouse and keys while you're playing; ui/PenaltyHud.tsx
+// reads it to show the score. The outcome itself (shared/penalty.ts) is pure; this is the clock.
 //
 // #47: a second visitor can take an agent's place. `match.visitor` marks a server-refereed match: this browser is
 // always local side 'player', the other visitor always 'opponent' (`visitor.mySide` is which Side the server calls
@@ -165,14 +166,34 @@ export function abandonPenaltyMatch() {
   if (!match) return;
   if (useStore.getState().held?.kind === 'penalty') useStore.getState().setHeld(null);
   match = null;
+  stopVisitorClock();
   penaltyChanged();
 }
 
 // ---------- visitor matches (#47): refereed by server/penaltyMatch.ts, relayed by server/presence.ts ----------
 
+/** ParkOpponent.tsx only ticks the clock (tickPenalty) once a frame, and R3F stops calling it at all while this
+ * tab's render loop is paused (hidden, a panel open, perf.tsx's useRenderPaused) - fine for a match against the
+ * AI, which nobody else needs this tab to keep up with. A visitor match is refereed by the server and shared with
+ * another browser, though, so it can't freeze just because this tab isn't being looked at right now: a plain
+ * interval keeps it moving (pushing resolved kicks, flipping the turn) independent of the render loop. */
+let visitorClockTimer: ReturnType<typeof setInterval> | null = null;
+function ensureVisitorClock() {
+  if (visitorClockTimer) return;
+  visitorClockTimer = setInterval(() => {
+    if (match?.visitor) tickPenalty();
+  }, 150);
+}
+function stopVisitorClock() {
+  if (!visitorClockTimer) return;
+  clearInterval(visitorClockTimer);
+  visitorClockTimer = null;
+}
+
 /** Starts a server-refereed match against another visitor: `turn` is already translated to this browser's own side. */
 function startVisitorMatch(otherId: string, otherName: string, mySide: Side, turn: Side) {
   ensureHeldWatch();
+  ensureVisitorClock();
   match = {
     id: seq++,
     opponentId: otherId,

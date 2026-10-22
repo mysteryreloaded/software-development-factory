@@ -339,6 +339,11 @@ describe('visitor penalty matches', () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ player: { name: 'Ada' }, opponent: { name: 'Bo' }, winner: 'player' });
     expect(hub.penaltyState().phase).toBe('empty'); // the pitch is free again
+
+    // the decisive kick's own pk-state broadcasts 'done' (so a browser's applyPkState sees the win), not straight
+    // to 'empty' (which it reads as a forfeit and discards the match with no result, right on the winning kick).
+    const pkStates = (got.a as ServerEvent[]).filter((e) => e.type === 'pk-state');
+    expect(pkStates.some((e) => e.type === 'pk-state' && e.phase === 'done')).toBe(true);
   });
 
   it('a disconnect, leaving floor 0, or wandering too far forfeits the match, with no result', () => {

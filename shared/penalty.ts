@@ -64,8 +64,10 @@ function keeperAt(dive: Dive | null, flightMs: number): { x: number; y: number }
 /** The shot's speed, km/h: 40 at no charge, 130 at full power. */
 export const kmhOf = (power: number) => KMH.min + (KMH.max - KMH.min) * Math.min(1, Math.max(0, power));
 
-/** How long (ms) a shot at this speed takes to cross the spot to the goal line. */
-export const flightMsOf = (kmh: number) => (GOAL.spot * 3600) / kmh;
+/** How long (ms) a shot at this speed takes to cross the spot to the goal line; 0 at kmh <= 0 (server/penaltyMatch.ts's
+ * SHOT_TIMEOUT_MS fallback for a shooter who never struck) - there's no real flight to animate, and dividing by it
+ * would give Infinity, stalling a client's own 'flight' stage (tickPenalty) forever since nothing ever exceeds it. */
+export const flightMsOf = (kmh: number) => (kmh > 0 ? (GOAL.spot * 3600) / kmh : 0);
 
 /**
  * What became of a shot aimed at (shot.x, shot.y) with `shot.power`, against a keeper who dove as `dive` says (or

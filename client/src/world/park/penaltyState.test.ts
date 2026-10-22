@@ -4,8 +4,11 @@ import type { Agent } from '../../store';
 // The store pulls in the sound module, which listens on window for the first click; tests run in node.
 vi.stubGlobal('window', { addEventListener: () => undefined });
 const { useStore } = await import('../../store');
+const { takeRoster } = await import('../presence/presenceState');
 const {
   abandonPenaltyMatch,
+  applyPkKick,
+  applyPkState,
   forcePenaltyShot,
   penaltyCharge,
   penaltyCommitDive,
@@ -183,5 +186,41 @@ describe('leaving (G, Esc, or any other way the held penalty is dropped)', () =>
     useStore.getState().setHeld({ kind: 'mug', id: 'mug-1', sips: 2 });
     useStore.getState().setHeld(null);
     expect(penaltyMatch()).not.toBeNull();
+  });
+});
+
+describe('a visitor match (#47): refereed by the server, applyPkState/applyPkKick', () => {
+  beforeEach(() => takeRoster({ type: 'visitors', you: 'me', visitors: [] }, 0));
+
+  it('starts from pk-state live and plays a server-reported kick through to the next one', () => {
+    applyPkState({ type: 'pk-state', phase: 'live', turn: 'player', players: [{ id: 'me', name: 'Me', side: 'player' }, { id: 'other', name: 'Other', side: 'opponent' }], kicks: [] });
+    const m = penaltyMatch()!;
+    expect(m.visitor).not.toBeNull();
+    expect(m.turn).toBe('player'); // this browser is always its own 'player'
+
+    vi.advanceTimersByTime(500); // SETUP_MS: 'setup' -> 'live'
+    tickPenalty();
+    expect(penaltyMatch()!.stage).toBe('live');
+
+    applyPkKick({ type: 'pk-kick', shot: { x: 0, y: 2, power: 0.5 }, dive: null, result: 'goal', kmh: 85 });
+    expect(penaltyMatch()!.stage).toBe('flight');
+
+    vi.advanceTimersByTime(10_000);
+    tickPenalty();
+    expect(penaltyMatch()!.stage).not.toBe('flight'); // a real flight time: moves on well within 10s
+    expect(penaltyMatch()!.kicks).toEqual([{ side: 'player', scored: true, kmh: 85 }]);
+  });
+
+  it("a shot-clock timeout (kmh 0, nobody struck in time) still leaves the 'flight' stage, not stuck forever", () => {
+    applyPkState({ type: 'pk-state', phase: 'live', turn: 'player', players: [{ id: 'me', name: 'Me', side: 'player' }, { id: 'other', name: 'Other', side: 'opponent' }], kicks: [] });
+    vi.advanceTimersByTime(500);
+    tickPenalty();
+
+    applyPkKick({ type: 'pk-kick', shot: { x: 0, y: 0, power: 0 }, dive: null, result: 'wide', kmh: 0 }); // server/penaltyMatch.ts SHOT_TIMEOUT_MS fallback
+    expect(penaltyMatch()!.stage).toBe('flight');
+
+    tickPenalty(); // flightMs must be 0, not Infinity: this alone (no time advance needed) should resolve it
+    expect(penaltyMatch()!.stage).toBe('result');
+    expect(penaltyMatch()!.kicks).toEqual([{ side: 'player', scored: false, kmh: 0 }]);
   });
 });
