@@ -257,7 +257,7 @@ export function HUD() {
       <WorkersPanel />
 
       {/* the centre dot (Settings → Accessibility) is a bolder crosshair that stays through the elevator's fade too */}
-      {started && !overlay && (!travel || centerDot) && onFoot && !scope && held?.kind !== 'paddle' && <div className={`crosshair ${focus ? 'crosshair-hot' : ''} ${centerDot ? 'crosshair-dot' : ''}`} />}
+      {started && !overlay && (!travel || centerDot) && onFoot && !scope && held?.kind !== 'paddle' && held?.kind !== 'penalty' && <div className={`crosshair ${focus ? 'crosshair-hot' : ''} ${centerDot ? 'crosshair-dot' : ''}`} />}
       {started && !overlay && !travel && onFoot && <RoofHud />}
       {started && !overlay && !locked && !travel && onFoot && !touchOn && <div className="hud-resume">Click to look around</div>}
       {started && !(settings.setupDone && settings.tutorialStep >= 0) && (

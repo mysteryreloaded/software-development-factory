@@ -50,6 +50,7 @@ import './pongErrands';
 import './toyErrands';
 import './events/watch';
 import './roof/roofErrand';
+import { parkAwayId, penaltyMatch } from './park/penaltyState';
 import type { Pt } from './toys/roombaBrain';
 import { findPath, spot as spotById, standable, steer, walkways, type Body, type FloorKind, type Spot } from './walkways';
 
@@ -652,8 +653,9 @@ export function ErrandDirector({
     }
 
     let away = 0;
+    const atPenalty = parkAwayId();
     for (const p of people.values()) {
-      if (p.gone) continue;
+      if (p.gone || p.id === atPenalty) continue; // ParkOpponent.tsx is driving their body instead
       const a = byId.get(p.id);
       const leaving = p.errand === LEAVE;
       if (!a && !leaving) continue;
@@ -781,9 +783,10 @@ export function ErrandDirector({
     }
     const states = new Map<string, ErrandState>();
     const ready: Person[] = [];
+    const penaltyOpponent = penaltyMatch()?.opponentId;
     for (const p of people.values()) {
       const a = byId.get(p.id);
-      if (!a) continue;
+      if (!a || p.id === penaltyOpponent) continue; // claimed for the shoot-out (ParkOpponent.tsx), even before it takes their body over
       const state: ErrandState = { floor, statusFor: run.clock - p.statusAt, seatedFor: run.clock - p.seatedAt, restless: p.restless, roll: p.roll, home: p.home, others };
       if (p.phase !== 'seated') {
         // Off on an idle errand, or on the way back, when board work comes in: straight there instead.
