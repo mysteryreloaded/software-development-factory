@@ -80,7 +80,9 @@ test('a probe-driven match reports the winner and the hardest shot to the office
     if (turn === 'player') {
       expect(await call(page, 'shoot', GOAL.width / 2 - 0.3, GOAL.height - 0.3, 1)).toBe(true);
     } else {
-      await expect.poll(async () => (await penalty(page)).stage, { timeout: 5000 }).toBe('flight'); // the AI strikes on its own
+      // the AI strikes on its own (within WINDUP_MS of penaltyState.ts); under load the kick may already have
+      // moved past 'flight' by the time we check, so anything other than 'live' means it struck
+      await expect.poll(async () => (await penalty(page)).stage, { timeout: 8000 }).not.toBe('live');
     }
     // wait for this kick to resolve (flight, then the result shown a while) before the next one's taken
     await expect

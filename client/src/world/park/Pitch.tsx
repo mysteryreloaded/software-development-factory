@@ -219,8 +219,15 @@ function StartSpot() {
   const g = useMemo(goalPitch, []);
   const [free, setFree] = useState(penaltyFree());
   useEffect(() => subscribePenalty(() => setFree(penaltyFree())), []);
-  const ref = useInteractable<THREE.Group>(free ? { id: 'penalty', label: 'Play penalties', action: { kind: 'penalty' } } : null, 3.2);
-  return <group ref={ref} position={[g.spotX, 1, g.z]} />;
+  const ref = useInteractable<THREE.Mesh>(free ? { id: 'penalty', label: 'Play penalties', action: { kind: 'penalty' } } : null, 3.2);
+  // double-sided: you stand right on this spot (unlike pong's TableEnd, reached from outside it), so the
+  // crosshair ray starts inside the box and must hit it from the inside too.
+  return (
+    <mesh ref={ref} position={[g.spotX, 1, g.z]}>
+      <boxGeometry args={[1, 2, 1]} />
+      <meshBasicMaterial visible={false} side={THREE.DoubleSide} />
+    </mesh>
+  );
 }
 
 export function Pitch() {
