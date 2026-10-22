@@ -3,10 +3,11 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { agentsOnRepo, repoOnFloor, useStore, type Agent } from '../../store';
 import { CEO_ID } from '../../../../shared/types';
+import { useA11y } from '../../ui/a11y';
 import { SANS, roundRect } from '../draw';
 import { useCanvasTexture } from '../interact';
 import { CEO_DESK, deskPosition } from '../layout';
-import { CHIP_COLORS, chipFor, type ChipKind } from './overviewInfo';
+import { CHIP_COLORS, chipFillStyle, chipFor, type ChipKind } from './overviewInfo';
 import { pickables } from './picking';
 
 // The overview's status chips: a small label over every desk with its person's name and what they're doing, the same
@@ -17,7 +18,8 @@ const CHIP = { w: 320, h: 72, px: 28, y: 2.45 };
 const scale = { x: 0.1, y: 0.025 };
 const LABEL: Record<ChipKind, string> = { working: 'working', testing: 'testing', fixing: 'fixing', error: 'needs help', idle: 'idle' };
 
-function drawChip(ctx: CanvasRenderingContext2D, name: string, kind: ChipKind) {
+/** Draws the chip into its canvas; exported so a test can check the fill, border, dot and text halo. */
+export function drawChip(ctx: CanvasRenderingContext2D, name: string, kind: ChipKind, highContrast: boolean) {
   const { w, h } = CHIP;
   ctx.clearRect(0, 0, w, h);
   ctx.font = `700 30px ${SANS}`;
@@ -29,7 +31,7 @@ function drawChip(ctx: CanvasRenderingContext2D, name: string, kind: ChipKind) {
   const width = Math.min(w - 8, ctx.measureText(line).width + 64);
   const x0 = (w - width) / 2;
   roundRect(ctx, x0, 6, width, h - 12, (h - 12) / 2);
-  ctx.fillStyle = 'rgba(255,253,246,0.96)';
+  ctx.fillStyle = chipFillStyle(highContrast);
   ctx.fill();
   ctx.lineWidth = 5;
   ctx.strokeStyle = '#1f1d2b';
@@ -40,8 +42,12 @@ function drawChip(ctx: CanvasRenderingContext2D, name: string, kind: ChipKind) {
   ctx.fill();
   ctx.lineWidth = 3;
   ctx.stroke();
-  ctx.fillStyle = '#1f1d2b';
   ctx.textBaseline = 'middle';
+  // a light halo keeps the name readable over the pill's see-through fill, on any desk underneath it
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(255,253,246,0.96)';
+  ctx.strokeText(line, x0 + 48, h / 2 + 1);
+  ctx.fillStyle = '#1f1d2b';
   ctx.fillText(line, x0 + 48, h / 2 + 1);
 }
 
@@ -54,7 +60,8 @@ function deskSpot(a: Agent): [number, number] {
 
 const Chip = memo(function Chip({ agent }: { agent: Agent }) {
   const kind = chipFor(agent);
-  const tex = useCanvasTexture(CHIP.w, CHIP.h, (ctx) => drawChip(ctx, agent.name, kind), [agent.name, kind]);
+  const highContrast = useA11y((s) => s.prefs.highContrast);
+  const tex = useCanvasTexture(CHIP.w, CHIP.h, (ctx) => drawChip(ctx, agent.name, kind, highContrast), [agent.name, kind, highContrast]);
   const material = useMemo(() => new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, sizeAttenuation: false, toneMapped: false }), [tex]);
   useEffect(() => () => material.dispose(), [material]);
   const ref = useRef<THREE.Sprite>(null);

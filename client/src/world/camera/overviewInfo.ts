@@ -14,6 +14,13 @@ export const CHIP_COLORS: Record<ChipKind, string> = {
   idle: '#adb5bd',
 };
 
+const CHIP_PAPER = { r: 255, g: 253, b: 246 };
+
+/** The chip pill's fill: mostly see-through so it blocks less of the desk, solid under high contrast. */
+export function chipFillStyle(highContrast: boolean): string {
+  return `rgba(${CHIP_PAPER.r},${CHIP_PAPER.g},${CHIP_PAPER.b},${highContrast ? 1 : 0.2})`;
+}
+
 /** The chip for someone: in trouble, testing a PR, fixing one, on an issue, or not busy. */
 export function chipFor(a: Pick<Agent, 'status' | 'task'>): ChipKind {
   if (a.status === 'error') return 'error';
