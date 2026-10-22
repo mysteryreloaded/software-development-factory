@@ -12,7 +12,9 @@ import { Character } from '../Character';
 import { SANS, roundRect } from '../draw';
 import { useCanvasTexture } from '../interact';
 import { shade, toon } from '../materials';
+import { markBloom } from '../gfx/bloomMarks';
 import { bodyState, bodyTarget, placeBody, say, saying, seatBody, setHandMug } from '../people';
+import { nook, parseSeatId } from '../smokeBreak';
 import { Box, Cyl } from '../Toon';
 import { BALLS, BallLook } from '../toys/balls';
 import { BLASTERS } from '../toys/darts';
@@ -147,11 +149,38 @@ function VisitorFigure({ id }: { id: string }) {
     const st = bodyState(vid);
     const target = bodyTarget(vid);
     const g = extras.current;
-    if (!rr || !st || !target || !g || !root.current) return;
+    const rootG = root.current;
+    if (!rr || !st || !target || !g || !rootG) return;
     const now = performance.now();
+    const seat = rr.seat ? parseSeatId(rr.seat) : null;
+    if (seat) {
+      // A smoke break (#59): seated at the bench, whatever x/z the pose carries (the joint, drawn by VisitorJoint
+      // below, comes from `held`). Moving the root itself to the seat (Character's own matrixWorld, read a frame
+      // later) is what makes its "seated" stage land exactly there.
+      rootG.visible = true;
+      const n = nook(seat.nookId);
+      const sp = n.seats[seat.seat];
+      rootG.position.set(sp.x, 0, sp.z);
+      rootG.rotation.set(0, n.yaw, 0);
+      target.mode = 'seated';
+      g.position.set(0, 0, 0);
+      g.rotation.set(0, 0, 0);
+      const l = lanyard.current;
+      if (l) {
+        l.position.set(0, 0.5, 0); // seated hip height (Character.tsx's HIP.seatY)
+        l.rotation.set(0, 0, 0);
+      }
+      m.lx = sp.x;
+      m.lz = sp.z;
+      m.lt = now;
+      m.speed = 0;
+      return;
+    }
+    rootG.position.set(0, 0, 0);
+    rootG.rotation.set(0, 0, 0);
     const at = poseNow(rr, now, m.at);
     // no pose yet (just arrived on this floor, waiting for where they are), or gone into the elevator: not drawn
-    root.current.visible = !!at;
+    rootG.visible = !!at;
     if (!at) {
       st.speed = 0;
       return;
@@ -212,6 +241,104 @@ function VisitorFigure({ id }: { id: string }) {
         </group>
         <Glow color={color} />
       </group>
+      <VisitorJoint id={id} />
+    </group>
+  );
+}
+
+// ---------- the joint, seated at a smoke break (#59): lit, rolled, and the puffs blown out ----------
+
+const JOINT_LOCAL = { x: 0.16, y: 1.05, z: -0.22 }; // roughly chest height, in front, right hand (seat-local)
+const JOINT_PUFFS = 6;
+const JOINT_PUFF_MS = 2200;
+const jointEmber = markBloom(new THREE.MeshBasicMaterial({ color: '#ff7b3d' }));
+const jointEmberDim = new THREE.MeshBasicMaterial({ color: '#8a4b2e' });
+
+/** A seated visitor's joint: a thin paper cylinder that shrinks as puffs run out, an ember that glows while lit, and
+ * a few puffs of smoke on each one that lands (held.s dropping). World-placed, not parented under `root` (which
+ * carries the seat's rotation already); no per-frame allocation. */
+function VisitorJoint({ id }: { id: string }) {
+  const group = useRef<THREE.Group>(null);
+  const paper = useRef<THREE.Mesh>(null);
+  const ember = useRef<THREE.Mesh>(null);
+  const sprites = useRef<(THREE.Sprite | null)[]>([]);
+  const pool = useMemo(() => Array.from({ length: JOINT_PUFFS }, () => ({ until: 0, born: 0, dx: 0, dz: 0 })), []);
+  const materials = useMemo(() => Array.from({ length: JOINT_PUFFS }, () => new THREE.SpriteMaterial({ color: '#e9ecef', transparent: true, opacity: 0, depthWrite: false, toneMapped: false })), []);
+  useEffect(() => () => materials.forEach((mat) => mat.dispose()), [materials]);
+  const next = useRef(0);
+  const lastPuffsLeft = useRef<number | null>(null);
+  const exhaledAt = useRef(0);
+  const geo = useMemo(() => new THREE.CylinderGeometry(0.006, 0.006, 1, 8).rotateX(Math.PI / 2), []); // unit length along local -Z
+  useEffect(() => () => geo.dispose(), [geo]);
+
+  useFrame(() => {
+    const g = group.current;
+    if (!g) return;
+    const r = remoteOf(id);
+    const seat = r?.seat ? parseSeatId(r.seat) : null;
+    const held = r?.held;
+    if (!seat || !held || held.k !== 'joint') {
+      g.visible = false;
+      lastPuffsLeft.current = null;
+      return;
+    }
+    const n = nook(seat.nookId);
+    const sp = n.seats[seat.seat];
+    const yaw = n.yaw;
+    const sin = Math.sin(yaw);
+    const cos = Math.cos(yaw);
+    g.visible = true;
+    g.position.set(sp.x + JOINT_LOCAL.x * cos + JOINT_LOCAL.z * sin, JOINT_LOCAL.y, sp.z - JOINT_LOCAL.x * sin + JOINT_LOCAL.z * cos);
+    g.rotation.y = yaw;
+
+    const puffsLeft = held.s ?? 0;
+    const len = held.r ? 0.1 : 0.09 * (0.3 + 0.7 * (puffsLeft / 8));
+    if (paper.current) {
+      paper.current.scale.z = len;
+      paper.current.position.z = -len / 2;
+    }
+    const lit = held.l === 1;
+    if (ember.current) {
+      ember.current.position.z = -len;
+      ember.current.material = lit ? jointEmber : jointEmberDim;
+      ember.current.visible = !held.r;
+    }
+    const now = performance.now();
+    if (lastPuffsLeft.current !== null && puffsLeft < lastPuffsLeft.current) exhaledAt.current = now;
+    lastPuffsLeft.current = puffsLeft;
+    const fresh = now - exhaledAt.current < 60;
+    if (fresh) {
+      for (let i = 0; i < 3; i++) {
+        const slot = next.current;
+        next.current = (next.current + 1) % JOINT_PUFFS;
+        pool[slot] = { born: now + i * 120, until: now + i * 120 + JOINT_PUFF_MS, dx: (Math.random() - 0.5) * 0.08, dz: (Math.random() - 0.5) * 0.08 };
+      }
+    }
+    for (let i = 0; i < JOINT_PUFFS; i++) {
+      const s = sprites.current[i];
+      const p = pool[i];
+      if (!s) continue;
+      if (now < p.born || now > p.until) {
+        s.visible = false;
+        continue;
+      }
+      const age = (now - p.born) / JOINT_PUFF_MS;
+      s.visible = true;
+      s.position.set(p.dx * age * 3, 0.1 + age * 0.5, -len + p.dz * age * 3);
+      s.scale.setScalar(0.05 + age * 0.15);
+      materials[i].opacity = 0.45 * (1 - age);
+    }
+  });
+
+  return (
+    <group ref={group} visible={false}>
+      <mesh ref={paper} geometry={geo} material={toon('#f1e8d8')} castShadow={false} />
+      <mesh ref={ember} visible={false} castShadow={false}>
+        <sphereGeometry args={[0.009, 8, 6]} />
+      </mesh>
+      {materials.map((mat, i) => (
+        <sprite key={i} ref={(s) => void (sprites.current[i] = s)} material={mat} visible={false} />
+      ))}
     </group>
   );
 }

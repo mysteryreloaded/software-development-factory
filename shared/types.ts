@@ -681,16 +681,22 @@ export interface VisitorView {
   floor: number; // 0 = lobby, -1 = the roof
 }
 
-/** What a visitor carries, as the others draw it. `s`: a mug's sips left (0–3). */
+/**
+ * What a visitor carries, as the others draw it. `s`: a mug's sips left (0–3), or (a joint, #59) puffs left (0–8).
+ * `l`/`r` (a joint only): lit, rolling (0 or 1).
+ */
 export interface VisitorHeld {
-  k: 'ball' | 'mug' | 'blaster';
+  k: 'ball' | 'mug' | 'blaster' | 'joint';
   id: string;
   s?: number;
+  l?: 0 | 1;
+  r?: 0 | 1;
 }
 
 /**
  * Where a visitor stands: floor, position (metres), heading (yaw, 0 facing -Z), look pitch and what they hold. `ts`:
  * when, on the sender's own clock (ms), so others space their poses as they were sent, not as they happened to arrive.
+ * `s` (#59): a smoke-break seat id ('office-west:0', 'office-east:1', 'roof:0'); while seated, drawn there whatever x/z.
  */
 export interface VisitorPose {
   ts: number;
@@ -700,6 +706,7 @@ export interface VisitorPose {
   h: number;
   p: number;
   held: VisitorHeld | null;
+  s?: string;
 }
 
 export type EmoteId = 'wave' | 'thumbs' | 'clap' | 'point' | 'laugh';

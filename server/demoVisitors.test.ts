@@ -68,4 +68,32 @@ describe('demo visitors', () => {
     expect(fakeProfile(0).name).toBe('Robin (demo)');
     expect(newWalker(0).held).toMatchObject({ k: 'mug' });
   });
+
+  it('takes a smoke break on floor 1 (#59): sits in a free seat and ends up standing', () => {
+    const w = newWalker(2);
+    stepWalker(w, 0.1, 1, () => 0.3); // placed on floor 1
+    w.smokeIn = 0;
+    stepWalker(w, 0.1, 1, () => 0.3); // starts one
+    expect(w.smoke).not.toBeNull();
+    const seatId = `${w.smoke!.nook}:${w.smoke!.seat}`;
+    expect(['office-west:0', 'office-west:1', 'office-east:0', 'office-east:1']).toContain(seatId);
+    let stood = false;
+    for (let i = 0; i < 2000 && !stood; i++) {
+      stepWalker(w, 0.1, 1, () => 0.3);
+      if (w.smoke === null) stood = true;
+    }
+    expect(stood).toBe(true);
+    const pose = poseOf(w);
+    expect(pose.s).toBeUndefined();
+    expect(pose.held).toEqual(w.held); // back to whatever they otherwise carry, not the joint
+  });
+
+  it("won't double-book a seat another walker already holds (#59)", () => {
+    const w = newWalker(5);
+    stepWalker(w, 0.1, 1, () => 0.1);
+    w.smokeIn = 0;
+    const taken = new Set(['office-west:0', 'office-west:1', 'office-east:0']);
+    stepWalker(w, 0.1, 1, () => 0.1, taken);
+    expect(w.smoke).toMatchObject({ nook: 'office-east', seat: 1 });
+  });
 });

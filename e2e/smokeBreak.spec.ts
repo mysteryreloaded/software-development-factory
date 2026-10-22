@@ -10,7 +10,11 @@ import { enterOffice, expect, startAt, test, type SavedView } from './helpers';
 interface SmokeProbe {
   nooks: { id: string; seats: ['free' | 'you', 'free' | 'you']; butts: number }[];
   me: { nook: string; seat: 0 | 1; stage: string; puffsLeft: number; lit: boolean } | null;
+  /** Other visitors on a smoke break (#59), shared/presence.ts's VisitorPose/VisitorHeld relayed between tabs. */
+  visitors: { id: string; nook: string; seat: 0 | 1; puffsLeft: number | null; lit: boolean; rolling: boolean }[];
 }
+
+type PresenceWin = { __swarmPresence: { fakes(n: number): void } };
 
 interface CameraProbe {
   state(): { pose: { x: number; z: number } };
@@ -144,3 +148,60 @@ for (const place of PLACES) {
     expect(Math.abs((await pose(page)).x - railX)).toBeLessThan(0.5);
   });
 }
+
+test('two tabs: a visitor sees the other sit, roll, light and puff, and can share the bench but not the seat (#59)', async ({ page, baseURL }) => {
+  test.setTimeout(120_000);
+  const n = nook('office-west');
+  const gap = { x: (n.gap.minX + n.gap.maxX) / 2, z: (n.gap.minZ + n.gap.maxZ) / 2 };
+  // Both tabs start aimed at the same seat (the nearer of the two from here): A gets it first.
+  const spot: SavedView = { floor: 1, x: gap.x, z: n.seats[0].z, yaw: n.yaw, pitch: 0 };
+  const other = await page.context().newPage();
+  await other.route(
+    (url) => !url.href.startsWith(baseURL!) && !url.protocol.startsWith('data'),
+    (route) => route.fulfill({ status: 200, body: '' }),
+  );
+  await startAt(page, spot);
+  await startAt(other, spot);
+  await enterOffice(page);
+  await enterOffice(other);
+  // just the two tabs: a fake visitor wandering onto the bench would make this flaky
+  await page.evaluate(() => (window as unknown as PresenceWin).__swarmPresence.fakes(0));
+  await other.evaluate(() => (window as unknown as PresenceWin).__swarmPresence.fakes(0));
+
+  // tab A sits on floor 1 west and lights up
+  await expect(page.getByText('Sit down')).toBeVisible({ timeout: 90_000 });
+  await page.keyboard.press('e');
+  await expect.poll(async () => (await probe(page)).me?.nook).toBe('office-west');
+  const aSeat = (await probe(page)).me!.seat;
+  await doIt(page, 'roll');
+  await expect.poll(async () => (await probe(page)).me?.stage, { timeout: ROLL_MS + 10000 }).toBe('ready');
+  await doIt(page, 'light');
+  await expect.poll(async () => (await probe(page)).me?.stage, { timeout: LIGHT_MS + 10000 }).toBe('lit');
+
+  // tab B sees A's visitor seated at that seat, lit
+  const seenA = async (p: Page) => (await probe(p)).visitors.find((v) => v.nook === 'office-west' && v.seat === aSeat) ?? null;
+  await expect.poll(async () => (await seenA(other))?.lit ?? null, { timeout: 20_000 }).toBe(true);
+
+  // B's sit into A's seat is refused: B is aimed at the very same one
+  await expect(other.getByText('Sit down')).toBeVisible();
+  await other.keyboard.press('e');
+  await expect.poll(async () => (await probe(other)).me).toBeNull();
+
+  // B takes the other seat
+  const otherSeat: 0 | 1 = aSeat === 0 ? 1 : 0;
+  await travel(other, 'z', n.seats[otherSeat].z, ['a', 'd']);
+  await other.keyboard.press('e');
+  await expect.poll(async () => (await probe(other)).me?.seat).toBe(otherSeat);
+
+  // A puffs: B sees A's puffsLeft drop
+  const before = (await seenA(other))!.puffsLeft;
+  await doIt(page, 'puff');
+  await expect.poll(async () => (await seenA(other))?.puffsLeft, { timeout: PUFF_MS + 10000 }).toBe((before ?? PUFFS) - 1);
+
+  // A gets up: the seat is free in B
+  await doIt(page, 'up');
+  await expect.poll(async () => (await probe(page)).me).toBeNull();
+  await expect.poll(async () => await seenA(other), { timeout: 10_000 }).toBeNull();
+
+  await other.close();
+});

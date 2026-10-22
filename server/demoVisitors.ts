@@ -4,6 +4,7 @@
 
 import { EMOTES, VISITOR_COLORS } from '../shared/presence.ts';
 import type { EmoteId, VisitorHeld, VisitorPose } from '../shared/types.ts';
+import { LIGHT_MS, PUFF_MS, PUFFS, ROLL_MS, nook } from '../client/src/world/smokeBreak.ts';
 
 interface Pt {
   x: number;
@@ -40,6 +41,17 @@ export const PING_SPOTS = { office: { x: 0, y: 1.8, z: -11.6, label: 'the whiteb
 const SPEED = 1.3; // m/s, a stroll
 const NAMES = ['Robin', 'Sam', 'Kai', 'Noor', 'Mika', 'Jo', 'Ari', 'Lou', 'Tess', 'Remy', 'Ivy', 'Bo', 'Zane', 'Ida', 'Max', 'Pia'];
 
+/** On a smoke break (#59), at one of #57's balcony nooks: rolling → lighting → lit/puffing through PUFFS puffs, then
+ * up. `t`: seconds into the current stage; `wait`: seconds left holding `lit` before the next puff. */
+export interface SmokeWalk {
+  nook: 'office-west' | 'office-east';
+  seat: 0 | 1;
+  stage: 'rolling' | 'lighting' | 'lit' | 'puffing';
+  t: number;
+  wait: number;
+  puffsLeft: number;
+}
+
 export interface Walker {
   index: number;
   /** null until there's a real visitor whose floor to go to. */
@@ -58,6 +70,9 @@ export interface Walker {
   emoteIn: number;
   pingIn: number;
   held: VisitorHeld | null;
+  /** Seconds until the next smoke break is tried (floor 1 only, #59); null while one is already under way. */
+  smokeIn: number;
+  smoke: SmokeWalk | null;
 }
 
 /** Their names and colours, by index. */
@@ -72,13 +87,86 @@ function heldFor(i: number): VisitorHeld | null {
 }
 
 export function newWalker(i: number): Walker {
-  return { index: i, floor: null, x: 0, z: 0, h: 0, leg: 'wander', next: 0, to: null, wait: 0, emoteIn: 3 + i * 1.7, pingIn: 12 + i * 5, held: heldFor(i) };
+  return {
+    index: i,
+    floor: null,
+    x: 0,
+    z: 0,
+    h: 0,
+    leg: 'wander',
+    next: 0,
+    to: null,
+    wait: 0,
+    emoteIn: 3 + i * 1.7,
+    pingIn: 12 + i * 5,
+    held: heldFor(i),
+    smokeIn: 120 + i * 53,
+    smoke: null,
+  };
 }
 
 const routeOf = (floor: number) => (floor === 0 ? ROUTES.lobby : ROUTES.office);
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-export const poseOf = (w: Walker, now = Date.now()): VisitorPose => ({ ts: now, f: w.floor ?? 0, x: r2(w.x), z: r2(w.z), h: Math.round(w.h * 1000) / 1000, p: 0, held: w.held });
+/** The joint a smoking walker holds, as others see it (shared/presence.ts's VisitorHeld). */
+function jointHeld(sm: SmokeWalk): VisitorHeld {
+  return { k: 'joint', id: 'demo-joint', s: sm.puffsLeft, l: sm.stage === 'lit' || sm.stage === 'puffing' ? 1 : 0, r: sm.stage === 'rolling' ? 1 : 0 };
+}
+
+export const poseOf = (w: Walker, now = Date.now()): VisitorPose => {
+  if (w.smoke) {
+    const seat = nook(w.smoke.nook).seats[w.smoke.seat];
+    const yaw = nook(w.smoke.nook).yaw;
+    return { ts: now, f: w.floor ?? 0, x: r2(seat.x), z: r2(seat.z), h: Math.round(yaw * 1000) / 1000, p: 0, held: jointHeld(w.smoke), s: `${w.smoke.nook}:${w.smoke.seat}` };
+  }
+  return { ts: now, f: w.floor ?? 0, x: r2(w.x), z: r2(w.z), h: Math.round(w.h * 1000) / 1000, p: 0, held: w.held };
+};
+
+const SMOKE_NOOKS: readonly ('office-west' | 'office-east')[] = ['office-west', 'office-east'];
+const SMOKE_SEATS: readonly (0 | 1)[] = [0, 1];
+
+/** A free (nook, seat) for a smoke break, picking at random among what's not in `taken` ('<nook>:<seat>'); null if none. */
+function pickFreeSmokeSeat(taken: ReadonlySet<string>, rand: () => number): { nook: 'office-west' | 'office-east'; seat: 0 | 1 } | null {
+  const free: { nook: 'office-west' | 'office-east'; seat: 0 | 1 }[] = [];
+  for (const n of SMOKE_NOOKS) for (const s of SMOKE_SEATS) if (!taken.has(`${n}:${s}`)) free.push({ nook: n, seat: s });
+  return free.length ? free[Math.floor(rand() * free.length) % free.length] : null;
+}
+
+/** Advances a smoke break by dt seconds: rolling → lighting → lit/puffing through PUFFS puffs. Clears `w.smoke`
+ * (stands up) once the last puff is done. */
+function stepSmoke(w: Walker, dt: number, rand: () => number) {
+  const sm = w.smoke!;
+  sm.t += dt;
+  if (sm.stage === 'rolling') {
+    if (sm.t >= ROLL_MS / 1000) {
+      sm.stage = 'lighting';
+      sm.t = 0;
+    }
+  } else if (sm.stage === 'lighting') {
+    if (sm.t >= LIGHT_MS / 1000) {
+      sm.stage = 'lit';
+      sm.t = 0;
+      sm.wait = 1.2 + rand() * 1.3;
+    }
+  } else if (sm.stage === 'lit') {
+    sm.wait -= dt;
+    if (sm.wait <= 0) {
+      sm.stage = 'puffing';
+      sm.t = 0;
+    }
+  } else if (sm.t >= PUFF_MS / 1000) {
+    sm.puffsLeft -= 1;
+    if (sm.puffsLeft <= 0) {
+      w.smoke = null;
+      return;
+    }
+    sm.stage = 'lit';
+    sm.t = 0;
+    sm.wait = 1.2 + rand() * 1.3;
+  }
+}
+
+const NO_SEATS: ReadonlySet<string> = new Set();
 
 /** Puts a walker on `floor`, spread along its route by index (halfway between two stops). */
 function place(w: Walker, floor: number) {
@@ -102,9 +190,10 @@ export interface WalkerStep {
 
 /**
  * Advances a walker by dt seconds towards the floor real visitors are on (`target`; null: nobody yet). They keep to the
- * office floors and the lobby: nobody follows you up to the roof. Mutates `w`.
+ * office floors and the lobby: nobody follows you up to the roof. `takenSeats` (#59): the smoke-break seats
+ * ('<nook>:<seat>') other walkers already hold this tick, so two don't sit in the same one. Mutates `w`.
  */
-export function stepWalker(w: Walker, dt: number, floor: number | null, rand: () => number): WalkerStep {
+export function stepWalker(w: Walker, dt: number, floor: number | null, rand: () => number, takenSeats: ReadonlySet<string> = NO_SEATS): WalkerStep {
   const out: WalkerStep = { moved: false, emote: null, ping: null };
   const target = floor !== null && floor >= 0 ? floor : w.floor;
   if (w.floor === null) {
@@ -112,6 +201,24 @@ export function stepWalker(w: Walker, dt: number, floor: number | null, rand: ()
     place(w, target);
     out.moved = true;
     return out;
+  }
+  // A smoke break on floor 1 (#59), instead of wandering: once under way, see it through before resuming.
+  if (w.smoke) {
+    stepSmoke(w, dt, rand);
+    out.moved = true;
+    return out;
+  }
+  if (target === w.floor && w.floor === 1 && w.leg === 'wander' && w.wait <= 0) {
+    w.smokeIn -= dt;
+    if (w.smokeIn <= 0) {
+      w.smokeIn = 150 + rand() * 150; // every 2.5-5 minutes or so, whether or not a seat was free
+      const seat = pickFreeSmokeSeat(takenSeats, rand);
+      if (seat) {
+        w.smoke = { nook: seat.nook, seat: seat.seat, stage: 'rolling', t: 0, wait: 0, puffsLeft: PUFFS };
+        out.moved = true;
+        return out;
+      }
+    }
   }
   w.emoteIn -= dt;
   w.pingIn -= dt;
