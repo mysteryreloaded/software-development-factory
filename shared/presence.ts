@@ -32,7 +32,9 @@ export const EMOTE_LABEL: Record<EmoteId, string> = { wave: 'Wave', thumbs: 'Thu
  * x is wide enough for the lobby's grounds (#41) too, out past the park at x -82, so a pose there relays unclamped. */
 export const BOUNDS = { x: 84, zMin: -26, zMax: 26, yMin: -1, yMax: 5, floorMin: -1, floorMax: 200 };
 
-const HELD_KINDS: readonly VisitorHeld['k'][] = ['ball', 'mug', 'blaster'];
+const HELD_KINDS: readonly VisitorHeld['k'][] = ['ball', 'mug', 'blaster', 'joint'];
+/** A smoke-break seat (#59): one of #57's nooks, seat 0 or 1. */
+const SEAT_RE = /^(office-west|office-east|roof):[01]$/;
 
 /**
  * Text someone typed, made safe to show anywhere as text: control, format (bidi overrides, zero-width) and private-use
@@ -77,17 +79,25 @@ export const isFloor = (v: unknown): v is number => Number.isInteger(v) && (v as
 /** What a visitor holds, if it's a kind others can draw; anything else is "nothing". */
 export function cleanHeld(raw: unknown): VisitorHeld | null {
   if (!raw || typeof raw !== 'object') return null;
-  const r = raw as { k?: unknown; id?: unknown; s?: unknown };
+  const r = raw as { k?: unknown; id?: unknown; s?: unknown; l?: unknown; r?: unknown };
   if (!HELD_KINDS.includes(r.k as VisitorHeld['k']) || typeof r.id !== 'string' || !/^[A-Za-z0-9:_-]{1,40}$/.test(r.id)) return null;
   const held: VisitorHeld = { k: r.k as VisitorHeld['k'], id: r.id };
   if (held.k === 'mug') held.s = finite(r.s) ? clamp(Math.round(r.s), 0, 3) : 0;
+  else if (held.k === 'joint') {
+    held.s = finite(r.s) ? clamp(Math.round(r.s), 0, 8) : 0;
+    held.l = (finite(r.l) ? clamp(Math.round(r.l), 0, 1) : 0) as 0 | 1;
+    held.r = (finite(r.r) ? clamp(Math.round(r.r), 0, 1) : 0) as 0 | 1;
+  }
   return held;
 }
 
+/** A smoke-break seat id ('office-west:0', ...), or undefined for anything else (#59). */
+export const cleanSeat = (raw: unknown): string | undefined => (typeof raw === 'string' && SEAT_RE.test(raw) ? raw : undefined);
+
 /** A pose from a browser, checked and rounded (centimetres, milliradians); null when it isn't one. */
-export function cleanPose(raw: { ts?: unknown; f?: unknown; x?: unknown; z?: unknown; h?: unknown; p?: unknown; held?: unknown }): VisitorPose | null {
+export function cleanPose(raw: { ts?: unknown; f?: unknown; x?: unknown; z?: unknown; h?: unknown; p?: unknown; held?: unknown; s?: unknown }): VisitorPose | null {
   if (!finite(raw.ts) || !isFloor(raw.f) || !finite(raw.x) || !finite(raw.z) || !finite(raw.h) || !finite(raw.p)) return null;
-  return {
+  const pose: VisitorPose = {
     ts: Math.round(clamp(raw.ts, 0, 1e13)),
     f: raw.f,
     x: round(clamp(raw.x, -BOUNDS.x, BOUNDS.x), 2),
@@ -96,6 +106,9 @@ export function cleanPose(raw: { ts?: unknown; f?: unknown; x?: unknown; z?: unk
     p: round(clamp(raw.p, -1.6, 1.6), 3),
     held: cleanHeld(raw.held),
   };
+  const seat = cleanSeat(raw.s);
+  if (seat) pose.s = seat;
+  return pose;
 }
 
 /** A presence message from a browser on /ws, validated and cleaned; null for anything else (ignored here). */

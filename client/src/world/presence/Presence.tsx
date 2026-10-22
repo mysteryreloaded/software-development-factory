@@ -8,8 +8,20 @@ import { isConfirmOpen } from '../../ui/Confirm';
 import { isKey } from '../../ui/controls';
 import { cameraMode, exitView, followBody, followingId, followOnFloor, playerAt, rigOwnsCamera } from '../camera/rig';
 import { Pings, pingHere } from './Pings';
-import { drawnVisitors, remoteOf, setFloorHere, setFollower, syncSelf, tickPresence } from './presenceState';
+import { drawnVisitors, remoteOf, seatedVisitors, setFloorHere, setFollower, syncSelf, tickPresence } from './presenceState';
 import { Visitors, visitorBodyId } from './Visitors';
+import { mySmokeHeld, parseSeatId, setSmokeVisitorsProbe } from '../smokeBreak';
+
+// Wires the smoke break's own probe (#59) to presence, without smokeBreak.ts importing presence code (its own
+// comment explains why): the server's demoVisitors.ts needs that file's pure nook geometry and stage timings.
+setSmokeVisitorsProbe(() =>
+  seatedVisitors()
+    .map(({ id, seat, held }) => {
+      const parsed = parseSeatId(seat);
+      return parsed && { id, nook: parsed.nookId, seat: parsed.seat, puffsLeft: held?.k === 'joint' ? held.s ?? null : null, lit: held?.k === 'joint' && held.l === 1, rolling: held?.k === 'joint' && held.r === 1 };
+    })
+    .filter((v): v is NonNullable<typeof v> => !!v),
+);
 
 // Shared presence in the 3D view (#223): the other visitors on this floor and their pings, following one with the
 // camera (rig.ts's follow cam, riding the elevator after them), and this tab's own pose going out (presenceState.ts
@@ -98,6 +110,12 @@ export function Presence() {
         p: away ? 0 : r3(euler.x),
         held: heldForOthers(s.held),
       };
+      // On a smoke break (#59): others draw you seated there, holding the joint, whatever x/z/held say above.
+      const smoke = mySmokeHeld();
+      if (smoke) {
+        pose.s = smoke.seat;
+        if (smoke.held) pose.held = smoke.held;
+      }
     }
     syncSelf({ started: s.started, floor: s.floor, pose }, now);
   });

@@ -10,6 +10,8 @@ import { BENCH, type Rect } from './layout';
 import { markBloom } from './gfx/bloomMarks';
 import { playerAt } from './camera/rig';
 import { FIRST_PERSON } from './viewTags';
+import { useStore } from '../store';
+import { myVisitorId, visitorsAtSeat } from './presence/presenceState';
 import {
   MAX_BUTTS,
   PUFFS,
@@ -319,6 +321,11 @@ export function SmokeNook({ id, bench = false }: { id: NookId; bench?: boolean }
     const d0 = Math.abs(playerAt.z - n.seats[0].z);
     const d1 = Math.abs(playerAt.z - n.seats[1].z);
     const i: 0 | 1 = d0 <= d1 ? 0 : 1;
+    // a seat a visitor already holds (#59) can't be taken: a toast, not a sit (move closer to the other one instead)
+    if (visitorsAtSeat(useStore.getState().floor, `${id}:${i}`).length) {
+      useStore.getState().pushToast('info', "🚬 Someone's sitting there");
+      return;
+    }
     const seatXZ = n.seats[i];
     setPerch({
       id: `smoke:${id}:${i}`,
@@ -357,6 +364,15 @@ export function SmokeNook({ id, bench = false }: { id: NookId; bench?: boolean }
 
   useFrame(() => {
     if (seatRef.current == null) return;
+    // Two people sat down on the same seat at once (#59): the lexically smaller visitor id keeps it, stood up here.
+    const mySeat = seatRef.current;
+    const others = visitorsAtSeat(useStore.getState().floor, `${id}:${mySeat}`);
+    const myId = myVisitorId();
+    if (others.length && others.some((o) => o < myId)) {
+      leavePerch();
+      useStore.getState().pushToast('info', "🚬 Someone's sitting there");
+      return;
+    }
     const now = performance.now();
     const r = tickSmoke(stateRef.current, now);
     if (r.state !== stateRef.current) setState(r.state);

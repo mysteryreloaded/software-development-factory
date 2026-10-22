@@ -107,7 +107,7 @@ export function sampleAt(samples: Sample[], t: number, out: Sample): Sample | nu
 
 // ---------- sending ours ----------
 
-export const heldKey = (h: VisitorHeld | null) => (h ? `${h.k}:${h.id}:${h.s ?? ''}` : '');
+export const heldKey = (h: VisitorHeld | null) => (h ? `${h.k}:${h.id}:${h.s ?? ''}:${h.l ?? ''}:${h.r ?? ''}` : '');
 
 /** Whether two poses differ enough to be worth sending (a centimetre, about half a degree). */
 export function poseChanged(a: VisitorPose, b: VisitorPose) {
@@ -117,7 +117,8 @@ export function poseChanged(a: VisitorPose, b: VisitorPose) {
     Math.abs(a.z - b.z) > 0.01 ||
     Math.abs(wrapAngle(a.h - b.h)) > 0.01 ||
     Math.abs(a.p - b.p) > 0.02 ||
-    heldKey(a.held) !== heldKey(b.held)
+    heldKey(a.held) !== heldKey(b.held) ||
+    (a.s ?? '') !== (b.s ?? '') // a smoke-break seat taken or left (#59)
   );
 }
 

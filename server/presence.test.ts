@@ -227,4 +227,19 @@ describe('PresenceHub', () => {
     me.say({ type: 'fakes', n: 0 });
     expect(me.last('visitors')?.visitors).toEqual([]);
   });
+
+  it('never sits a fake on a smoke-break seat a real visitor already holds (#59)', () => {
+    const { hub, tab, advance } = setup(true);
+    hub.setFakes(1);
+    const fakeId = hub.state().find((p) => p.fake)!.id;
+    const me = tab();
+    me.say(pose(1, 0, 0, { s: 'office-west:0' })); // claims the seat before the fake ever considers one
+    for (let i = 0; i < 400; i++) {
+      advance(500);
+      hub.tick();
+    }
+    const fakeSeats = me.all('visitorPose').filter((p) => p.id === fakeId && p.s).map((p) => p.s);
+    expect(fakeSeats.length).toBeGreaterThan(0); // it did take a smoke break at some point in this run
+    expect(fakeSeats).not.toContain('office-west:0');
+  });
 });
