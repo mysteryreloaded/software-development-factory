@@ -7,7 +7,7 @@ import type { LogEntry, SessionHandle, SessionResult } from './agentRunner.ts';
 import { MAX_PR_DIFF, type PrDetails } from './github.ts';
 import { defaultProjectsDir, DESK_SWEEP_INTERVAL_MS, HOME_DIR, LOG_BUFFER, SCHEDULER_INTERVAL_MS, STATE_FILE, SYNC_INTERVAL_MS, VERSION } from './config.ts';
 import { askedFor, ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, checkReviewTarget, createOfficeTools, floorCapacity, IssueCap, jobLabel, NOT_ASKED, planDependencies, plannedSize, scalePlan, type CeoJob, type CodeReviewPr, type OfficeTools, type TeamNow } from './ceo.ts';
-import { afterClose, ASK_AGAIN_MS, closedWhy, closuresHeld, forgettable, issueOpen, nameList, pullNow, stillOpen, stoppedMessage, toAsk, toHold, type Closure, type FloorState, type KnownPull, type LearnedPull } from './closeCleanup.ts';
+import { afterClose, ASK_AGAIN_MS, closedWhy, closuresHeld, forgettable, issueOpen, nameList, pullNow, settledPulls, stillOpen, stoppedMessage, toAsk, toHold, type Closure, type FloorState, type KnownPull, type LearnedPull } from './closeCleanup.ts';
 import { depsPromptLine, type DepsOutcome } from './deps.ts';
 import { setUpDesk } from './deskSetup.ts';
 import { fixOutcome, MAX_FIX_FAILURES } from './fixOutcome.ts';
@@ -1934,7 +1934,7 @@ export class Swarm {
     for (const [key, at] of rt.openAt) if (Date.now() - at > ASK_AGAIN_MS) rt.openAt.delete(key);
     const f = this.floorState(rt);
     rt.issues = rt.issues.filter((i) => issueOpen(i.number, f) !== false);
-    rt.pulls = rt.pulls.map((p) => (p.state === 'OPEN' && pullNow(p.number, f)?.state === 'CLOSED' ? { ...p, state: 'CLOSED' as const } : p));
+    rt.pulls = settledPulls(rt.pulls, f);
   }
 
   /** Stop and clear the work on the floor's closed issues and PRs (closeCleanup.ts). Returns the names of those it stopped. */
@@ -2003,6 +2003,7 @@ export class Swarm {
     const rec = this.state.qa.find((q) => q.repoId === repo.id && q.prNumber === prNumber);
     if (!rec) return;
     this.state.qa = this.state.qa.filter((q) => q !== rec);
+    this.outbox.flush(); // the floor's settled state (MERGED, not OPEN) reaches tabs before its record vanishes
     this.broadcast({ type: 'qaRemoved', repoId: repo.id, prNumber });
     void removeQaShots(qaShotsDir(QA_SHOTS_DIR, repo.id, prNumber)).catch(() => undefined);
     this.clearPrepStrikes(repo.id, prNumber);
@@ -2032,8 +2033,9 @@ export class Swarm {
     const known: LearnedPull = { number: pr.number, headRefName: pr.headRefName, closesIssues: pr.closesIssues, state, at: Date.now() };
     rt.closedPulls.set(pr.number, known);
     if (!rebuild) this.holdIssues(repo, known);
-    if (state === 'CLOSED' && rt.pulls.some((p) => p.number === pr.number && p.state === 'OPEN')) {
-      rt.pulls = rt.pulls.map((p) => (p.number === pr.number ? { ...p, state } : p));
+    const settled = settledPulls(rt.pulls, this.floorState(rt));
+    if (settled !== rt.pulls) {
+      rt.pulls = settled;
       this.emitRepo(repo);
     }
     return this.cleanUpClosed(repo);

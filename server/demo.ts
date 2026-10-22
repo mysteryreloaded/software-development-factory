@@ -652,9 +652,11 @@ export function createDemoBackend(scale: DemoScale | null = null): Backend {
       return [...(r?.issues ?? [])];
     },
     // Like GitHub's list: the open PRs and the 8 latest merges, never closed ones, so the office asks about those.
+    // Copies, not the fake store's own objects: mergePull mutates those in place, and a shared reference would let
+    // that silently "fix" what the outbox already queued to send, so the real patch never goes out (#70).
     listPulls: async (fullName) => {
       const pulls = repos.get(fullName)?.pulls ?? [];
-      return [...pulls.filter((p) => p.state === 'OPEN'), ...pulls.filter((p) => p.state === 'MERGED').slice(0, 8)];
+      return [...pulls.filter((p) => p.state === 'OPEN'), ...pulls.filter((p) => p.state === 'MERGED').slice(0, 8)].map((p) => ({ ...p }));
     },
     createIssue: async (fullName, title, body, labels = []) => {
       const r = repos.get(fullName);
