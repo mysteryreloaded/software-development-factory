@@ -1,6 +1,6 @@
 // The penalty pitch (#46): the goal, its net, the ball, and the billboard that pages between the live match and the
-// all-time board. Mounted with the city (outside/City.tsx), so it (and the match) show from the office windows too.
-// Pure positions come from parkPitch.ts; the match clock itself is penaltyState.ts, ticked by ParkOpponent.tsx.
+// all-time board. Mounted with the city (outside/City.tsx), lobby-only. Pure positions come from parkPitch.ts; the
+// match clock itself is penaltyState.ts, ticked by ParkOpponent.tsx.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
@@ -102,6 +102,9 @@ type Page = (typeof BOARD_PAGES)[number];
 const BOARD_W = 1024;
 const BOARD_H = 768;
 
+/** Who the board calls you (PongTable.tsx's own pattern): the manager's first name, or 'You'. */
+const youName = () => useStore.getState().settings.managerName.trim().split(/\s+/)[0] || 'You';
+
 function drawTop5(ctx: CanvasRenderingContext2D) {
   const w = BOARD_W;
   const h = BOARD_H;
@@ -111,22 +114,22 @@ function drawTop5(ctx: CanvasRenderingContext2D) {
   ctx.fill();
   ctx.fillStyle = '#d8f3dc';
   ctx.textAlign = 'center';
-  ctx.font = `700 54px ${SANS}`;
-  ctx.fillText('⚽ All-time top 5', w / 2, 60);
+  ctx.font = `700 88px ${SANS}`;
+  ctx.fillText('⚽ Top 5', w / 2, 100);
   ctx.textAlign = 'left';
-  ctx.font = `600 38px ${SANS}`;
+  ctx.font = `600 84px ${SANS}`;
   const rows = board.rows.slice(0, 5);
   if (rows.length === 0) {
     ctx.textAlign = 'center';
     ctx.fillText('No games yet', w / 2, h / 2);
   } else {
     rows.forEach((r, i) => {
-      const y = 140 + i * 70;
+      const y = 220 + i * 108;
       ctx.fillStyle = '#d8f3dc';
-      ctx.fillText(`${i + 1}.`, 60, y);
-      ctx.fillText(r.name.slice(0, 8), 140, y);
+      ctx.fillText(`${i + 1}.`, 50, y);
+      ctx.fillText(r.name.slice(0, 7), 150, y);
       ctx.textAlign = 'right';
-      ctx.fillText(`${r.wins}W`, w - 60, y);
+      ctx.fillText(`${r.wins}W`, w - 50, y);
       ctx.textAlign = 'left';
     });
   }
@@ -141,16 +144,16 @@ function drawHardest(ctx: CanvasRenderingContext2D) {
   ctx.fill();
   ctx.textAlign = 'center';
   ctx.fillStyle = '#e0aaff';
-  ctx.font = `700 54px ${SANS}`;
-  ctx.fillText('🚀 Hardest shot', w / 2, 60);
-  ctx.font = `700 76px ${SANS}`;
+  ctx.font = `700 88px ${SANS}`;
+  ctx.fillText('🚀 Hardest shot', w / 2, 100);
   if (!board.hardest) {
-    ctx.font = `600 38px ${SANS}`;
+    ctx.font = `600 84px ${SANS}`;
     ctx.fillText('No games yet', w / 2, h / 2);
   } else {
-    ctx.fillText(`${Math.round(board.hardest.kmh)} km/h`, w / 2, h / 2 - 20);
-    ctx.font = `600 40px ${SANS}`;
-    ctx.fillText(board.hardest.name.slice(0, 16), w / 2, h / 2 + 70);
+    ctx.font = `700 96px ${SANS}`;
+    ctx.fillText(`${Math.round(board.hardest.kmh)} km/h`, w / 2, h / 2);
+    ctx.font = `600 84px ${SANS}`;
+    ctx.fillText(board.hardest.name.slice(0, 14), w / 2, h / 2 + 130);
   }
 }
 
@@ -164,18 +167,17 @@ function drawLive(ctx: CanvasRenderingContext2D) {
   if (!v) return;
   ctx.textAlign = 'center';
   ctx.fillStyle = '#caf0f8';
-  ctx.font = `700 46px ${SANS}`;
-  ctx.fillText(`Manager vs ${v.opponentName.slice(0, 14)}`, w / 2, 56);
-  ctx.font = `700 90px ${SANS}`;
-  ctx.fillText(`${v.score.player} – ${v.score.opponent}`, w / 2, 160);
+  ctx.font = `700 84px ${SANS}`;
+  ctx.fillText(`${youName()} vs ${v.opponentName.slice(0, 10)}`, w / 2, 100);
+  ctx.font = `700 96px ${SANS}`;
+  ctx.fillText(`${v.score.player} – ${v.score.opponent}`, w / 2, 230);
   const dot = (k: 'goal' | 'miss') => (k === 'goal' ? '●' : '○');
-  ctx.font = `600 40px ${SANS}`;
+  ctx.font = `600 84px ${SANS}`;
   const playerKicks = v.kicksShown.filter((_, i) => i % 2 === 0);
   const oppKicks = v.kicksShown.filter((_, i) => i % 2 === 1);
-  ctx.fillText(playerKicks.map(dot).join(' ') || '—', w / 2, 230);
-  ctx.fillText(oppKicks.map(dot).join(' ') || '—', w / 2, 280);
-  ctx.font = `600 32px ${SANS}`;
-  ctx.fillText(v.winner ? `${v.winner === 'player' ? 'You win!' : `${v.opponentName} wins!`}` : `${v.turn === 'player' ? 'Your kick' : `${v.opponentName}'s kick`}`, w / 2, 340);
+  ctx.fillText(playerKicks.map(dot).join(' ') || '—', w / 2, 340);
+  ctx.fillText(oppKicks.map(dot).join(' ') || '—', w / 2, 440);
+  ctx.fillText(v.winner ? `${v.winner === 'player' ? 'You win!' : `${v.opponentName} wins!`}` : `${v.turn === 'player' ? 'Your kick' : `${v.opponentName}'s kick`}`, w / 2, 580);
 }
 
 function Billboard() {
@@ -185,11 +187,7 @@ function Billboard() {
   const since = useRef(0);
   useFrame((_, dt) => {
     since.current += dt;
-    const live = !penaltyFree();
-    if (live) {
-      setTick((t) => t + 1);
-      return;
-    }
+    if (!penaltyFree()) return; // a live match redraws from subscribePenalty below, not every frame
     if (since.current > 8) {
       since.current = 0;
       setPage((p) => (p === 'top5' ? 'hardest' : 'top5'));

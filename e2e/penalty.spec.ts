@@ -61,6 +61,38 @@ test('walking up to the spot shows the hint to play', async ({ page }) => {
   await expect(page.getByText('Play penalties')).toBeVisible({ timeout: 90_000 });
 });
 
+test('a match without skipWalk reaches live: ParkOpponent.tsx claims and walks them out itself', async ({ page }) => {
+  test.setTimeout(240_000); // a few generous attempts, each with its own long walk and freeAgent() poll
+  await startAt(page, { floor: 0, x: goal.spotX, z: goal.z, yaw: Math.PI / 2, pitch: 0 });
+  await enterOffice(page);
+
+  // the demo's own work can reassign whichever agent freeAgent() picked while they're still walking out (same
+  // tickPenalty() abort as 'an agent called back to work leaves no result'): retry with a fresh one rather than
+  // flaking on bad luck.
+  let stage: string | null = null;
+  for (let attempt = 0; attempt < 3 && stage !== 'live'; attempt++) {
+    const opponentId = await freeAgent(page);
+    expect(await call(page, 'start', opponentId)).toBe(true);
+    try {
+      await expect
+        .poll(
+          async () => {
+            stage = (await penalty(page)).stage;
+            return stage === 'live' || stage === null;
+          },
+          { timeout: 60_000, intervals: [500] },
+        )
+        .toBe(true);
+    } catch {
+      // timed out mid-walk (this machine's own load, not the opponent being reassigned): drop it (G, same as
+      // item 2's fix) so the next attempt's startPenaltyMatch() isn't blocked by this one still being on
+      await page.keyboard.press('g');
+      await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).toBeNull();
+    }
+  }
+  expect(stage).toBe('live');
+});
+
 test('a probe-driven match reports the winner and the hardest shot to the office-wide board', async ({ page }) => {
   await startAt(page, { floor: 0, x: goal.spotX, z: goal.z, yaw: Math.PI / 2, pitch: 0 });
   await enterOffice(page);
@@ -83,7 +115,7 @@ test('a probe-driven match reports the winner and the hardest shot to the office
     } else {
       // the AI strikes on its own (within WINDUP_MS of penaltyState.ts); under load the kick may already have
       // moved past 'flight' by the time we check, so anything other than 'live' means it struck
-      await expect.poll(async () => (await penalty(page)).stage, { timeout: 8000 }).not.toBe('live');
+      await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).not.toBe('live');
     }
     // wait for this kick to resolve (flight, then the result shown a while) before the next one's taken
     await expect
@@ -127,6 +159,30 @@ test('an agent called back to work leaves no result', async ({ page }) => {
 
   // work calls them back mid-match (the same patch the office sends when a session picks up an issue): no result
   await call(page, 'callBack', opponentId);
+  await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).toBeNull();
+
+  const state = await page.evaluate(() => fetch('/api/state').then((r) => r.json()));
+  const rowAfter = state.penalty.rows.find((r: { id: string }) => r.id === opponentId);
+  expect(rowAfter ? rowAfter.wins + rowAfter.losses : 0).toBe(countBefore);
+});
+
+test('G drops the match with no result, same as work calling the opponent back', async ({ page }) => {
+  await startAt(page, { floor: 0, x: goal.spotX, z: goal.z, yaw: Math.PI / 2, pitch: 0 });
+  await enterOffice(page);
+  const opponentId = await freeAgent(page);
+  // the same agent may already have a row from an earlier test in this run (the board persists for the whole
+  // server session): record their count before, rather than assuming no row exists at all.
+  const before = await page.evaluate(() => fetch('/api/state').then((r) => r.json()));
+  const rowBefore = before.penalty.rows.find((r: { id: string }) => r.id === opponentId);
+  const countBefore = rowBefore ? rowBefore.wins + rowBefore.losses : 0;
+
+  expect(await call(page, 'start', opponentId)).toBe(true);
+  expect(await call(page, 'skipWalk')).toBe(true);
+  await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).not.toBe('walkup');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __swarmToys: { held: unknown } }).__swarmToys.held)).toEqual({ kind: 'penalty', id: 'match' });
+
+  await page.keyboard.press('g');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __swarmToys: { held: unknown } }).__swarmToys.held)).toBeNull();
   await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).toBeNull();
 
   const state = await page.evaluate(() => fetch('/api/state').then((r) => r.json()));

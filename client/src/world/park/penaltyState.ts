@@ -73,7 +73,7 @@ export function subscribePenalty(fn: () => void) {
 /** Whether a goal is free for a new match: nobody's playing. */
 export const penaltyFree = () => !match;
 
-// ---------- the opponent's trip out and back (parkErrand.ts, ParkOpponent.tsx) ----------
+// ---------- the opponent's trip out and back (ParkOpponent.tsx) ----------
 
 /** Who's hidden from their floor, out in the park (or on the way), while the sequence runs; null once they're back. */
 let awayId: string | null = null;
@@ -92,9 +92,9 @@ function pickOpponent(): { id: string; name: string } | null {
 }
 
 /**
- * E at the penalty spot: a free agent (any floor, CEO included) sets off for the goal (parkErrand.ts walks them);
- * the match exists from now (stage 'walkup'), but play starts once they arrive (penaltyOpponentArrived). False
- * ("Everyone's busy, try again later") when nobody's free.
+ * E at the penalty spot: a free agent (any floor, CEO included) sets off for the goal (ParkOpponent.tsx claims and
+ * walks them); the match exists from now (stage 'walkup'), but play starts once they arrive (penaltyOpponentArrived).
+ * False ("Everyone's busy, try again later") when nobody's free.
  */
 export function requestPenaltyMatch(): boolean {
   if (match) return true;
@@ -105,7 +105,7 @@ export function requestPenaltyMatch(): boolean {
   return true;
 }
 
-/** The chosen opponent reached the spot (parkErrand.ts / ParkOpponent.tsx): the shoot-out begins. */
+/** The chosen opponent reached the spot (ParkOpponent.tsx): the shoot-out begins. */
 export function penaltyOpponentArrived() {
   if (!match || match.stage !== 'walkup') return;
   match.stage = 'setup';
@@ -149,6 +149,12 @@ export function abandonPenaltyMatch() {
   match = null;
   penaltyChanged();
 }
+
+// G, Esc, a panel opening, or the mouse being freed some other way: no result either (like pongState.ts's own
+// held-paddle subscription).
+useStore.subscribe((s, prev) => {
+  if (prev.held?.kind === 'penalty' && s.held?.kind !== 'penalty') abandonPenaltyMatch();
+});
 
 // ---------- the player's side ----------
 

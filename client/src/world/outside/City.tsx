@@ -597,8 +597,13 @@ export function City() {
       ))}
       <ParkFence />
       <Bollards />
-      <Pitch />
-      <ParkOpponent />
+      {/* lobby-only (#46): no floor-specific errand walks a floor agent out while you're looking at their floor instead */}
+      {floor === 0 && (
+        <>
+          <Pitch />
+          <ParkOpponent />
+        </>
+      )}
     </group>
   );
 }

@@ -1,8 +1,9 @@
-// The free agent's walk out to the goal and back (#46): once parkErrand.ts has hidden them from their own floor,
-// they step out of the revolving door, walk the open grounds (a single rectangle, outside/grounds.ts: no obstacles,
-// so a straight line always does) to the penalty spot, and stand there for the match; work calling them back, or the
-// match ending, sends them the same way home. Mounted with the city (outside/City.tsx), so it runs on every floor,
-// and the billboard and the match stay visible from the office windows. Drives the clock (tickPenalty) too.
+// The free agent's walk out to the goal and back (#46): claims the match's opponent itself, like RoofPeople claims a
+// roof visit, the moment it's in 'walkup' - there's no floor-specific errand to wait on (their own floor isn't even
+// mounted while you're down here: lobby-only, like the park itself, City.tsx). Steps out of the revolving door, walks
+// the open grounds (a single rectangle, outside/grounds.ts: no obstacles, so a straight line always does) to the
+// penalty spot, and stands there for the match; work calling them back, or the match ending, sends them the same way
+// home. Drives the clock (tickPenalty) too.
 
 import { useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
@@ -10,7 +11,7 @@ import { useStore } from '../../store';
 import { Character } from '../Character';
 import { isFree } from '../errands';
 import { HALF_W, SIDE_OPENINGS, WALL_T } from '../layout';
-import { bodyState, placeBody, say, seatBody, setBody } from '../people';
+import { bodyState, placeBody, say, seatBody, setBody, setHidden } from '../people';
 import { WALK_SPEED } from '../walkways';
 import { goalPitch } from './parkPitch';
 import { parkAwayId, penaltyMatch, penaltyOpponentArrived, setParkAway, tickPenalty } from './penaltyState';
@@ -35,9 +36,14 @@ export function ParkOpponent() {
   const shooterSpot = { x: goal.spotX, z: goal.z };
   const [drawn, setDrawn] = useState<string | null>(null);
 
-  useFrame((_, delta) => {
-    const dt = Math.min(delta, 0.1);
+  useFrame(() => {
     tickPenalty();
+    // Claim the waiting match ourselves (like RoofPeople claims a roof visit): nobody else will.
+    const m0 = penaltyMatch();
+    if (!parkAwayId() && m0 && m0.stage === 'walkup') {
+      setParkAway(m0.opponentId);
+      setHidden(m0.opponentId, true); // off their own floor's desk, wherever that is, while they're down here
+    }
     const away = parkAwayId();
     if (away !== drawn) setDrawn(away);
     let w = walker.current;
@@ -50,6 +56,7 @@ export function ParkOpponent() {
     const a = agents[w.id];
     if (!a) {
       seatBody(w.id);
+      setHidden(w.id, false);
       walker.current = null;
       setParkAway(null);
       return;
@@ -65,9 +72,7 @@ export function ParkOpponent() {
     if (w.stage === 'toSpot' || w.stage === 'toDoor') {
       const target = w.stage === 'toSpot' ? shooterSpot : DOOR;
       const at = bodyState(w.id) ?? { x: DOOR.x, z: DOOR.z };
-      const tx = target.x - at.x;
-      const tz = target.z - at.z;
-      const d = Math.hypot(tx, tz);
+      const d = Math.hypot(target.x - at.x, target.z - at.z);
       if (d < 0.1) {
         setBody(w.id, { mode: 'standing', x: target.x, z: target.z, heading: facing(target.x, target.z, goal.lineX, goal.z) });
         if (w.stage === 'toSpot') {
@@ -75,13 +80,15 @@ export function ParkOpponent() {
           penaltyOpponentArrived();
         } else {
           seatBody(w.id);
+          setHidden(w.id, false);
           walker.current = null;
           setParkAway(null);
         }
       } else {
-        const heading = Math.atan2(-tx, -tz);
-        const step = Math.min(d, WALK_SPEED * dt);
-        setBody(w.id, { mode: 'walking', x: at.x + (tx / d) * step, z: at.z + (tz / d) * step, heading, speed: WALK_SPEED });
+        // the target is the destination itself, not an incremental step: body.ts's own walkTo() accelerates and
+        // covers the ground over the following frames (like ErrandDirector's and RoofPeople's own follow()).
+        const heading = Math.atan2(-(target.x - at.x), -(target.z - at.z));
+        setBody(w.id, { mode: 'walking', x: target.x, z: target.z, heading, speed: WALK_SPEED });
       }
       return;
     }
