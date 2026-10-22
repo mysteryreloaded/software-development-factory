@@ -40,11 +40,24 @@ import { greet } from './Chatter';
 import { joinPong, pongCamera, pongMouse, tickPaddle } from './toys/pongState';
 import { penaltyAim, penaltyAimDive, penaltyCamera, penaltyCharge, penaltyCommitDive, penaltyShuffle, playerRole, requestPenaltyMatch } from './park/penaltyState';
 import { gesture, touchInput, useTouch } from './touch';
+import { groundedJump, jumpHeight, startJump, stepJump } from './jump';
 
 /** How fast the right stick moves the ping-pong paddle, full over (in mouse pixels a second). */
 const PAD_PADDLE = 600;
 
 let canvasEl: HTMLCanvasElement | null = null;
+
+// One Player is ever mounted, so the jump arc lives at module scope: TouchControls.tsx's Jump button (and
+// __swarmJump, for e2e) reach it the same way interact() below is reached.
+let jumpState = groundedJump();
+(window as unknown as Record<string, unknown>).__swarmJump = { height: () => jumpHeight(jumpState), airborne: () => jumpState.airborne };
+
+/** Takes off, unless already airborne, perched, travelling (the elevator) or holding the pong paddle. */
+export function triggerJump() {
+  const s = useStore.getState();
+  if (s.travel || s.held?.kind === 'paddle' || perch()) return;
+  jumpState = startJump(jumpState);
+}
 
 // After an action, mouse presses are swallowed for a moment, so the second half of a double click
 // (or a click right after E) can't land on the panel's backdrop and close it, or confirm a hire.
@@ -422,6 +435,11 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
         // − and + turn the jukebox down and up while you look at it.
         if (action === 'volumeDown' && s.focus?.action.kind === 'jukebox') jukeboxAction('vol-');
         if (action === 'volumeUp' && s.focus?.action.kind === 'jukebox') jukeboxAction('vol+');
+        if (action === 'jump' && !e.repeat) {
+          e.preventDefault(); // Space never clicks a focused button or scrolls the page
+          triggerJump();
+        }
+        if (action === 'throw' && !e.repeat && !s.travel) startCharge();
         if (action === 'throw' && !e.repeat && !s.travel) {
           if (s.held?.kind === 'penalty') penaltyCharge(true);
           else startCharge();
@@ -564,6 +582,8 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
     const running = anyHeld(b, 'run', k) || padRun.current || touchInput.run;
     const speed = running ? 6.5 : 3.6;
     tickSip();
+    jumpState = stepJump(jumpState, dt);
+    const airborne = jumpState.airborne;
 
     // another view has the camera (camera/rig.ts): you stay where you were standing
     if (rigOwnsCamera()) {
@@ -678,15 +698,15 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       camera.position.z = p.z;
       moving = true;
     }
-    bob.current += moving ? dt * speed * tilt * 2.2 : 0;
+    bob.current += moving && !airborne ? dt * speed * tilt * 2.2 : 0;
     // Head bob and the head tipping back for a sip can be turned off (Settings → Accessibility, motion comfort).
     const comfort = getA11y();
     if (p) {
       camera.position.set(p.x, p.y, p.z);
       p.yaw = yaw;
       p.pitch = pitch;
-    } else camera.position.y = EYE_HEIGHT + (moving && comfort.headBob ? Math.sin(bob.current) * 0.035 : 0);
-    footstepsFollow(bob.current, moving, speed > 5, surfaceAt(floor === ROOF ? 'roof' : floor === 0 ? 'lobby' : 'office', camera.position.x, camera.position.z));
+    } else camera.position.y = EYE_HEIGHT + jumpHeight(jumpState) + (moving && !airborne && comfort.headBob ? Math.sin(bob.current) * 0.035 : 0);
+    footstepsFollow(bob.current, moving && !airborne, speed > 5, surfaceAt(floor === ROOF ? 'roof' : floor === 0 ? 'lobby' : 'office', camera.position.x, camera.position.z));
     camera.rotation.set(pitch + (p?.tilt ?? 0) + (comfort.cameraShake ? sipPose.head : 0), yaw, 0, 'YXZ');
     playerAt.x = camera.position.x;
     playerAt.z = camera.position.z;
