@@ -1,6 +1,7 @@
 // The penalty pitch (#46): the goal, its net, the ball, and the billboard that pages between the live match and the
-// all-time board. Mounted with the city (outside/City.tsx), lobby-only. Pure positions come from parkPitch.ts; the
-// match clock itself is penaltyState.ts, ticked by ParkOpponent.tsx.
+// all-time board. Mounted with the city (outside/City.tsx) on every floor, so the billboard (and the match) show
+// from the office windows too; only the walk itself (ParkOpponent.tsx, which ticks the clock) is lobby-only.
+// Pure positions come from parkPitch.ts.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
@@ -12,7 +13,7 @@ import { useCanvasTexture, useInteractable } from '../interact';
 import { toon } from '../materials';
 import { boxesGeometry, type BoxSpec } from '../shapes';
 import { boardPitch, goalPitch } from './parkPitch';
-import { penaltyFree, penaltyMatch, penaltyView, subscribePenalty } from './penaltyState';
+import { penaltyFree, penaltyMatch, penaltyView, playerRole, subscribePenalty } from './penaltyState';
 
 const POST = 0.1;
 
@@ -50,6 +51,26 @@ function netGeometry() {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
   return geo;
+}
+
+/** Where you're aiming, while it's your kick to take: a small ring in the goal mouth (aim.x is the frame's z offset). */
+function AimMarker() {
+  const ref = useRef<THREE.Mesh>(null);
+  const g = useMemo(goalPitch, []);
+  useFrame(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const m = penaltyMatch();
+    const show = !!m && m.stage === 'live' && m.turn === 'player' && playerRole() === 'shooter';
+    mesh.visible = show;
+    if (show && m) mesh.position.set(g.lineX, m.aim.y, g.z + m.aim.x);
+  });
+  return (
+    <mesh ref={ref} rotation={[0, Math.PI / 2, 0]} visible={false} renderOrder={999}>
+      <ringGeometry args={[0.1, 0.16, 20]} />
+      <meshBasicMaterial color="#ff4d6d" side={THREE.DoubleSide} depthTest={false} depthWrite={false} />
+    </mesh>
+  );
 }
 
 function Goal() {
@@ -233,6 +254,7 @@ export function Pitch() {
     <group>
       <Goal />
       <PenaltyBall />
+      <AimMarker />
       <Billboard />
       <StartSpot />
     </group>

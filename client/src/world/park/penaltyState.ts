@@ -164,11 +164,13 @@ const FRAME = { halfW: GOAL.width / 2, height: GOAL.height };
 /** Metres the aim (or the dive) moves per pixel of mouse movement. */
 const PER_PX = 0.012;
 
-/** Mouse movement while shooting: aims the marker over the goal mouth (frame coordinates, +x right, +y up). */
+/** Mouse movement while shooting: aims the marker over the goal mouth (frame coordinates, +x right, +y up).
+ * Negated: +x here is the shooter's right, but maps to world +z (Pitch.tsx's AimMarker, PenaltyBall), which is
+ * the shooter's left (they face -x, towards the goal) - without this, mouse-right would turn the aim left. */
 export function penaltyAim(dx: number, dy: number, sensitivity = 1) {
   if (!match) return;
   const lim = FRAME.halfW + OVER_AIM;
-  match.aim.x = Math.min(lim, Math.max(-lim, match.aim.x + dx * PER_PX * sensitivity));
+  match.aim.x = Math.min(lim, Math.max(-lim, match.aim.x - dx * PER_PX * sensitivity));
   match.aim.y = Math.min(FRAME.height + OVER_AIM, Math.max(0, match.aim.y - dy * PER_PX * sensitivity));
 }
 
