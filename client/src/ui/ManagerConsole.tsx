@@ -634,7 +634,7 @@ function SettingsTab() {
   const terminal = settings.runtime === 'terminal';
   const defaultCli = terminal ? settings.defaultCli : 'claude';
   return (
-    <div className="tab-grid">
+    <div className="tab-grid settings-grid">
       <div className="card">
         <h3>🧠 Agents</h3>
         {terminal && (
@@ -710,6 +710,26 @@ function SettingsTab() {
           />
         </label>
         <p className="muted small">At most {FLOOR_SEATS}, one per desk. Adding agents past it is refused, by hand or by the CEO.</p>
+        <h3>⌨️ How agents run</h3>
+        <label className="toggle block">
+          <input type="radio" checked={settings.runtime === 'terminal'} onChange={() => set({ runtime: 'terminal' })} />
+          <span>
+            <b>Real terminals</b> (recommended): every agent is its actual coding agent running in its own terminal. Open a desk to watch it live or type into it.
+          </span>
+        </label>
+        <label className="toggle block">
+          <input type="radio" checked={settings.runtime === 'sdk'} onChange={() => set({ runtime: 'sdk' })} />
+          <span>
+            <b>Agent SDK</b>: Claude Code through the Claude Agent SDK, shown as a log of its steps. Claude Code only.
+          </span>
+        </label>
+        <p className="muted small">
+          Agents work like your own coding agents in a terminal, with your skills, MCP servers and settings, and don't stop to ask. The office's workflow (branches, pull requests, QA reporting
+          back) is in their instructions.
+        </p>
+      </div>
+      <NotifySettings />
+      <div className="card">
         <h3>🧠 The CEO</h3>
         <div role="radiogroup" aria-label="Team changes from the CEO">
           <div className="small">
@@ -735,24 +755,8 @@ function SettingsTab() {
         </label>
         <p className="muted small">A review checks team sizes, stuck PRs and floor profiles, and is skipped when nothing changed since the last one. It never files issues: new work only comes from you. The CEO's own model and effort are on the CEO tab.</p>
       </div>
+      <ProfileSettings />
       <div className="card">
-        <h3>⌨️ How agents run</h3>
-        <label className="toggle block">
-          <input type="radio" checked={settings.runtime === 'terminal'} onChange={() => set({ runtime: 'terminal' })} />
-          <span>
-            <b>Real terminals</b> (recommended): every agent is its actual coding agent running in its own terminal. Open a desk to watch it live or type into it.
-          </span>
-        </label>
-        <label className="toggle block">
-          <input type="radio" checked={settings.runtime === 'sdk'} onChange={() => set({ runtime: 'sdk' })} />
-          <span>
-            <b>Agent SDK</b>: Claude Code through the Claude Agent SDK, shown as a log of its steps. Claude Code only.
-          </span>
-        </label>
-        <p className="muted small">
-          Agents work like your own coding agents in a terminal, with your skills, MCP servers and settings, and don't stop to ask. The office's workflow (branches, pull requests, QA reporting
-          back) is in their instructions.
-        </p>
         <h3>🏢 Company</h3>
         <label className="field">
           <span>Your name</span>
@@ -803,11 +807,9 @@ function SettingsTab() {
           Agents' machines: <code>{machinesRoot}</code>
         </div>
       </div>
-      <ProfileSettings />
-      <VoiceSettings />
-      <OutsideSettings />
-      <NotifySettings />
       <ThemeSettings />
+      <OutsideSettings />
+      <VoiceSettings />
     </div>
   );
 }

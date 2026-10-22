@@ -2519,6 +2519,9 @@ input.inline:focus {
   gap: 16px;
   align-items: start;
 }
+.settings-grid {
+  align-items: stretch;
+}
 @media (max-width: 900px) {
   .tab-grid {
     grid-template-columns: 1fr;
