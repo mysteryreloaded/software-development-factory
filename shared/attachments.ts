@@ -237,15 +237,25 @@ export interface AttachmentInfo {
   height?: number;
 }
 
-/** One line of the block appended to the CEO's text, e.g. "- /home/.../photo.png — image/png, 1600×1200, 820 KB". */
-function attachmentLine(path: string, a: AttachmentInfo): string {
+const VIDEO_NOTE: Record<'ceo' | 'agent', string> = {
+  ceo: "you can't watch video; say so if it matters",
+  agent: "you can't watch video; extract frames with ffmpeg if it's installed, or say so",
+};
+
+/** One line of the block appended to the message text, e.g. "- /home/.../photo.png — image/png, 1600×1200, 820 KB". */
+function attachmentLine(path: string, a: AttachmentInfo, who: 'ceo' | 'agent'): string {
   const dims = a.width && a.height ? `, ${a.width}×${a.height}` : '';
-  const note = a.kind === 'video' ? ' — you can\'t watch video; say so if it matters' : '';
+  const note = a.kind === 'video' ? ` — ${VIDEO_NOTE[who]}` : '';
   return `- ${path} — ${a.mime}${dims}, ${humanSize(a.size)}${note}`;
 }
 
-/** The block appended to the CEO's message text so its Read tool knows what files it was sent and where they are. */
-export function attachedBlock(files: { path: string; info: AttachmentInfo }[]): string {
+const BLOCK_HEADER: Record<'ceo' | 'agent', string> = {
+  ceo: 'Attached files (open each with your Read tool before you answer):',
+  agent: "Attached files (open each with your file-reading tool; if your model can't view images, say so):",
+};
+
+/** The block appended to a message's text so the CEO's or an agent's CLI knows what files it was sent and where they are. */
+export function attachedBlock(files: { path: string; info: AttachmentInfo }[], who: 'ceo' | 'agent'): string {
   if (files.length === 0) return '';
-  return ['Attached files (open each with your Read tool before you answer):', ...files.map((f) => attachmentLine(f.path, f.info))].join('\n');
+  return [BLOCK_HEADER[who], ...files.map((f) => attachmentLine(f.path, f.info, who))].join('\n');
 }

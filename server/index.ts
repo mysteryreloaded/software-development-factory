@@ -203,7 +203,7 @@ app.delete('/api/agents/:id', route((req) => swarm.fireAgent(String(req.params.i
 app.post('/api/agents/:id/assign', route((req) => swarm.assign(String(req.params.id), num(req.body.issueNumber), str(req.body.note) || undefined, req.body?.waitForDeps === true)));
 app.post('/api/agents/:id/stop', route((req) => swarm.stopAgent(String(req.params.id))));
 app.post('/api/agents/:id/reset', route((req) => swarm.resetAgent(String(req.params.id))));
-app.post('/api/agents/:id/message', route((req) => swarm.message(String(req.params.id), str(req.body.text))));
+app.post('/api/agents/:id/message', route((req) => swarm.message(String(req.params.id), str(req.body.text), false, Array.isArray(req.body.attachments) ? req.body.attachments.map(String) : [])));
 app.get('/api/agents/:id/prompt', route((req) => swarm.agentPrompt(String(req.params.id))));
 app.get('/api/agents/:id/screen', (req, res) => {
   const shot = swarm.screenshot(String(req.params.id));

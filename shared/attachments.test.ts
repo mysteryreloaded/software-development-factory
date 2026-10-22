@@ -165,17 +165,32 @@ describe('checkAttachment', () => {
 
 describe('attachedBlock', () => {
   it('is empty with no files', () => {
-    expect(attachedBlock([])).toBe('');
+    expect(attachedBlock([], 'ceo')).toBe('');
+    expect(attachedBlock([], 'agent')).toBe('');
   });
 
   it('lists each file with its path, type, dimensions and size', () => {
-    const block = attachedBlock([{ path: '/ceo/attachments/1-photo.png', info: { name: 'photo.png', mime: 'image/png', kind: 'image', size: 240_000, width: 1600, height: 1200 } }]);
+    const block = attachedBlock([{ path: '/ceo/attachments/1-photo.png', info: { name: 'photo.png', mime: 'image/png', kind: 'image', size: 240_000, width: 1600, height: 1200 } }], 'ceo');
     expect(block).toContain('Attached files');
     expect(block).toContain('/ceo/attachments/1-photo.png — image/png, 1600×1200, 234 KB');
   });
 
-  it("notes that video can't be watched", () => {
-    const block = attachedBlock([{ path: '/ceo/attachments/2-clip.mp4', info: { name: 'clip.mp4', mime: 'video/mp4', kind: 'video', size: 1_000_000 } }]);
+  it("notes that video can't be watched (ceo)", () => {
+    const block = attachedBlock([{ path: '/ceo/attachments/2-clip.mp4', info: { name: 'clip.mp4', mime: 'video/mp4', kind: 'video', size: 1_000_000 } }], 'ceo');
     expect(block).toContain("you can't watch video");
+  });
+
+  it('wording for an agent mentions a file-reading tool and ffmpeg for video', () => {
+    const block = attachedBlock(
+      [
+        { path: '/machines/a1/tmp/attachments/1-photo.png', info: { name: 'photo.png', mime: 'image/png', kind: 'image', size: 240_000, width: 1600, height: 1200 } },
+        { path: '/machines/a1/tmp/attachments/2-clip.mp4', info: { name: 'clip.mp4', mime: 'video/mp4', kind: 'video', size: 1_000_000 } },
+      ],
+      'agent',
+    );
+    expect(block).toContain('file-reading tool');
+    expect(block).toContain("if your model can't view images");
+    expect(block).toContain('extract frames with ffmpeg');
+    expect(block).toContain('/machines/a1/tmp/attachments/1-photo.png');
   });
 });
