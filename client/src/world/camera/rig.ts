@@ -285,6 +285,9 @@ function capture(out: Pose) {
 
 /** Leaving first person: remember where you stand, put down what you hold and let go of the mouse. */
 function leaveFirst() {
+  // Always let go of the lock, even on a second tap/middle-click that lands while the rig still owns the camera
+  // from the first (mid-FLY_BACK): otherwise no pointerlockchange fires and the next view keeps the mouse captured.
+  if (document.pointerLockElement) document.exitPointerLock();
   if (rig.owns || !camera) return;
   const look = homeLook();
   rig.home = { x: camera.position.x, z: camera.position.z, yaw: look.yaw, pitch: look.pitch };
@@ -294,7 +297,6 @@ function leaveFirst() {
   const s = useStore.getState();
   if (s.held) s.setHeld(null);
   if (s.focus) s.setFocus(null);
-  if (document.pointerLockElement) document.exitPointerLock();
 }
 
 function startFlight(time: number) {

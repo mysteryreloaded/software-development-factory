@@ -51,34 +51,19 @@ function rideAlong(floor: number, travelling: boolean) {
 
 // ---------- input ----------
 
-/** Middle-click pings where the mouse is (the crosshair while looking around); the ping key, the crosshair on foot. */
-function usePingInput(canvas: HTMLCanvasElement) {
+/** The ping key (X) drops a marker where you aim, on the spot or thing under the crosshair. */
+function usePingInput() {
   useEffect(() => {
-    const ready = () => {
-      const s = useStore.getState();
-      return s.started && !s.overlay && !s.travel && !s.replaying && !photoActive() && !isConfirmOpen();
-    };
-    const onDown = (e: MouseEvent) => {
-      if (e.button !== 1 || !ready()) return;
-      e.preventDefault(); // no autoscroll
-      if (document.pointerLockElement === canvas) pingHere();
-      else {
-        const r = canvas.getBoundingClientRect();
-        pingHere(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1));
-      }
-    };
     const onKey = (e: KeyboardEvent) => {
-      if (!isKey('ping', e.code) || e.repeat || e.ctrlKey || e.metaKey || e.altKey || cameraMode() !== 'first' || !ready()) return;
+      const s = useStore.getState();
+      const ready = s.started && !s.overlay && !s.travel && !s.replaying && !photoActive() && !isConfirmOpen();
+      if (!isKey('ping', e.code) || e.repeat || e.ctrlKey || e.metaKey || e.altKey || cameraMode() !== 'first' || !ready) return;
       if ((e.target as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
       pingHere();
     };
-    canvas.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
-    return () => {
-      canvas.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [canvas]);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 }
 
 // ---------- the scene ----------
@@ -90,9 +75,8 @@ const r3 = (n: number) => Math.round(n * 1000) / 1000;
 export function Presence() {
   const floor = useStore((s) => s.floor);
   const camera = useThree((s) => s.camera);
-  const gl = useThree((s) => s.gl);
   useEffect(() => setFloorHere(floor), [floor]);
-  usePingInput(gl.domElement);
+  usePingInput();
 
   useFrame(() => {
     const s = useStore.getState();
