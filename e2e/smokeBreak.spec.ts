@@ -164,38 +164,58 @@ interface OutsideProbe {
 
 const FREE_STATUSES = new Set(['idle', 'done', 'stopped']);
 
-/** Someone the errand can actually start for right now (errands.ts's `isFree`), and the floor they're on: read
- * straight from the real REST state (no browser needed), since the demo's own agents come and go on their own. */
-async function aFreeAgent(request: import('@playwright/test').APIRequestContext): Promise<{ id: string; floor: number } | null> {
+/** Someone free on `floor` specifically, right now (errands.ts's `isFree`), from the real REST state (no browser
+ * needed, since the demo's own agents come and go on their own): asking anyone on a floor the browser never
+ * loaded would send to someone nobody will ever pick up. */
+async function aFreeAgentOnFloor(request: import('@playwright/test').APIRequestContext, floor: number): Promise<string | null> {
   const s: DemoState = await (await request.get('/api/state')).json();
-  const floors = new Map(s.repos.map((r) => [r.id, r.floor]));
-  const free = s.agents.find((a) => FREE_STATUSES.has(a.status) && floors.has(a.repoId));
-  return free ? { id: free.id, floor: floors.get(free.repoId)! } : null;
+  const repoIds = new Set(s.repos.filter((r) => r.floor === floor).map((r) => r.id));
+  const free = s.agents.find((a) => FREE_STATUSES.has(a.status) && repoIds.has(a.repoId));
+  return free?.id ?? null;
 }
 
-/** A floor with a free agent on it right now, however long that takes to show up. */
+/**
+ * Whichever floor has the most free agents right now: a floor with only a single, momentarily free agent among a
+ * busy team is a bad bet to sit the whole test on.
+ */
 async function floorWithFreeAgent(request: import('@playwright/test').APIRequestContext): Promise<number> {
-  let found: { id: string; floor: number } | null = null;
+  let found: number | null = null;
   await expect
     .poll(
       async () => {
-        found = await aFreeAgent(request);
+        const s: DemoState = await (await request.get('/api/state')).json();
+        const floors = new Map(s.repos.map((r) => [r.id, r.floor]));
+        const counts = new Map<number, number>();
+        for (const a of s.agents) {
+          const floor = floors.get(a.repoId);
+          if (floor != null && FREE_STATUSES.has(a.status)) counts.set(floor, (counts.get(floor) ?? 0) + 1);
+        }
+        found = null;
+        let best = 0;
+        for (const [floor, n] of counts) {
+          if (n > best) {
+            best = n;
+            found = floor;
+          }
+        }
         return found;
       },
       { message: 'a free agent somewhere in the demo', timeout: 90_000, intervals: [1000] },
     )
     .not.toBeNull();
-  return found!.floor;
+  return found!;
 }
 
 /**
- * Keeps offering the smoke errand to whoever's free right now (the real REST state, re-checked every second: the
+ * Keeps offering the smoke errand to whoever's free right now, on this floor (otherwise the browser never sees
+ * them: `aFreeAgentOnFloor` keeps it to this one), re-checked every second against the real REST state (the
  * demo's own agents come and go on their own, and one that's recalled mid-walk never gets there) until an actual
  * seat is occupied, however many of them that takes. `door` is a side channel: whichever (if any) side door this
  * saw open along the way, since by the time someone's seated it's long shut again.
  */
 async function startSmokeAndGetSeated(
   request: import('@playwright/test').APIRequestContext,
+  floor: number,
   people: (fn: 'list' | 'send', ...args: unknown[]) => Promise<unknown>,
   smoke: () => Promise<SmokeProbe>,
   outside: () => Promise<OutsideProbe>,
@@ -213,8 +233,8 @@ async function startSmokeAndGetSeated(
           return who;
         }
         const list = (await people('list')) as { id: string }[];
-        const candidate = (await aFreeAgent(request)) ?? (list[0] ? { id: list[0].id } : null);
-        if (candidate) await people('send', candidate.id, 'smoke');
+        const candidate = (await aFreeAgentOnFloor(request, floor)) ?? list[0]?.id ?? null;
+        if (candidate) await people('send', candidate, 'smoke');
         return null;
       },
       { message: 'an agent seated on the smoke errand', timeout: 9 * 60_000, intervals: [1000] },
@@ -223,12 +243,64 @@ async function startSmokeAndGetSeated(
   return who!;
 }
 
-test('a free agent on a smoke errand (#58): the door opens for them, their seat shows agent:<id>, and leaving mid-break frees it again', async ({ page, request }) => {
+/** The first-run tour (ui/Tutorial.tsx) can sit over the view (and would be what a screenshot caught); turn it off
+ * the way its own "Skip tour" button does (e2e/chatNewline.spec.ts's own helper). */
+async function skipTour(page: import('@playwright/test').Page) {
+  await page.evaluate(() => fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tutorialStep: -1 }) }));
+  await expect(page.locator('.tour')).toBeHidden();
+}
+
+test('a free agent on a smoke errand (#58) runs its full course: the door opens both ways, the ashtray gets a stub, and they come home', async ({ page, request }) => {
   // The demo's own agents come and go on their own, so finding one that stays free long enough to get there is the
-  // slow part (retried every second against the real REST state); once they're seated, the ashtray's stub and
-  // coming home the ordinary way are the same end() a work interruption would call (smokeErrand.test.ts covers
-  // those directly), so this doesn't wait out the full ~2-minute six-puff round trip — only the mid-break leave.
-  test.setTimeout(15 * 60_000);
+  // slow part (retried every second against the real REST state); the roll, the light and all six puffs, about 20 s
+  // apart, are the other one.
+  test.setTimeout(25 * 60_000);
+  const floor = await floorWithFreeAgent(request);
+  const spot: SavedView = { floor, x: -4, z: 6, yaw: 0, pitch: 0 };
+  await startAt(page, spot);
+  await enterOffice(page);
+  await skipTour(page);
+
+  const people = (fn: 'list' | 'send', ...args: unknown[]) =>
+    page.evaluate(([f, a]) => (window as unknown as { __swarmPeople: Record<string, (...x: unknown[]) => unknown> }).__swarmPeople[f](...(a as unknown[])), [fn, args] as const);
+  const smoke = () => page.evaluate(() => (window as unknown as { __swarmSmokeBreak: SmokeProbe }).__swarmSmokeBreak);
+  const outside = () => page.evaluate(() => (window as unknown as { __swarmOutside: OutsideProbe }).__swarmOutside);
+
+  const door = { open: 0 };
+  const who = await startSmokeAndGetSeated(request, floor, people, smoke, outside, door);
+
+  // on the way there, one of the side doors opened for them (they're not the player); their seat shows 'agent:<id>'
+  expect(door.open).toBeGreaterThan(0.5);
+  expect((await smoke()).nooks.flatMap((n) => n.seats)).toContain(`agent:${who}`);
+
+  // mid-puff, for the PR: follow them so the shot shows the agent and the joint, not just the player's own desk
+  await page.evaluate((id) => (window as unknown as { __swarmCamera: { follow(id: string): void } }).__swarmCamera.follow(id), who);
+  await page.waitForTimeout((NPC_SMOKE.roll + NPC_SMOKE.light + 1) * 1000);
+  await page.screenshot({ path: test.info().outputPath(`smoke-agent-${who}-puff.png`) });
+
+  // the rest of the break, for real: the ashtray gets a stub (the moment they set off home, well before they're
+  // anywhere near the door), then the door opens again on the way back (it had long shut while they sat), and
+  // they're home, seated, off the errand
+  const buttsBefore = Math.max(...(await smoke()).nooks.map((n) => n.butts));
+  await expect
+    .poll(async () => Math.max(...(await smoke()).nooks.map((n) => n.butts)), {
+      message: 'a stub in an ashtray',
+      timeout: NPC_SMOKE.puffs * (NPC_SMOKE.puffGesture + NPC_SMOKE.puffGap) * 1000 + 6 * 60_000,
+      intervals: [1000],
+    })
+    .toBeGreaterThan(buttsBefore);
+  await expect
+    .poll(async () => Math.max((await outside()).doors.west.open, (await outside()).doors.east.open), { message: 'a side door opens again on the way back', timeout: 60_000, intervals: [250] })
+    .toBeGreaterThan(0.5);
+  await expect
+    .poll(async () => ((await people('list')) as { id: string; stage: string; errand: unknown }[]).find((p) => p.id === who), { timeout: 60_000, intervals: [250] })
+    .toMatchObject({ stage: 'seated', errand: null });
+  // nobody's left holding their seat
+  expect((await smoke()).nooks.flatMap((n) => n.seats)).not.toContain(`agent:${who}`);
+});
+
+test('leaving the floor mid-break (#58) frees the seat: it never stays agent:<id> once nobody can come back to stub it out', async ({ page, request }) => {
+  test.setTimeout(10 * 60_000);
   const floor = await floorWithFreeAgent(request);
   const other = floor === 1 ? 2 : 1; // any other office floor, just to leave this one
   const spot: SavedView = { floor, x: -4, z: 6, yaw: 0, pitch: 0 };
@@ -249,16 +321,7 @@ test('a free agent on a smoke errand (#58): the door opens for them, their seat 
     await expect(page.locator('.fade-label')).toHaveCount(0);
   };
 
-  const door = { open: 0 };
-  const who = await startSmokeAndGetSeated(request, people, smoke, outside, door);
-
-  // on the way there, one of the side doors opened for them (they're not the player); their seat shows 'agent:<id>'
-  expect(door.open).toBeGreaterThan(0.5);
-  expect((await smoke()).nooks.flatMap((n) => n.seats)).toContain(`agent:${who}`);
-
-  // mid-puff, for the PR: the roll and the light are done by about NPC_SMOKE.roll + NPC_SMOKE.light seconds in
-  await page.waitForTimeout((NPC_SMOKE.roll + NPC_SMOKE.light + 1) * 1000);
-  await page.screenshot({ path: test.info().outputPath(`smoke-agent-${who}-puff.png`) });
+  const who = await startSmokeAndGetSeated(request, floor, people, smoke, outside, { open: 0 });
 
   // away to another floor mid-break, then straight back: the seat is free again, not left stuck as agent:<id>
   await goToFloor(other);

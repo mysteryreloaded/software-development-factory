@@ -4,22 +4,25 @@ import type { NookHandle, Stage } from './smokeBreak';
 // hiringState.ts (imported by smokeErrand.ts) reaches into the store, which touches window at module load.
 vi.stubGlobal('window', { addEventListener: () => undefined });
 const { errandNamed } = await import('./errands');
-const { handJoint, setErrand } = await import('./people');
+const { newBodyState } = await import('./body');
+const { doorWalkers } = await import('./hiringState');
+const { DOOR_SENSOR, HALF_W } = await import('./layout');
+const { handJoint, setErrand, trackBody } = await import('./people');
 const { agentAtSeat, NPC_SMOKE, registerNook, setAgentSeat } = await import('./smokeBreak');
-await import('./smokeErrand');
+const { tickSmokeDoorWalkers } = await import('./smokeErrand');
 const { findPath, standable, walkways } = await import('./walkways');
 
 const smoke = errandNamed('smoke')!;
 
 /** A bare NookHandle, with a controllable "you" (player) seat; agents' own seats come from agentAtSeat, as the real
- * SmokeNook's report() mixes in. */
-function fakeNook(id: 'office-west' | 'office-east', youSeat: 0 | 1 | null = null): NookHandle {
+ * SmokeNook's report() mixes in. `stubs` counts calls to stub(), for tests that care whether the ashtray got one. */
+function fakeNook(id: 'office-west' | 'office-east', youSeat: 0 | 1 | null = null, stubs: { count: number } = { count: 0 }): NookHandle {
   return {
     focusAt: () => null,
     sit: () => {},
     press: () => {},
     label: () => '',
-    stub: () => {},
+    stub: () => void stubs.count++,
     report: () => ({
       seats: [0, 1].map((i): 'free' | 'you' | `agent:${string}` => {
         if (i === youSeat) return 'you';
@@ -78,7 +81,8 @@ describe('the smoke errand', () => {
   });
 
   it('sitting down claims the seat and rolls one; the ashtray gets a stub however it ends', () => {
-    const unregister = registerNook('office-west', fakeNook('office-west'));
+    const stubs = { count: 0 };
+    const unregister = registerNook('office-west', fakeNook('office-west', null, stubs));
     try {
       expect(smoke.where!('kai')).toContain('smoke-office-west-0');
       // sat down at seat 0: ErrandDirector.tsx's report() would have published this as they arrived
@@ -99,20 +103,22 @@ describe('the smoke errand', () => {
       smoke.end!('kai', 'cut'); // work came in, or they finished: either way, they stub it and the seat's free again
       expect(agentAtSeat('office-west', 0)).toBeNull();
       expect(handJoint('kai')).toBeNull();
+      expect(stubs.count).toBe(1);
       setErrand('kai', null);
     } finally {
       unregister();
     }
   });
 
-  it('the player sitting down mid-walk, before the cue fires, cancels the sit: no seat claimed', () => {
+  it('the player sitting down mid-walk, before the cue fires, cancels the sit: no seat claimed, and no stub for a seat they never had', () => {
     let youSeat: 0 | 1 | null = null;
+    const stubs = { count: 0 };
     const unregister = registerNook('office-west', {
       focusAt: () => null,
       sit: () => {},
       press: () => {},
       label: () => '',
-      stub: () => {},
+      stub: () => void stubs.count++,
       report: () => ({
         seats: [0, 1].map((i): 'free' | 'you' | `agent:${string}` => (i === youSeat ? 'you' : 'free')) as ['free' | 'you' | `agent:${string}`, 'free' | 'you' | `agent:${string}`],
         butts: 0,
@@ -126,8 +132,48 @@ describe('the smoke errand', () => {
       expect(smoke.cue!('kai', 'sit')).toBe(false);
       expect(agentAtSeat('office-west', 0)).toBeNull();
       expect(handJoint('kai')).toBeNull();
+      smoke.end!('kai', 'cut'); // called back before ever sitting: nothing to stub
+      expect(stubs.count).toBe(0);
       setErrand('kai', null);
     } finally {
+      unregister();
+    }
+  });
+
+  it('the door stays open on the way back, not the moment they set off, until their body is actually indoors', () => {
+    const unregister = registerNook('office-west', fakeNook('office-west'));
+    const untrack = trackBody('kai', { ...newBodyState(), x: HALF_W - 0.5, z: 0 }); // out past the balcony door
+    try {
+      smoke.claim!('kai');
+      expect(doorWalkers.has('kai')).toBe(true);
+      smoke.end!('kai', 'cut'); // setting off home
+      expect(doorWalkers.has('kai')).toBe(true); // still not indoors: the door stays open
+
+      tickSmokeDoorWalkers();
+      expect(doorWalkers.has('kai')).toBe(true); // hasn't moved yet
+
+      trackBody('kai', { ...newBodyState(), x: HALF_W - DOOR_SENSOR.across - 2, z: 0 }); // well clear of the door now
+      tickSmokeDoorWalkers();
+      expect(doorWalkers.has('kai')).toBe(false);
+    } finally {
+      untrack();
+      unregister();
+    }
+  });
+
+  it("discard shuts the door on them right away (leaving the floor, or they're gone): nothing is left to tick them home", () => {
+    const unregister = registerNook('office-west', fakeNook('office-west'));
+    const untrack = trackBody('kai', { ...newBodyState(), x: HALF_W - 0.5, z: 0 });
+    try {
+      smoke.claim!('kai');
+      smoke.end!('kai', 'cut');
+      expect(doorWalkers.has('kai')).toBe(true);
+      smoke.discard!('kai');
+      expect(doorWalkers.has('kai')).toBe(false);
+      tickSmokeDoorWalkers(); // nothing left to do: they're not tracked for it any more
+      expect(doorWalkers.has('kai')).toBe(false);
+    } finally {
+      untrack();
       unregister();
     }
   });

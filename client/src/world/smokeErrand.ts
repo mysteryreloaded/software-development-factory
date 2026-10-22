@@ -6,7 +6,8 @@
 import type { Gesture } from './body';
 import { registerErrand, isFree, type ErrandStep } from './errands';
 import { doorWalkers } from './hiringState';
-import { errandOf, handJoint, setHandJoint } from './people';
+import { DOOR_SENSOR, HALF_W } from './layout';
+import { bodyState, errandOf, handJoint, setHandJoint } from './people';
 import { NPC_SMOKE, nookStub, setAgentSeat, smokeNookReports, type NookId } from './smokeBreak';
 
 /** Nook and seat a smoke-break spot id (`smoke-<nookId>-<0|1>`, walkways.ts) names. */
@@ -34,6 +35,22 @@ const steps: ErrandStep[] = [
 
 /** Who (of ours) is seated where, so `end` can let go of the seat and the ashtray gets its stub. */
 const seated = new Map<string, { nook: NookId; seat: 0 | 1 }>();
+
+/** Walking home from the balcony (end() has already run): the side door stays open for them (hiringState.ts's
+ * doorWalkers) until they're actually back inside, not shut on them the moment they set off. */
+const returning = new Set<string>();
+
+/** Every frame, while anyone's walking home from a smoke break: lets the door close behind them once they're
+ * well clear of it (or gone/seated: no body at all). Call once a frame (ErrandDirector.tsx); cheap when empty. */
+export function tickSmokeDoorWalkers() {
+  for (const id of returning) {
+    const b = bodyState(id);
+    if (!b || Math.abs(b.x) < HALF_W - DOOR_SENSOR.across) {
+      returning.delete(id);
+      doorWalkers.delete(id);
+    }
+  }
+}
 
 registerErrand({
   name: 'smoke',
@@ -78,6 +95,13 @@ registerErrand({
       nookStub(info.nook); // however it ends, what they'd rolled is stubbed out
     }
     setHandJoint(agentId, null);
+    // the walk home is still ahead of them (or they never left the desk, which tickSmokeDoorWalkers sees as
+    // "already indoors" on the very next frame): the door stays open until they're actually back inside
+    returning.add(agentId);
+  },
+  discard(agentId) {
+    // the floor's being left behind (or they're gone): nothing will tick them home, so the door shuts right now
+    returning.delete(agentId);
     doorWalkers.delete(agentId);
   },
 });
