@@ -193,7 +193,8 @@ export interface PenaltyBoard {
 
 /** A shoot-out that just finished, ready for the board: both sides' names, the winner, the kicks, and when. */
 export interface PenaltyMatch {
-  player: { name: string };
+  /** `id` defaults to PENALTY_PLAYER (the manager, #46); a visitor match (#47) gives its own (visitorId). */
+  player: { id?: string; name: string };
   opponent: { id: string; name: string };
   winner: Side;
   kicks: readonly PenaltyKick[];
@@ -212,7 +213,7 @@ export function rankPenaltyBoard(rows: readonly PenaltyRow[]): PenaltyRow[] {
 export function recordShootout(board: PenaltyBoard, match: PenaltyMatch, keep = PENALTY_KEEP): PenaltyBoard {
   const rows = board.rows.map((r) => ({ ...r }));
   const sides: { id: string; name: string; side: Side }[] = [
-    { id: PENALTY_PLAYER, name: match.player.name, side: 'player' },
+    { id: match.player.id ?? PENALTY_PLAYER, name: match.player.name, side: 'player' },
     { id: match.opponent.id, name: match.opponent.name, side: 'opponent' },
   ];
   let hardest = board.hardest;
@@ -229,4 +230,53 @@ export function recordShootout(board: PenaltyBoard, match: PenaltyMatch, keep = 
   }
   const kept = rows.length > keep ? [...rows].sort((a, b) => b.lastAt - a.lastAt).slice(0, keep) : rows;
   return { rows: rankPenaltyBoard(kept), hardest };
+}
+
+// ---------- visitor matches (#47): browser -> server messages, refereed by server/penaltyMatch.ts ----------
+
+/** The board id a visitor plays under: 'player' for the manager (any case), else 'v:' + their lower-cased name. */
+export const visitorId = (name: string, managerName: string) => (name.trim().toLowerCase() === managerName.trim().toLowerCase() ? PENALTY_PLAYER : `v:${name.trim().toLowerCase()}`);
+
+/** How far either side of the posts (and above the bar) a shot or dive may aim; beyond this, reject the message. */
+const AIM_MARGIN = 2;
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
+export type PenaltyMessage =
+  | { type: 'pk-join' }
+  | { type: 'pk-shot'; x: number; y: number; power: number }
+  | { type: 'pk-dive'; x: number; y: number }
+  | { type: 'pk-shuffle'; x: number }
+  | { type: 'pk-leave' };
+
+/** A pk-* message from a browser on /ws (at most 1024 characters), validated and clamped; null for anything else. */
+export function parsePenaltyMessage(raw: unknown): PenaltyMessage | null {
+  let m: unknown = raw;
+  if (typeof raw === 'string') {
+    if (raw.length > 1024) return null;
+    try {
+      m = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (!m || typeof m !== 'object') return null;
+  const r = m as Record<string, unknown>;
+  const hw = GOAL.width / 2 + AIM_MARGIN;
+  switch (r.type) {
+    case 'pk-join':
+      return { type: 'pk-join' };
+    case 'pk-shot':
+      if (!finite(r.x) || !finite(r.y) || !finite(r.power)) return null;
+      return { type: 'pk-shot', x: clamp(r.x, -hw, hw), y: clamp(r.y, -1, GOAL.height + AIM_MARGIN), power: clamp(r.power, 0, 1) };
+    case 'pk-dive':
+      if (!finite(r.x) || !finite(r.y)) return null;
+      return { type: 'pk-dive', x: clamp(r.x, -hw, hw), y: clamp(r.y, -1, GOAL.height + AIM_MARGIN) };
+    case 'pk-shuffle':
+      return finite(r.x) ? { type: 'pk-shuffle', x: clamp(r.x, -hw, hw) } : null;
+    case 'pk-leave':
+      return { type: 'pk-leave' };
+    default:
+      return null;
+  }
 }

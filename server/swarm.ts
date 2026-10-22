@@ -58,7 +58,8 @@ import { attachedBlock, MAX_FILES } from '../shared/attachments.ts';
 import { MESSAGE_MAX, messageProblem } from '../shared/message.ts';
 import { achievementDef, type ProgressView } from '../shared/progress.ts';
 import { parsePongResult, PONG_PLAYER, recordGame } from '../shared/pong.ts';
-import { parsePenaltyResult, recordShootout } from '../shared/penalty.ts';
+import { parsePenaltyResult, recordShootout, visitorId } from '../shared/penalty.ts';
+import type { MatchResult } from './penaltyMatch.ts';
 import { effectiveModel } from '../shared/models.ts';
 import { DEFAULT_WEATHER, DEFAULT_WORLD_EVENTS, weatherSettings, worldEventSettings } from '../shared/outside.ts';
 import { DEFAULT_THEME_SETTINGS, dueGreeting, themeSettings } from '../shared/themes.ts';
@@ -4813,6 +4814,25 @@ export class Swarm {
     this.broadcast({ type: 'penalty', board });
     this.save();
     return board;
+  }
+
+  /**
+   * A visitor-vs-visitor match in the park just finished (server/penaltyMatch.ts, server/presence.ts): onto the
+   * office-wide board it goes too, under each visitor's own id (shared/penalty.ts visitorId), server-side only
+   * so no browser can fake a visitor win through POST /api/penalty.
+   */
+  recordVisitorPenalty(result: MatchResult) {
+    const managerName = this.state.settings.managerName.trim() || 'Manager';
+    const board = recordShootout(this.state.penalty, {
+      player: { id: visitorId(result.player.name, managerName), name: result.player.name },
+      opponent: { id: visitorId(result.opponent.name, managerName), name: result.opponent.name },
+      winner: result.winner,
+      kicks: result.kicks,
+      at: Date.now(),
+    });
+    this.state.penalty = board;
+    this.broadcast({ type: 'penalty', board });
+    this.save();
   }
 
   // ---------- team changes ----------

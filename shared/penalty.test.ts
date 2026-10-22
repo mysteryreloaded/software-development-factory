@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flightMsOf, GOAL, kickOutcome, kmhOf, parsePenaltyResult, recordShootout, shootoutState, type Kick, type PenaltyBoard } from './penalty.ts';
+import { flightMsOf, GOAL, kickOutcome, kmhOf, parsePenaltyMessage, parsePenaltyResult, recordShootout, shootoutState, visitorId, type Kick, type PenaltyBoard } from './penalty.ts';
 
 describe('kickOutcome', () => {
   it('is a goal when the keeper never gets close', () => {
@@ -155,5 +155,36 @@ describe('recordShootout', () => {
       at: 2000,
     });
     expect(twice.hardest).toMatchObject({ id: 'agent-1', kmh: 120 });
+  });
+});
+
+describe('visitorId', () => {
+  it("is 'player' for the manager, any case", () => {
+    expect(visitorId('Jordan', 'jordan')).toBe('player');
+    expect(visitorId('jordan', 'Jordan')).toBe('player');
+  });
+
+  it('is v: + the lower-cased name for anyone else', () => {
+    expect(visitorId('Ada', 'Jordan')).toBe('v:ada');
+  });
+});
+
+describe('parsePenaltyMessage', () => {
+  it('parses each pk-* message, clamping shot/dive/shuffle coordinates', () => {
+    expect(parsePenaltyMessage('{"type":"pk-join"}')).toEqual({ type: 'pk-join' });
+    expect(parsePenaltyMessage('{"type":"pk-leave"}')).toEqual({ type: 'pk-leave' });
+    expect(parsePenaltyMessage({ type: 'pk-shot', x: 1, y: 1, power: 0.5 })).toEqual({ type: 'pk-shot', x: 1, y: 1, power: 0.5 });
+    expect(parsePenaltyMessage({ type: 'pk-shot', x: 1000, y: -1000, power: 5 })).toEqual({ type: 'pk-shot', x: GOAL.width / 2 + 2, y: -1, power: 1 });
+    expect(parsePenaltyMessage({ type: 'pk-dive', x: 1, y: 1 })).toEqual({ type: 'pk-dive', x: 1, y: 1 });
+    expect(parsePenaltyMessage({ type: 'pk-shuffle', x: 0.4 })).toEqual({ type: 'pk-shuffle', x: 0.4 });
+  });
+
+  it('rejects malformed, oversized or unknown messages', () => {
+    expect(parsePenaltyMessage('not json')).toBeNull();
+    expect(parsePenaltyMessage('x'.repeat(1025))).toBeNull();
+    expect(parsePenaltyMessage({ type: 'pk-shot', x: 1, y: 1 })).toBeNull();
+    expect(parsePenaltyMessage({ type: 'pk-dive', x: 'left', y: 1 })).toBeNull();
+    expect(parsePenaltyMessage({ type: 'nope' })).toBeNull();
+    expect(parsePenaltyMessage(null)).toBeNull();
   });
 });

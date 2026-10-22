@@ -2,11 +2,20 @@
 // whose kick it is, the live aim/charge/dive while it's being taken, and window.__swarmPenalty. ParkOpponent.tsx
 // ticks it once a frame and walks the opponent; Player.tsx reads it to steer the mouse and keys while you're playing;
 // ui/PenaltyHud.tsx reads it to show the score. The outcome itself (shared/penalty.ts) is pure; this is the clock.
+//
+// #47: a second visitor can take an agent's place. `match.visitor` marks a server-refereed match: this browser is
+// always local side 'player', the other visitor always 'opponent' (`visitor.mySide` is which Side the server calls
+// *this* browser, for translating its turn/pk-state). The shooter's own strike and the keeper's dive go to the
+// server (pk-shot/pk-dive) instead of resolving locally; applyPkKick plays the server's outcome exactly like a local
+// strike() would, so the rest of the clock (tickPenalty, Pitch.tsx, PenaltyHud.tsx) needs no further changes.
 
 import { api } from '../../api';
 import { useStore } from '../../store';
+import { sendWs } from '../../net';
+import type { ServerEvent } from '../../../../shared/types';
 import { flightMsOf, GOAL, kickOutcome, kmhOf, shootoutState, type Dive, type KickOutcome, type PenaltyKick, type Side } from '../../../../shared/penalty';
 import { isFree } from '../errands';
+import { myVisitorId } from '../presence/presenceState';
 import { aiKeeperDive, aiShooterShot } from './penaltyAi';
 import { goalPitch } from './parkPitch';
 
@@ -46,7 +55,12 @@ export interface Match {
   diveCommitted: boolean;
   diveAt: number | null; // performance.now() the keeper committed, while strikeAt (this kick's) is still unknown
   aiAt: number | null; // performance.now() the AI shooter will strike
+  /** A server-refereed match against another visitor (#47), instead of the AI; null for an agent match. */
+  visitor: { mySide: Side } | null;
 }
+
+/** The server's Side (shared/penalty.ts) translated to this browser's own convention: always 'player' for itself. */
+const localSide = (serverSide: Side, mySide: Side): Side => (serverSide === mySide ? 'player' : 'opponent');
 
 let match: Match | null = null;
 let seq = 1;
@@ -117,6 +131,7 @@ export function penaltyOpponentArrived() {
 /** Starts the match record itself, for `opponentId`; a building block for requestPenaltyMatch and the probe. */
 export function startPenaltyMatch(opponentId: string, opponentName: string): Match | null {
   if (match) return null;
+  ensureHeldWatch();
   match = {
     id: seq++,
     opponentId,
@@ -139,6 +154,7 @@ export function startPenaltyMatch(opponentId: string, opponentName: string): Mat
     diveCommitted: false,
     diveAt: null,
     aiAt: null,
+    visitor: null,
   };
   penaltyChanged();
   return match;
@@ -152,11 +168,101 @@ export function abandonPenaltyMatch() {
   penaltyChanged();
 }
 
+// ---------- visitor matches (#47): refereed by server/penaltyMatch.ts, relayed by server/presence.ts ----------
+
+/** Starts a server-refereed match against another visitor: `turn` is already translated to this browser's own side. */
+function startVisitorMatch(otherId: string, otherName: string, mySide: Side, turn: Side) {
+  ensureHeldWatch();
+  match = {
+    id: seq++,
+    opponentId: otherId,
+    opponentName: otherName,
+    turn,
+    stage: 'setup',
+    since: performance.now(),
+    kicks: [],
+    shot: null,
+    dive: null,
+    strikeAt: null,
+    outcome: null,
+    winner: null,
+    aim: { x: 0, y: GOAL.height * 0.45 },
+    power: 0,
+    charging: false,
+    chargeAt: 0,
+    keeperX: 0,
+    keeperY: GOAL.height * 0.4,
+    diveCommitted: false,
+    diveAt: null,
+    aiAt: null,
+    visitor: { mySide },
+  };
+  useStore.getState().setHeld({ kind: 'penalty', id: 'match' });
+  penaltyChanged();
+}
+
+/** E on the take-over hint (Pitch.tsx): joins the park's one visitor match (the second joiner starts it live). */
+export function requestPenaltyTakeover() {
+  if (match) return;
+  sendWs({ type: 'pk-join' });
+}
+
+/** pk-state (store.ts apply): the park's match changed. */
+export function applyPkState(ev: Extract<ServerEvent, { type: 'pk-state' }>) {
+  const myId = myVisitorId();
+  if (!myId) return;
+  if (ev.phase === 'live') {
+    if (match && match.visitor) return; // already in it: only pk-kick moves it on from here
+    // Playing it, or just watching from floor 0 (#47's "others watch"): a bystander gets the same match too, so
+    // the billboard and the ball show it; mySide is then arbitrary (nobody ever shoots or dives from here).
+    const mine = ev.players.find((p) => p.id === myId);
+    const mySide: Side = mine?.side ?? 'player';
+    const playerSide = ev.players.find((p) => p.side === 'player');
+    const opponentSide = ev.players.find((p) => p.side === 'opponent');
+    if (!playerSide || !opponentSide) return;
+    const other = mySide === 'player' ? opponentSide : playerSide;
+    if (match) abandonPenaltyMatch(); // taking over from (or walking in on) a local agent match: no result for it
+    startVisitorMatch(other.id, other.name, mySide, localSide(ev.turn ?? mySide, mySide));
+    return;
+  }
+  if (ev.phase === 'waiting') {
+    // someone else wants to play: if that's taking over from the agent match this browser is mid-way through,
+    // answer with our own pk-join, so the server's second joiner is us (ParkOpponent.tsx walks the agent home once
+    // abandonPenaltyMatch() below runs, same as #46's own "an agent called back to work" abandon).
+    const waiting = ev.players[0];
+    if (match && !match.visitor && waiting && waiting.id !== myId) sendWs({ type: 'pk-join' });
+    return;
+  }
+  if (ev.phase === 'empty' && match?.visitor && match.stage !== 'over') abandonPenaltyMatch(); // forfeited: no result
+}
+
+/** pk-kick (store.ts apply): a kick resolved, the same way for every browser on floor 0. Only this browser's own
+ * ongoing visitor match animates it; tickPenalty() (unchanged) carries it through flight to the next kick or over. */
+export function applyPkKick(ev: Extract<ServerEvent, { type: 'pk-kick' }>) {
+  const m = match;
+  if (!m || !m.visitor || m.stage !== 'live') return;
+  m.shot = ev.shot;
+  m.dive = ev.dive;
+  m.outcome = { result: ev.result, kmh: ev.kmh, flightMs: flightMsOf(ev.kmh) };
+  m.strikeAt = performance.now();
+  m.charging = false;
+  m.stage = 'flight';
+  m.since = performance.now();
+  penaltyChanged();
+}
+
 // G, Esc, a panel opening, or the mouse being freed some other way: no result either (like pongState.ts's own
-// held-paddle subscription).
-useStore.subscribe((s, prev) => {
-  if (prev.held?.kind === 'penalty' && s.held?.kind !== 'penalty') abandonPenaltyMatch();
-});
+// held-paddle subscription). Subscribed lazily, the first time a match actually starts: store.ts imports this
+// module (to apply pk-state/pk-kick, #47), so subscribing at the top level here would run while store.ts is
+// still mid-evaluation, before its own `useStore` export exists.
+let heldWatchStarted = false;
+function ensureHeldWatch() {
+  if (heldWatchStarted) return;
+  heldWatchStarted = true;
+  useStore.subscribe((s, prev) => {
+    if (prev.held?.kind === 'penalty' && s.held?.kind !== 'penalty') abandonPenaltyMatch();
+  });
+}
 
 // ---------- the player's side ----------
 
@@ -183,10 +289,21 @@ export function penaltyAimDive(dx: number, dy: number, sensitivity = 1) {
   penaltyShuffle(dx * PER_PX * sensitivity);
 }
 
+/** At most 10/s (shared/penalty.ts's protocol, matched server-side too, server/penaltyMatch.ts SHUFFLE_GAP_MS). */
+const SHUFFLE_SEND_MS = 100;
+let lastShuffleSentAt = 0;
+
 /** A/D while keeping: shuffles along the line. */
 export function penaltyShuffle(dx: number) {
   if (!match || match.diveCommitted) return;
   match.keeperX = Math.min(FRAME.halfW + 0.4, Math.max(-(FRAME.halfW + 0.4), match.keeperX + dx));
+  if (match.visitor && match.turn === 'opponent') {
+    const now = performance.now();
+    if (now - lastShuffleSentAt >= SHUFFLE_SEND_MS) {
+      lastShuffleSentAt = now;
+      sendWs({ type: 'pk-shuffle', x: match.keeperX });
+    }
+  }
 }
 
 /** Holding the throw key or the mouse button while shooting: charges the power. */
@@ -198,7 +315,8 @@ export function penaltyCharge(on: boolean) {
     penaltyChanged();
   } else if (!on && match.charging) {
     match.charging = false;
-    strike(match.aim.x, match.aim.y, match.power);
+    if (match.visitor) sendWs({ type: 'pk-shot', x: match.aim.x, y: match.aim.y, power: match.power }); // applyPkKick plays it once the server resolves it
+    else strike(match.aim.x, match.aim.y, match.power);
   }
 }
 
@@ -210,6 +328,7 @@ export function penaltyCommitDive() {
   match.diveCommitted = true;
   match.diveAt = performance.now();
   match.dive = { x: match.keeperX, y: match.keeperY, at: match.strikeAt === null ? -1 : match.diveAt - match.strikeAt };
+  if (match.visitor) sendWs({ type: 'pk-dive', x: match.keeperX, y: match.keeperY }); // the server times its arrival; this local `at` is only for the camera
 }
 
 function strike(x: number, y: number, power: number) {
@@ -236,7 +355,8 @@ export function tickPenalty() {
   const m = match;
   if (!m) return;
   // Work calls them back (a status patch from the office): the match leaves no result, however far it got.
-  if (m.stage !== 'over' && !isFree(useStore.getState().agents[m.opponentId]?.status ?? 'idle')) {
+  // A visitor match's "opponent" is another browser, not an agent: forfeits come from the server instead (#47).
+  if (!m.visitor && m.stage !== 'over' && !isFree(useStore.getState().agents[m.opponentId]?.status ?? 'idle')) {
     abandonPenaltyMatch();
     return;
   }
@@ -260,7 +380,9 @@ export function tickPenalty() {
       m.diveAt = null;
       m.strikeAt = null;
       m.outcome = null;
-      if (m.turn === 'opponent') {
+      if (m.visitor) {
+        m.aiAt = null; // the real shooter (local or the other browser) strikes in their own time; applyPkKick plays it
+      } else if (m.turn === 'opponent') {
         m.shot = forcedShot ?? aiShooterShot(Math.random);
         m.aiAt = now + WINDUP_MS[0] + Math.random() * (WINDUP_MS[1] - WINDUP_MS[0]);
       } else {
@@ -271,7 +393,7 @@ export function tickPenalty() {
     case 'live':
       if (m.turn === 'player') {
         if (m.charging) m.power = Math.min(1, (now - m.chargeAt) / CHARGE_MS);
-      } else if (m.aiAt !== null && now >= m.aiAt && m.shot) {
+      } else if (!m.visitor && m.aiAt !== null && now >= m.aiAt && m.shot) {
         strike(m.shot.x, m.shot.y, m.shot.power);
       }
       return;
@@ -279,7 +401,8 @@ export function tickPenalty() {
       if (!m.outcome || !m.strikeAt || !m.shot) return;
       if (now - m.strikeAt < m.outcome.flightMs) return;
       // the player keeping may have moved (or finally committed) since the strike: the save is judged on arrival
-      if (m.turn === 'opponent') m.outcome = kickOutcome(m.shot, m.dive);
+      // (a visitor match's outcome is the server's own, from applyPkKick: never recomputed here)
+      if (!m.visitor && m.turn === 'opponent') m.outcome = kickOutcome(m.shot, m.dive);
       m.kicks.push({ side: m.turn, scored: m.outcome.result === 'goal', kmh: m.outcome.kmh });
       m.stage = 'result';
       m.since = now;
@@ -293,7 +416,7 @@ export function tickPenalty() {
         m.winner = state.winner;
         m.stage = 'over';
         m.since = now;
-        report(m);
+        if (!m.visitor) report(m); // a visitor match is recorded server-side (server/penaltyMatch.ts), already done
       } else {
         m.turn = m.turn === 'player' ? 'opponent' : 'player';
         m.stage = 'setup';

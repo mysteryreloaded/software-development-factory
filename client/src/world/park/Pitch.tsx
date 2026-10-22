@@ -6,16 +6,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import type { Focus } from '../../store';
 import { useStore } from '../../store';
 import { GOAL } from '../../../../shared/penalty';
 import { roundRect, SANS } from '../draw';
 import { useCanvasTexture, useInteractable } from '../interact';
 import { toon } from '../materials';
+import { drawnVisitors, poseNow, remoteOf, type DrawnPose } from '../presence/presenceState';
 import { boxesGeometry, type BoxSpec } from '../shapes';
 import { boardPitch, goalPitch } from './parkPitch';
 import { penaltyFree, penaltyMatch, penaltyView, playerRole, subscribePenalty } from './penaltyState';
 
 const POST = 0.1;
+/** Another visitor within this many metres of the spot (#47): the take-over hint shows instead of "Play penalties". */
+const TAKEOVER_RANGE = 6;
 
 function goalGeometry() {
   const g = goalPitch();
@@ -233,12 +237,42 @@ function Billboard() {
   );
 }
 
-/** Where you stand to start a shoot-out (E Play penalties); hidden once a match is on. */
+/** Where you stand to start a shoot-out (E Play penalties), or take an agent's place (#47): while nobody's playing,
+ * any other visitor standing near the spot means you'd be taking over for them instead of starting your own match
+ * against an agent (their own browser answers with its own pk-join, as soon as the server sees this one). */
 function StartSpot() {
   const g = useMemo(goalPitch, []);
   const [free, setFree] = useState(penaltyFree());
   useEffect(() => subscribePenalty(() => setFree(penaltyFree())), []);
-  const ref = useInteractable<THREE.Mesh>(free ? { id: 'penalty', label: 'Play penalties', action: { kind: 'penalty' } } : null, 3.2);
+  const [takeover, setTakeover] = useState<{ id: string; name: string } | null>(null);
+  const since = useRef(0);
+  useFrame((_, dt) => {
+    if (!free) {
+      if (takeover) setTakeover(null);
+      return;
+    }
+    since.current += dt;
+    if (since.current < 0.2) return;
+    since.current = 0;
+    const now = performance.now();
+    const p: DrawnPose = { x: 0, z: 0, h: 0, p: 0 };
+    let found: { id: string; name: string } | null = null;
+    for (const id of drawnVisitors()) {
+      const r = remoteOf(id);
+      const at = r && poseNow(r, now, p);
+      if (at && Math.hypot(at.x - g.spotX, at.z - g.z) <= TAKEOVER_RANGE) {
+        found = { id, name: r!.name };
+        break;
+      }
+    }
+    if (found?.id !== takeover?.id || found?.name !== takeover?.name) setTakeover(found);
+  });
+  const focus: Focus | null = !free
+    ? null
+    : takeover
+      ? { id: 'penalty-takeover', label: `Play ${takeover.name} instead of the agent`, action: { kind: 'penalty-takeover' } }
+      : { id: 'penalty', label: 'Play penalties', action: { kind: 'penalty' } };
+  const ref = useInteractable<THREE.Mesh>(focus, 3.2);
   // double-sided: you stand right on this spot (unlike pong's TableEnd, reached from outside it), so the
   // crosshair ray starts inside the box and must hit it from the inside too.
   return (

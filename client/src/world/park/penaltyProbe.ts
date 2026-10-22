@@ -14,6 +14,7 @@ import {
   penaltyView,
   playerRole,
   requestPenaltyMatch,
+  requestPenaltyTakeover,
   startPenaltyMatch,
   type Match,
 } from './penaltyState';
@@ -33,6 +34,7 @@ function state() {
     away: parkAwayId(),
     kicks: m ? [...m.kicks] : [],
     winner: m?.winner ?? null,
+    visitor: !!m?.visitor, // a server-refereed match against another visitor (#47), not the AI
   };
 }
 
@@ -76,6 +78,8 @@ const probe = {
     penaltyCommitDive();
     return true;
   },
+  /** Takes over the agent's place (#47), or joins a visitor waiting for a second: sends pk-join. */
+  takeover: () => requestPenaltyTakeover(),
   /** Forces the AI's next shot (as shooter) or dive (as keeper); null clears it. */
   forceShot: (shot: { x: number; y: number; power: number } | null) => forcePenaltyShot(shot),
   forceDive: (dive: Dive | null) => forcePenaltyDive(dive),

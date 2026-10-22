@@ -25,7 +25,7 @@ import { readUpload, saveUpload } from './uploads.ts';
 
 const swarm = new Swarm(DEMO ? createDemoBackend(DEMO_SCALE) : realBackend);
 // Who else is in the 3D office (shared presence): relayed between tabs over /ws, never saved. The demo adds fake visitors.
-const presence = new PresenceHub({ demo: DEMO });
+const presence = new PresenceHub({ demo: DEMO, onPenaltyResult: (result) => swarm.recordVisitorPenalty(result) });
 // Sessions the office picks back up while it starts need the address their CLIs call back on before it listens.
 if (PORT) setOfficeUrl(`http://127.0.0.1:${PORT}`);
 await swarm.init();

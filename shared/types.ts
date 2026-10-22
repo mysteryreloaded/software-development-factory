@@ -1,5 +1,6 @@
 // Types shared between the swarm server and the 3D client.
 import type { CareerView } from './careers.ts';
+import type { PenaltyMessage } from './penalty.ts';
 import type { ProgressView, RewardView } from './progress.ts';
 
 import type { WeatherSettings, WeatherView, WorldEventSettings } from './outside.ts';
@@ -594,6 +595,39 @@ export interface PenaltyBoard {
   hardest: { id: string; name: string; kmh: number; at: number } | null;
 }
 
+// ---------- visitor penalty matches (#47): refereed by server/penaltyMatch.ts, relayed to floor 0 by presence.ts ----------
+
+/** Who's playing a visitor penalty match, and which side (shared/penalty.ts Side) they kick for. */
+export interface PkPlayer {
+  id: string;
+  name: string;
+  side: 'player' | 'opponent';
+}
+
+/** One kick taken in a visitor match so far (shared/penalty.ts PenaltyKick, restated here). */
+export interface PkKickTaken {
+  side: 'player' | 'opponent';
+  scored: boolean;
+  kmh: number;
+}
+
+/** Whole-match state, sent to floor 0 on every change (server/penaltyMatch.ts). 'empty': nobody's playing ·
+ * 'waiting': one visitor joined, waiting for a second · 'live': alternating kicks · 'done': just decided. */
+export interface PkStateView {
+  players: PkPlayer[];
+  kicks: PkKickTaken[];
+  turn: 'player' | 'opponent' | null;
+  phase: 'empty' | 'waiting' | 'live' | 'done';
+}
+
+/** One kick resolved (shared/penalty.ts KickOutcome), so every browser on floor 0 animates it the same way. */
+export interface PkKickEvent {
+  shot: { x: number; y: number; power: number };
+  dive: { x: number; y: number; at: number } | null;
+  result: 'goal' | 'saved' | 'post' | 'wide' | 'over';
+  kmh: number;
+}
+
 export interface WorldSnapshot {
   user: string | null; // gh login
   ghReady: boolean;
@@ -676,7 +710,10 @@ export type ServerEvent =
   | { type: 'visitors'; you: string; visitors: VisitorView[] }
   | ({ type: 'visitorPose'; id: string } & VisitorPose)
   | { type: 'visitorEmote'; id: string; e: EmoteId }
-  | { type: 'visitorPing'; id: string; x: number; y: number; z: number; label: string };
+  | { type: 'visitorPing'; id: string; x: number; y: number; z: number; label: string }
+  // Visitor penalty matches (#47), relayed to floor 0 the same way (server/presence.ts, server/penaltyMatch.ts).
+  | ({ type: 'pk-state' } & PkStateView)
+  | ({ type: 'pk-kick' } & PkKickEvent);
 
 /** What a tab shows of the agents' terminals, so the office sends it only those lines (shared/watch.ts). */
 export interface Watch {
@@ -733,7 +770,7 @@ export type EmoteId = 'wave' | 'thumbs' | 'clap' | 'point' | 'laugh';
  * Browser to server on /ws. resync: send a fresh snapshot (a tab back from the time-lapse replay); lines: which
  * agents' terminal lines this tab shows (shared/watch.ts). The rest: presence.
  */
-export type ClientEvent = { type: 'resync' } | ({ type: 'lines' } & Watch) | PresenceEvent;
+export type ClientEvent = { type: 'resync' } | ({ type: 'lines' } & Watch) | PresenceEvent | PenaltyMessage;
 
 /**
  * A tab's presence (shared/presence.ts). hello: your name and colour · pose: you're in the office and appear to others ·
