@@ -248,17 +248,25 @@ function VisitorFigure({ id }: { id: string }) {
 
 // ---------- the joint, seated at a smoke break (#59): lit, rolled, and the puffs blown out ----------
 
-const JOINT_LOCAL = { x: 0.16, y: 1.05, z: -0.22 }; // roughly chest height, in front, right hand (seat-local)
+// Seat-local (VisitorJoint is mounted inside `root`, already at the seat's world position and turned by its yaw, so
+// these are offsets from there, not world coordinates): the hand resting low, and up near the mouth for a puff.
+const JOINT_HAND: [number, number, number] = [0.16, 0.95, -0.2];
+const JOINT_MOUTH: [number, number, number] = [0.04, 1.42, -0.12];
+const JOINT_HEAD: [number, number, number] = [0.02, 1.55, -0.08];
 const JOINT_PUFFS = 6;
 const JOINT_PUFF_MS = 2200;
+/** How long the hand lifts to the mouth for, on each puff that lands (held.s dropping): a guess, since the puff
+ * itself isn't relayed, only puffs-left before and after. */
+const JOINT_LIFT_MS = 700;
 const jointEmber = markBloom(new THREE.MeshBasicMaterial({ color: '#ff7b3d' }));
 const jointEmberDim = new THREE.MeshBasicMaterial({ color: '#8a4b2e' });
 
-/** A seated visitor's joint: a thin paper cylinder that shrinks as puffs run out, an ember that glows while lit, and
- * a few puffs of smoke on each one that lands (held.s dropping). World-placed, not parented under `root` (which
- * carries the seat's rotation already); no per-frame allocation. */
+/** A seated visitor's joint: a thin paper cylinder that shrinks as puffs run out, an ember that glows while lit, a
+ * lift to the mouth and a few puffs of smoke from the head on each one that lands (held.s dropping). Mounted inside
+ * `root` (seat-local, above); no per-frame allocation. */
 function VisitorJoint({ id }: { id: string }) {
   const group = useRef<THREE.Group>(null);
+  const hand = useRef<THREE.Group>(null);
   const paper = useRef<THREE.Mesh>(null);
   const ember = useRef<THREE.Mesh>(null);
   const sprites = useRef<(THREE.Sprite | null)[]>([]);
@@ -267,13 +275,15 @@ function VisitorJoint({ id }: { id: string }) {
   useEffect(() => () => materials.forEach((mat) => mat.dispose()), [materials]);
   const next = useRef(0);
   const lastPuffsLeft = useRef<number | null>(null);
-  const exhaledAt = useRef(0);
+  const puffAt = useRef(0); // performance.now() of the last puffs-left drop seen
+  const spawned = useRef(0); // the puffAt value already spawned for, so a puff spawns its smoke exactly once
   const geo = useMemo(() => new THREE.CylinderGeometry(0.006, 0.006, 1, 8).rotateX(Math.PI / 2), []); // unit length along local -Z
   useEffect(() => () => geo.dispose(), [geo]);
 
   useFrame(() => {
     const g = group.current;
-    if (!g) return;
+    const h = hand.current;
+    if (!g || !h) return;
     const r = remoteOf(id);
     const seat = r?.seat ? parseSeatId(r.seat) : null;
     const held = r?.held;
@@ -282,16 +292,17 @@ function VisitorJoint({ id }: { id: string }) {
       lastPuffsLeft.current = null;
       return;
     }
-    const n = nook(seat.nookId);
-    const sp = n.seats[seat.seat];
-    const yaw = n.yaw;
-    const sin = Math.sin(yaw);
-    const cos = Math.cos(yaw);
     g.visible = true;
-    g.position.set(sp.x + JOINT_LOCAL.x * cos + JOINT_LOCAL.z * sin, JOINT_LOCAL.y, sp.z - JOINT_LOCAL.x * sin + JOINT_LOCAL.z * cos);
-    g.rotation.y = yaw;
-
     const puffsLeft = held.s ?? 0;
+    const now = performance.now();
+    if (lastPuffsLeft.current !== null && puffsLeft < lastPuffsLeft.current) puffAt.current = now;
+    lastPuffsLeft.current = puffsLeft;
+
+    const since = now - puffAt.current;
+    const puffing = since < JOINT_LIFT_MS;
+    const k = puffing ? Math.sin((Math.PI * since) / JOINT_LIFT_MS) : 0; // lifts toward the mouth and back
+    h.position.set(JOINT_HAND[0] + (JOINT_MOUTH[0] - JOINT_HAND[0]) * k, JOINT_HAND[1] + (JOINT_MOUTH[1] - JOINT_HAND[1]) * k, JOINT_HAND[2] + (JOINT_MOUTH[2] - JOINT_HAND[2]) * k);
+
     const len = held.r ? 0.1 : 0.09 * (0.3 + 0.7 * (puffsLeft / 8));
     if (paper.current) {
       paper.current.scale.z = len;
@@ -303,11 +314,9 @@ function VisitorJoint({ id }: { id: string }) {
       ember.current.material = lit ? jointEmber : jointEmberDim;
       ember.current.visible = !held.r;
     }
-    const now = performance.now();
-    if (lastPuffsLeft.current !== null && puffsLeft < lastPuffsLeft.current) exhaledAt.current = now;
-    lastPuffsLeft.current = puffsLeft;
-    const fresh = now - exhaledAt.current < 60;
-    if (fresh) {
+
+    if (puffAt.current !== spawned.current) {
+      spawned.current = puffAt.current;
       for (let i = 0; i < 3; i++) {
         const slot = next.current;
         next.current = (next.current + 1) % JOINT_PUFFS;
@@ -324,7 +333,7 @@ function VisitorJoint({ id }: { id: string }) {
       }
       const age = (now - p.born) / JOINT_PUFF_MS;
       s.visible = true;
-      s.position.set(p.dx * age * 3, 0.1 + age * 0.5, -len + p.dz * age * 3);
+      s.position.set(JOINT_HEAD[0] + p.dx * age * 3, JOINT_HEAD[1] + age * 0.5, JOINT_HEAD[2] + p.dz * age * 3);
       s.scale.setScalar(0.05 + age * 0.15);
       materials[i].opacity = 0.45 * (1 - age);
     }
@@ -332,10 +341,12 @@ function VisitorJoint({ id }: { id: string }) {
 
   return (
     <group ref={group} visible={false}>
-      <mesh ref={paper} geometry={geo} material={toon('#f1e8d8')} castShadow={false} />
-      <mesh ref={ember} visible={false} castShadow={false}>
-        <sphereGeometry args={[0.009, 8, 6]} />
-      </mesh>
+      <group ref={hand}>
+        <mesh ref={paper} geometry={geo} material={toon('#f1e8d8')} castShadow={false} />
+        <mesh ref={ember} visible={false} castShadow={false}>
+          <sphereGeometry args={[0.009, 8, 6]} />
+        </mesh>
+      </group>
       {materials.map((mat, i) => (
         <sprite key={i} ref={(s) => void (sprites.current[i] = s)} material={mat} visible={false} />
       ))}

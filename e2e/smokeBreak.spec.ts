@@ -161,7 +161,9 @@ test('two tabs: a visitor sees the other sit, roll, light and puff, and can shar
     (route) => route.fulfill({ status: 200, body: '' }),
   );
   await startAt(page, spot);
-  await startAt(other, spot);
+  // B stands in the same gap but faces back at the bench (the "Sit down" prompt doesn't care which way you look),
+  // so its screenshot below shows A seated there.
+  await startAt(other, { ...spot, yaw: n.yaw + Math.PI });
   await enterOffice(page);
   await enterOffice(other);
   // just the two tabs: a fake visitor wandering onto the bench would make this flaky
@@ -181,6 +183,8 @@ test('two tabs: a visitor sees the other sit, roll, light and puff, and can shar
   // tab B sees A's visitor seated at that seat, lit
   const seenA = async (p: Page) => (await probe(p)).visitors.find((v) => v.nook === 'office-west' && v.seat === aSeat) ?? null;
   await expect.poll(async () => (await seenA(other))?.lit ?? null, { timeout: 20_000 }).toBe(true);
+  await other.waitForTimeout(300); // let the seated pose and the joint settle into place before the shot
+  await other.screenshot({ path: test.info().outputPath('smoke-visitor-seated-lit.png') });
 
   // B's sit into A's seat is refused: B is aimed at the very same one
   await expect(other.getByText('Sit down')).toBeVisible();

@@ -170,11 +170,18 @@ export class PresenceHub {
     const now = this.now();
     const dt = this.lastTick ? Math.min(0.5, (now - this.lastTick) / 1000) : TICK_MS / 1000;
     this.lastTick = now;
+    // Smoke-break seats already held (#59), floor 1 only (the only floor fakes take one on): other fakes, and real
+    // visitors' own relayed pose.s. Grown as each fake below sits, so two fakes don't pick the same seat this tick.
     const takenSeats = new Set<string>();
-    for (const p of this.peers.values()) if (p.walker?.smoke) takenSeats.add(`${p.walker.smoke.nook}:${p.walker.smoke.seat}`);
     for (const p of this.peers.values()) {
-      if (p.walker) this.stepFake(p, dt, takenSeats);
-      else if (p.dirty && due(p.relayedAt, now, RELAY_GAP_MS)) this.relayNow(p);
+      if (p.walker?.smoke) takenSeats.add(`${p.walker.smoke.nook}:${p.walker.smoke.seat}`);
+      else if (!p.walker && p.floor === 1 && p.pose?.s) takenSeats.add(p.pose.s);
+    }
+    for (const p of this.peers.values()) {
+      if (p.walker) {
+        this.stepFake(p, dt, takenSeats);
+        if (p.walker.smoke) takenSeats.add(`${p.walker.smoke.nook}:${p.walker.smoke.seat}`);
+      } else if (p.dirty && due(p.relayedAt, now, RELAY_GAP_MS)) this.relayNow(p);
     }
   }
 
