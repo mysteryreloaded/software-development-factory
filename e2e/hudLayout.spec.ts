@@ -344,6 +344,65 @@ test.describe('phone HUD layout round 4: desktop stays unaffected', () => {
   });
 });
 
+// Issue #71: Android drew a grey scrollbar thumb beside the floor card in `.hud-top-scroll`'s landscape clip
+// (styles.css's `overflow-y: auto`, kept so a genuinely tall stack can still scroll by touch), even in states
+// where nothing visibly overflows — `.hud-chips` renders with no children when its three chips are all hidden, but
+// still claimed a flex gap on each side (a few px taller than the box), which was enough for Android to show the
+// thumb. `scrollbar-width: none` / `::-webkit-scrollbar { display: none }` on the three scroll boxes hide the
+// thumb outright; `.hud-chips:empty { display: none }` removes the extra gap so the lobby's landscape box doesn't
+// scroll at all. 805x384 is the manager's own reported viewport (issue #71); the others are issue #44's set.
+const SCROLLBAR_VIEWPORTS = [...VIEWPORTS, ['landscape 805x384 (reported)', { width: 805, height: 384 }] as const];
+
+test.describe('phone HUD layout round 7: no visible scrollbar beside the floor card', () => {
+  test.use(S23);
+
+  for (const [name, viewport] of SCROLLBAR_VIEWPORTS) {
+    // Only one box is actually a scroll box per orientation (styles.css's two mobile media queries): a tall-enough
+    // portrait phone shares one clip on `.hud-top` itself; a short/landscape one splits it into `.hud-top-scroll`
+    // (the floor card and pills) and `.hud-top-lower` (the aim card, hints and toasts) instead.
+    const selectors = name.startsWith('portrait') ? ['.hud-top'] : ['.hud-top-scroll', '.hud-top-lower'];
+    test(`scrollbar-width is none on the scroll boxes (${name})`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await page.goto('/?pocket=0');
+      await enterOffice(page, { loaded: true });
+      await skipTour(page);
+      for (const selector of selectors) {
+        await expect(page.locator(selector)).toHaveCSS('scrollbar-width', 'none');
+      }
+    });
+  }
+
+  test('no scrollbar takes layout width even when a stack overflows (landscape 568x320)', async ({ page }) => {
+    const viewport = { width: 568, height: 320 };
+    await page.setViewportSize(viewport);
+    await startAt(page, WORKING_DESK_SPOT);
+    await page.goto('/?pocket=0');
+    await enterOffice(page, { loaded: true });
+    await skipTour(page);
+    await setWorstCase(page, { longText: true });
+    await expect(page.locator('.agent-card')).toBeVisible({ timeout: 15_000 });
+    const gaps = await page.locator('.hud-top-scroll, .hud-top-lower').evaluateAll((els) =>
+      (els as HTMLElement[]).map((el) => {
+        const cs = getComputedStyle(el);
+        const borders = parseFloat(cs.borderLeftWidth) + parseFloat(cs.borderRightWidth);
+        return el.offsetWidth - el.clientWidth - borders;
+      }),
+    );
+    for (const gap of gaps) expect(gap).toBeLessThanOrEqual(0.5);
+  });
+
+  test('nothing scrolls in the lobby at 805x384 (manager-reported viewport)', async ({ page }, testInfo) => {
+    const viewport = { width: 805, height: 384 };
+    await page.setViewportSize(viewport);
+    await page.goto('/?pocket=0');
+    await enterOffice(page, { loaded: true });
+    await skipTour(page);
+    const scroll = await page.locator('.hud-top-scroll').evaluate((el) => ({ scrollHeight: el.scrollHeight, clientHeight: el.clientHeight }));
+    expect(scroll.scrollHeight, '.hud-top-scroll should not scroll when the lobby card fits').toBeLessThanOrEqual(scroll.clientHeight);
+    await page.screenshot({ path: testInfo.outputPath('lobby-805x384-top-left.png'), clip: { x: 0, y: 0, width: 420, height: 200 } });
+  });
+});
+
 // Issue #44 round 6: the roof (in scope since the issue's "every floor kind (lobby, an office floor, the roof)")
 // has its own .hud-hint, a direct child of .hud rather than nested in .aim-cards — the spec never put one of
 // those on screen on a phone before. Sitting in a deck chair shows "🪑 Sitting back · …", testing .hud > .hud-hint
