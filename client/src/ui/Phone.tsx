@@ -10,6 +10,7 @@ import { MicButton } from './MicButton';
 import { handsFreeProblem, setHandsFree } from './mic';
 import { closeOverlay } from './Panel';
 import { useDialogFocus } from './dialogFocus';
+import { openImagePreview } from './ImagePreview';
 import { isKey } from './controls';
 import { Key } from './Key';
 import { Games, type GameId } from './games/Games';
@@ -327,9 +328,9 @@ function BubbleAttachment({ a }: { a: AttachmentView }) {
   const url = `/api/uploads/${a.id}`;
   if (a.kind === 'image')
     return (
-      <a href={url} target="_blank" rel="noreferrer" className="bubble-img-link">
+      <button type="button" className="bubble-img-link" onClick={() => openImagePreview(url, a.name)}>
         <img src={url} alt={a.name} className="bubble-img" />
-      </a>
+      </button>
     );
   if (a.kind === 'video') return <video src={url} controls className="bubble-video" />;
   return (
