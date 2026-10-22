@@ -431,3 +431,65 @@ test.describe('phone HUD layout round 6: the roof’s own hints', () => {
     });
   }
 });
+
+// Issue #85: the floor card and the status pills/chips in .hud-top-scroll fade their own background to 20% opacity
+// (alpha 0.2) so the 3D world shows through, while their text stays fully opaque (never `opacity` on the element,
+// which would fade the text too). High contrast (an accessibility setting) keeps today's solid backgrounds. This
+// spec reads getComputedStyle(...).backgroundColor to check the alpha channel, on desktop and a phone viewport.
+
+function alphaOf(color: string): number {
+  // A color-mix() background can serialize as `color(srgb r g b / a)` instead of `rgba(r, g, b, a)` (Chromium).
+  const fn = color.match(/color\([^)]*\/\s*([\d.]+)\s*\)/);
+  if (fn) return Number(fn[1]);
+  const m = color.match(/rgba?\(([^)]+)\)/);
+  if (!m) throw new Error(`not a color: ${color}`);
+  const parts = m[1].split(',').map((s) => s.trim());
+  return parts.length > 3 ? Number(parts[3]) : 1;
+}
+
+async function setHighContrast(page: Page, on: boolean) {
+  await page.evaluate((on) => (window as unknown as { __swarmA11y: { set: (p: { highContrast: boolean }) => void } }).__swarmA11y.set({ highContrast: on }), on);
+}
+
+test.describe('HUD backgrounds fade to 20% opacity, high contrast keeps them solid (issue #85)', () => {
+  for (const [name, viewport] of [
+    ['desktop 1280x800', { width: 1280, height: 800 }],
+    ['phone 390x844', { width: 390, height: 844 }],
+  ] as const) {
+    test(`floor card, pills and chips (${name})`, async ({ page }) => {
+      await page.setViewportSize(viewport);
+      await page.goto('/?pocket=0');
+      await enterOffice(page, { loaded: true });
+      await skipTour(page);
+
+      const floorCard = page.locator('.hud-floor');
+      const livePill = page.locator('.hud-status .pill', { hasText: 'live' });
+      const sessionsPill = page.locator('.hud-status .pill', { hasText: 'sessions' });
+      const officeChip = page.locator('.hud-chips .office-chip');
+
+      expect(alphaOf(await floorCard.evaluate((el) => getComputedStyle(el).backgroundColor))).toBeCloseTo(0.2, 1);
+      expect(alphaOf(await livePill.evaluate((el) => getComputedStyle(el).backgroundColor))).toBeCloseTo(0.2, 1);
+      expect(alphaOf(await sessionsPill.evaluate((el) => getComputedStyle(el).backgroundColor))).toBeCloseTo(0.2, 1);
+      if (await officeChip.count()) {
+        expect(alphaOf(await officeChip.first().evaluate((el) => getComputedStyle(el).backgroundColor))).toBeCloseTo(0.2, 1);
+      }
+      // Text stays fully opaque (only the background fades).
+      expect(alphaOf(await page.locator('.floor-name').evaluate((el) => getComputedStyle(el).color))).toBe(1);
+      expect(alphaOf(await livePill.evaluate((el) => getComputedStyle(el).color))).toBe(1);
+
+      await setHighContrast(page, true);
+      expect(alphaOf(await floorCard.evaluate((el) => getComputedStyle(el).backgroundColor))).toBe(1);
+      expect(alphaOf(await livePill.evaluate((el) => getComputedStyle(el).backgroundColor))).toBe(1);
+      expect(alphaOf(await sessionsPill.evaluate((el) => getComputedStyle(el).backgroundColor))).toBe(1);
+      await setHighContrast(page, false);
+    });
+  }
+
+  test('a .pill outside the HUD (the start screen) keeps a solid background', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/?pocket=0');
+    await expect(page.getByText(/DEMO MODE/)).toBeVisible();
+    const demoPill = page.locator('.start .pill.pill-demo');
+    expect(alphaOf(await demoPill.evaluate((el) => getComputedStyle(el).backgroundColor))).toBe(1);
+  });
+});
