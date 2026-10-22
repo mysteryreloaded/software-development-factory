@@ -68,7 +68,8 @@ test('a probe-driven match reports the winner and the hardest shot to the office
 
   expect(await call(page, 'start', opponentId)).toBe(true);
   expect(await call(page, 'skipWalk')).toBe(true);
-  await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).toBe('setup');
+  // 'setup' only lasts SETUP_MS (penaltyState.ts): under load it may already be 'live' by the time we check
+  await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).not.toBe('walkup');
   // sticks for every opponent kick (forcePenaltyShot/forceShot only clears or replaces on request): no race with the clock
   await call(page, 'forceShot', { x: GOAL.width / 2 + 2, y: 1, power: 0.9 });
 
@@ -113,17 +114,24 @@ test('an agent called back to work leaves no result', async ({ page }) => {
   await startAt(page, { floor: 0, x: goal.spotX, z: goal.z, yaw: Math.PI / 2, pitch: 0 });
   await enterOffice(page);
   const opponentId = await freeAgent(page);
+  // the same agent may already have a row from an earlier test in this run (the board persists for the whole
+  // server session): record their count before, rather than assuming no row exists at all.
+  const before = await page.evaluate(() => fetch('/api/state').then((r) => r.json()));
+  const rowBefore = before.penalty.rows.find((r: { id: string }) => r.id === opponentId);
+  const countBefore = rowBefore ? rowBefore.wins + rowBefore.losses : 0;
 
   expect(await call(page, 'start', opponentId)).toBe(true);
   expect(await call(page, 'skipWalk')).toBe(true);
-  await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).toBe('setup');
+  // 'setup' only lasts SETUP_MS (penaltyState.ts): under load it may already be 'live' by the time we check
+  await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).not.toBe('walkup');
 
   // work calls them back mid-match (the same patch the office sends when a session picks up an issue): no result
   await call(page, 'callBack', opponentId);
   await expect.poll(async () => (await penalty(page)).stage, { timeout: 15_000 }).toBeNull();
 
   const state = await page.evaluate(() => fetch('/api/state').then((r) => r.json()));
-  expect(state.penalty.rows.find((r: { id: string }) => r.id === opponentId)).toBeUndefined();
+  const rowAfter = state.penalty.rows.find((r: { id: string }) => r.id === opponentId);
+  expect(rowAfter ? rowAfter.wins + rowAfter.losses : 0).toBe(countBefore);
 });
 
 test('the billboard pages between the top 5 and the hardest shot', async ({ page }) => {
