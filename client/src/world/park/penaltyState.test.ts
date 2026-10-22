@@ -6,7 +6,9 @@ vi.stubGlobal('window', { addEventListener: () => undefined });
 const { useStore } = await import('../../store');
 const {
   abandonPenaltyMatch,
+  forcePenaltyShot,
   penaltyCharge,
+  penaltyCommitDive,
   penaltyFree,
   penaltyMatch,
   penaltyOpponentArrived,
@@ -96,6 +98,48 @@ describe('the stage clock', () => {
     vi.advanceTimersByTime(4000);
     tickPenalty();
     expect(penaltyMatch()).toBeNull();
+  });
+});
+
+describe("the keeper's dive, judged against when the agent actually strikes", () => {
+  it('a dive committed before strikeAt exists (the only way to stop a quick shot) still saves it', () => {
+    startPenaltyMatch('bob', 'Bob');
+    penaltyOpponentArrived();
+    vi.advanceTimersByTime(SETUP_MS);
+    tickPenalty(); // 'live', turn 'player': play their kick out of the way first
+
+    penaltyCharge(true);
+    vi.advanceTimersByTime(CHARGE_MS);
+    tickPenalty();
+    penaltyCharge(false); // strikes, 'flight'
+    const flightMs1 = penaltyMatch()!.outcome!.flightMs;
+    vi.advanceTimersByTime(flightMs1 + 10);
+    tickPenalty(); // 'result'
+    vi.advanceTimersByTime(RESULT_MS);
+    tickPenalty(); // 'setup', turn 'opponent'
+    expect(penaltyMatch()!.turn).toBe('opponent');
+
+    // arm the agent's shot before 'live' starts (penaltyState.ts reads it exactly at the setup->live transition)
+    forcePenaltyShot({ x: 2.5, y: 1, power: 1 });
+    vi.advanceTimersByTime(SETUP_MS + 5); // +5: floating-point flight times upstream can shave a hair off SETUP_MS
+    tickPenalty(); // 'live': m.strikeAt is null here (the bug: it used to still be the previous kick's)
+    expect(penaltyMatch()!.stage).toBe('live');
+    expect(penaltyMatch()!.strikeAt).toBeNull();
+
+    const m = penaltyMatch()!;
+    m.keeperX = 2.5;
+    m.keeperY = 1;
+    penaltyCommitDive(); // guesses now, well before the agent strikes
+
+    vi.advanceTimersByTime(1700); // past WINDUP_MS's range: the agent has struck by now
+    tickPenalty();
+    expect(penaltyMatch()!.stage).toBe('flight');
+    const flightMs2 = penaltyMatch()!.outcome!.flightMs;
+    vi.advanceTimersByTime(flightMs2 + 10);
+    tickPenalty(); // 'result': the kick is judged on arrival
+
+    expect(penaltyMatch()!.kicks.at(-1)).toMatchObject({ side: 'opponent', scored: false });
+    forcePenaltyShot(null);
   });
 });
 

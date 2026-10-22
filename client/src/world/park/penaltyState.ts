@@ -44,6 +44,7 @@ export interface Match {
   keeperX: number;
   keeperY: number;
   diveCommitted: boolean;
+  diveAt: number | null; // performance.now() the keeper committed, while strikeAt (this kick's) is still unknown
   aiAt: number | null; // performance.now() the AI shooter will strike
 }
 
@@ -136,6 +137,7 @@ export function startPenaltyMatch(opponentId: string, opponentName: string): Mat
     keeperX: 0,
     keeperY: GOAL.height * 0.4,
     diveCommitted: false,
+    diveAt: null,
     aiAt: null,
   };
   penaltyChanged();
@@ -200,11 +202,14 @@ export function penaltyCharge(on: boolean) {
   }
 }
 
-/** The keeper (you) commits their dive, final: no more moving once it's thrown. */
+/** The keeper (you) commits their dive, final: no more moving once it's thrown. Usually before the agent has even
+ * struck (this kick's strikeAt is still null - a guess, which is the only way to stop a shot that quick): `diveAt`
+ * remembers when, and strike() turns it into the dive's `at` (ms since the strike, negative) once strikeAt is known. */
 export function penaltyCommitDive() {
   if (!match || match.turn === 'player' || match.diveCommitted || match.stage === 'result' || match.stage === 'over') return;
   match.diveCommitted = true;
-  match.dive = { x: match.keeperX, y: match.keeperY, at: match.strikeAt === null ? -1 : performance.now() - match.strikeAt };
+  match.diveAt = performance.now();
+  match.dive = { x: match.keeperX, y: match.keeperY, at: match.strikeAt === null ? -1 : match.diveAt - match.strikeAt };
 }
 
 function strike(x: number, y: number, power: number) {
@@ -214,6 +219,9 @@ function strike(x: number, y: number, power: number) {
   if (match.turn === 'player') {
     const kmh = kmhOf(power);
     match.dive = forcedDive ?? aiKeeperDive({ x, y, power }, flightMsOf(kmh), Math.random);
+  } else if (match.dive && match.diveAt !== null) {
+    // the keeper (you) committed before this strikeAt existed: now it does
+    match.dive = { ...match.dive, at: match.diveAt - match.strikeAt };
   }
   match.outcome = kickOutcome(match.shot, match.dive);
   match.stage = 'flight';
@@ -249,6 +257,9 @@ export function tickPenalty() {
       m.diveCommitted = false;
       m.dive = null;
       m.shot = null;
+      m.diveAt = null;
+      m.strikeAt = null;
+      m.outcome = null;
       if (m.turn === 'opponent') {
         m.shot = forcedShot ?? aiShooterShot(Math.random);
         m.aiAt = now + WINDUP_MS[0] + Math.random() * (WINDUP_MS[1] - WINDUP_MS[0]);
