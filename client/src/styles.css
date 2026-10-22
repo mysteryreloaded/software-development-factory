@@ -446,6 +446,12 @@ input.inline:focus {
   .hud-top-scroll .hud-status {
     justify-content: flex-start;
   }
+  /* OfficeUpdateChip/UsageChip/DoctorChip render null when there's nothing to show, leaving .hud-chips with no
+     children; as a flex item it still claims a gap on each side (round 4's extra few px that triggers Android's
+     scrollbar on a lobby with nothing to scroll), so drop it from the flow entirely when it's empty. */
+  .hud-top-scroll .hud-chips:empty {
+    display: none;
+  }
   .hud-top-scroll .hud-banner {
     transform: none;
   }
@@ -457,6 +463,10 @@ input.inline:focus {
   .hud-top {
     max-height: calc(100vh - 200px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .hud-top::-webkit-scrollbar {
+    display: none;
   }
 }
 /* Landscape phones: not enough room to share .hud-top-scroll's clip with the card too and still show it whole
@@ -476,6 +486,7 @@ input.inline:focus {
   .hud-top-scroll {
     max-height: calc(100vh - 200px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     overflow-y: auto;
+    scrollbar-width: none;
   }
   .hud-top-lower {
     position: fixed;
@@ -484,6 +495,11 @@ input.inline:focus {
     width: min(220px, calc(100vw - 32px));
     max-height: calc(100vh - 156px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     overflow-y: auto;
+    scrollbar-width: none;
+  }
+  .hud-top-scroll::-webkit-scrollbar,
+  .hud-top-lower::-webkit-scrollbar {
+    display: none;
   }
 }
 /* The office updating itself: under the floor card, out of the way; opens the console. */
