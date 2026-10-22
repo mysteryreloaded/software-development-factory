@@ -107,16 +107,26 @@ export function balconyRailing(side: Side): Rect[] {
 
 export const PLANTER = { w: 0.55, l: 1.8, h: 0.55 };
 export const BENCH = { w: 0.6, l: 1.8, h: 0.85 };
+/** The smoke break's little table in front of each office balcony bench (world/smokeBreak.ts), and on the roof. */
+export const SMOKE_TABLE = { w: 0.4, l: 0.8, h: 0.45 };
+/** How far the gap between a bench and its table is: enough to pass on both sides (PLAYER_RADIUS * 2 + 0.1). */
+export const SMOKE_GAP = 0.7;
 
-/** On each balcony: a planter against the railing near each end, and a bench against the wall looking out, 3.6 m from the door. */
-export function balconyFurniture(kind: FloorKind, side: Side): { planters: Rect[]; bench: Rect } {
+/** On each balcony: a planter against the railing near each end, and a bench against the wall looking out, 3.6 m from
+ * the door. Offices also get a little table in the gap beyond the bench (world/smokeBreak.ts), 0.7 m clear of both
+ * the bench and the railing; the lobby's balcony is unchanged. */
+export function balconyFurniture(kind: FloorKind, side: Side): { planters: Rect[]; bench: Rect; table: Rect | null } {
   const door = SIDE_OPENINGS[kind][side].door;
   const x = across(side, BALCONY_OUT - BALCONY.railT - PLANTER.w, BALCONY_OUT - BALCONY.railT);
   const pz = BALCONY.maxZ - 1.3;
   const bz = door - 3.6 * Math.sign(door || 1);
+  const bench: Rect = { ...across(side, BALCONY_IN, BALCONY_IN + BENCH.w), minZ: bz - BENCH.l / 2, maxZ: bz + BENCH.l / 2, h: BENCH.h };
+  const tableFrom = BALCONY_IN + BENCH.w + SMOKE_GAP;
+  const table: Rect | null = kind === 'office' ? { ...across(side, tableFrom, tableFrom + SMOKE_TABLE.w), minZ: bz - SMOKE_TABLE.l / 2, maxZ: bz + SMOKE_TABLE.l / 2, h: SMOKE_TABLE.h } : null;
   return {
     planters: [-pz, pz].map((z) => ({ ...x, minZ: z - PLANTER.l / 2, maxZ: z + PLANTER.l / 2, h: PLANTER.h })),
-    bench: { ...across(side, BALCONY_IN, BALCONY_IN + BENCH.w), minZ: bz - BENCH.l / 2, maxZ: bz + BENCH.l / 2, h: BENCH.h },
+    bench,
+    table,
   };
 }
 
@@ -125,8 +135,8 @@ export function balconyFurniture(kind: FloorKind, side: Side): { planters: Rect[
 export function outsideColliders(kind: FloorKind): Rect[] {
   const sides = kind === 'lobby' ? (['east'] as const satisfies readonly Side[]) : SIDES;
   return sides.flatMap((side) => {
-    const { planters, bench } = balconyFurniture(kind, side);
-    return [...balconyRailing(side), ...planters, bench];
+    const { planters, bench, table } = balconyFurniture(kind, side);
+    return table ? [...balconyRailing(side), ...planters, bench, table] : [...balconyRailing(side), ...planters, bench];
   });
 }
 
@@ -567,6 +577,10 @@ export const TREE_PLANTERS = [{ x: 1.3, z: -6.8 }, { x: 15.1, z: 9.8 }].map((p) 
 export const HELIPAD = { x: -8.4, z: 1.2, r: 4.6 };
 /** The windsock's pole by the west parapet, beside the helipad. */
 export const WINDSOCK = { x: -15.2, z: 7.8, h: 3.4 };
+/** The smoke break's bench and table on the roof (world/smokeBreak.ts): the bench backs onto the west side, facing
+ * east over the parapet; the table sits in the SMOKE_GAP beyond it, 0.7 m clear of the parapet's face at x 16.0. */
+export const ROOF_SMOKE_BENCH: Rect = { minX: 13.6, maxX: 14.2, minZ: 0.6, maxZ: 2.4, h: BENCH.h };
+export const ROOF_SMOKE_TABLE: Rect = { minX: 14.9, maxX: 15.3, minZ: 1.1, maxZ: 1.9, h: SMOKE_TABLE.h };
 
 /** The roof's colliders: the parapet all round, the hut and the cabin, and everything standing on the deck. */
 export function roofColliders(): Rect[] {
@@ -594,6 +608,8 @@ export function roofColliders(): Rect[] {
     rect(PICNIC.x, PICNIC.z, PICNIC.w, PICNIC.d, PICNIC.h),
     rect(TELESCOPE.x, TELESCOPE.z, TELESCOPE.r * 2, TELESCOPE.r * 2, TELESCOPE.eye),
     rect(WINDSOCK.x, WINDSOCK.z, 0.2, 0.2, WINDSOCK.h),
+    ROOF_SMOKE_BENCH,
+    ROOF_SMOKE_TABLE,
   ];
   return out;
 }

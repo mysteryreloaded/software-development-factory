@@ -35,6 +35,7 @@ import { lookCurve, pad, padName, pollPad, wasPressed, wasReleased, watchPads } 
 import { arriveOnFloor, cameraMode, exitView, homeSpot, lookAllowed, playerAt, rigInput, rigOwnsCamera, rotateView, setHomeLook, stepRig, tapView } from './camera/rig';
 import { leavePerch, perch, takePerchTurn, type Perch } from './perch';
 import { roofAction } from './roof/roofState';
+import { parseSmokePerchId, runSmokeBreakOp, smokeBreakFocus, smokeFocusAt, type SmokeFocus } from './smokeBreak';
 import { greet } from './Chatter';
 import { joinPong, pongCamera, pongMouse, tickPaddle } from './toys/pongState';
 import { gesture, touchInput, useTouch } from './touch';
@@ -125,6 +126,10 @@ export function runFocusAction(focus: Focus, via: 'key' | 'click' = 'key') {
   }
   if (focus.action.kind === 'roof') {
     roofAction(focus.action.op);
+    return;
+  }
+  if (focus.action.kind === 'smokeBreak') {
+    runSmokeBreakOp(focus.action.op);
     return;
   }
   if (focus.action.kind === 'channel') {
@@ -225,6 +230,12 @@ function pickFocus(ray: THREE.Raycaster): Focus | null {
   }
   return null;
 }
+
+/** A smokeBreak.ts focus, as a store Focus. */
+const toFocus = (f: SmokeFocus | null): Focus | null => (f ? { id: f.id, label: f.label, action: { kind: 'smokeBreak', op: f.op } } : null);
+
+/** Standing at (x, z) in a mounted smoke break nook's gap: the "Sit down" focus, or null. */
+const smokeSitFocus = (x: number, z: number) => toFocus(smokeFocusAt(x, z));
 
 export function Player({ colliders, floor }: { colliders: Rect[]; floor: number }) {
   const { camera, gl } = useThree();
@@ -384,8 +395,10 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       keys.current.add(e.code);
       const mode = cameraMode();
       if (e.code === 'Escape' && mode !== 'first') return exitView();
-      // Perched (a deck chair, the telescope): walking, Space or the use key gets you up, though with food in hand it still eats.
-      if (mode === 'first' && perch() && !e.repeat && (gotUp(b, e.code) || (isBound(b, 'interact', e.code) && eAction(s.held, s.focus?.action.kind ?? null) !== 'sip'))) {
+      // Perched (a deck chair, the telescope): walking, Space or the use key gets you up, though with food in hand it
+      // still eats, and on a smoke break it still rolls, lights or puffs.
+      const smokeHere = parseSmokePerchId(perch()?.id ?? '');
+      if (mode === 'first' && perch() && !e.repeat && (gotUp(b, e.code) || (isBound(b, 'interact', e.code) && eAction(s.held, s.focus?.action.kind ?? null) !== 'sip' && !smokeHere))) {
         leavePerch();
         return;
       }
@@ -649,15 +662,19 @@ export function Player({ colliders, floor }: { colliders: Rect[]; floor: number 
       saveView({ floor: s.floor, x: at.x, z: at.z, yaw, pitch });
     }
 
-    // what are we looking at? (nothing while perched: E gets you up)
+    // what are we looking at? (nothing while perched: E gets you up — except a smoke break, whose own stage keeps
+    // showing on E so you know whether it's "Light it" or "Take a puff")
     if (++frame.current % 3 !== 0) return;
     if (s.overlay || s.travel || p || isConfirmOpen()) {
-      if (s.focus) s.setFocus(null);
+      const smoke = p && parseSmokePerchId(p.id);
+      const focus = smoke ? toFocus(smokeBreakFocus(smoke.nookId)) : null;
+      if (s.focus?.label !== focus?.label) s.setFocus(focus);
       return;
     }
     ray.setFromCamera(center, camera);
     ray.far = 8;
-    s.setFocus(pickFocus(ray));
+    // standing in a smoke break's gap offers to sit whatever you're aiming at, unless it's aimed at something else
+    s.setFocus(pickFocus(ray) ?? smokeSitFocus(camera.position.x, camera.position.z));
   });
 
   return null;

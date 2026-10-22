@@ -15,6 +15,7 @@ import { walk } from './toys/hands';
 import { boxesGeometry, merged, type BoxSpec } from './shapes';
 import { paneMaterial } from './Shell';
 import { LampHalos, balconyBulb } from './sky/lamps';
+import { SmokeBreak } from './SmokeBreak';
 import { DRUM_RADIUS, tickLiveDoor, wingAngle, WINGS } from './revolvingDoor';
 
 // Outside the side walls: the sliding glass doors, the balconies (the lobby's is a patio on the ground), and the rest
@@ -332,6 +333,7 @@ export function Outside({ kind, floor, top }: { kind: FloorKind; floor: number; 
       <OutsideSounds kind={kind} />
       <Balconies kind={kind} floor={floor} top={Math.max(top, floor)} />
       <Facade floor={floor} top={Math.max(top, floor)} />
+      {kind === 'office' && <SmokeBreak />}
     </group>
   );
 }

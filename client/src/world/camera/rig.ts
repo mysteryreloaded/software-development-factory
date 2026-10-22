@@ -613,19 +613,24 @@ export function screenOf(x: number, y: number, z: number) {
   return { x: Math.round(r.left + ((v.x + 1) / 2) * r.width), y: Math.round(r.top + ((1 - v.y) / 2) * r.height) };
 }
 
+const probePose = newPose();
+
 const probe = {
-  state: () => ({
-    mode: rig.mode,
-    owns: rig.owns,
-    flying: rig.flight < 1,
-    target: rig.target ? { id: rig.target.id, label: rig.target.label } : null,
-    home: { x: round(rig.home.x), z: round(rig.home.z), yaw: round(rig.home.yaw), pitch: round(rig.home.pitch) },
-    pose: { x: round(rig.pose.x), y: round(rig.pose.y), z: round(rig.pose.z), yaw: round(rig.pose.yaw), pitch: round(rig.pose.pitch), fov: round(rig.pose.fov) },
-    orbit: { fx: round(rig.goal.fx), fy: round(rig.goal.fy), fz: round(rig.goal.fz), yaw: round(rig.goal.yaw), dist: round(rig.goal.dist), fov: round(rig.goal.fov) },
-    quad: rig.quad,
-    cut: rig.cut,
-    sides: { ...rig.sides },
-  }),
+  state: () => {
+    capture(probePose); // rig.pose only moves in the modes the rig itself drives; first person needs the camera's own transform
+    return {
+      mode: rig.mode,
+      owns: rig.owns,
+      flying: rig.flight < 1,
+      target: rig.target ? { id: rig.target.id, label: rig.target.label } : null,
+      home: { x: round(rig.home.x), z: round(rig.home.z), yaw: round(rig.home.yaw), pitch: round(rig.home.pitch) },
+      pose: { x: round(probePose.x), y: round(probePose.y), z: round(probePose.z), yaw: round(probePose.yaw), pitch: round(probePose.pitch), fov: round(probePose.fov) },
+      orbit: { fx: round(rig.goal.fx), fy: round(rig.goal.fy), fz: round(rig.goal.fz), yaw: round(rig.goal.yaw), dist: round(rig.goal.dist), fov: round(rig.goal.fov) },
+      quad: rig.quad,
+      cut: rig.cut,
+      sides: { ...rig.sides },
+    };
+  },
   overview: enterOverview,
   building: enterBuilding,
   first: exitView,

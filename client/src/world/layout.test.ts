@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FLOOR_SEATS } from '../../../shared/types';
-import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BALCONY_TOP, BENCH, FLOOR_HEIGHT, HALF_W, PLANTER, SIDE_DOOR, SIDE_OPENINGS, SIDES, WALL_H, WALL_T, WINDOW, balconyFloor, balconyFurniture, balconyRailing, floorElevation, inBuilding, outsideAt, outsideColliders, sideDoorway, sideSign, toyOnlyAt } from './layout.ts';
+import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BALCONY_TOP, BENCH, FLOOR_HEIGHT, HALF_W, PLANTER, SIDE_DOOR, SIDE_OPENINGS, SIDES, SMOKE_GAP, WALL_H, WALL_T, WINDOW, balconyFloor, balconyFurniture, balconyRailing, floorElevation, inBuilding, outsideAt, outsideColliders, sideDoorway, sideSign, toyOnlyAt } from './layout.ts';
 import { APP_SCREEN, BOARD, CEO_DESK, CEO_ROOM, COFFEE_CORNER, coffeeCorner, collide, decorSlots, DESK_RUGS, ELEVATOR, elevatorDoorway, GONG, GONG_SPOT, gongRect, HALF_D, LOBBY_RUG, lobbyColliders, MANAGER_DESK, MANAGER_KIOSK, MANAGER_KIOSK_SPOT, managerKioskRect, MANAGER_ROOM, MISSION, missionColumn, missionRects, officeColliders, PLAYER_RADIUS, RECEPTION, rect, shellColliders, SPAWN, surfaceAt, WAITING, WAITING_TABLE, type Rect } from './layout.ts';
 import { DESK, DESK_ROWS, EAST_DESKS, EAST_ROTATION, MAX_DESKS, SEATS, deskPosition, deskRotation, isEastDesk } from './layout.ts';
 import { spot, walkways } from './walkways.ts';
@@ -355,8 +355,10 @@ describe('outside: side doors, windows and balconies', () => {
       expect(walk(railing, inside, rects), `${kind} ${side} back`).toEqual(inside);
       // but no further: the railing stops you
       expect(s * walk(railing, { x: s * (BALCONY_OUT + 2), z }, rects).x).toBeCloseTo(BALCONY_OUT - BALCONY.railT - PLAYER_RADIUS);
-      // and you can walk along the balcony, past its bench and planters, to either end
-      const along = s * (BALCONY_OUT - BALCONY.railT - PLANTER.w - PLAYER_RADIUS - 0.05);
+      // and you can walk along the balcony, past its bench and planters, to either end (offices: through the smoke
+      // break's bench-table gap, clear of both)
+      const { table } = balconyFurniture(kind, side);
+      const along = table ? s * (HALF_W + WALL_T + BENCH.w + SMOKE_GAP / 2) : s * (BALCONY_OUT - BALCONY.railT - PLANTER.w - PLAYER_RADIUS - 0.05);
       const out = walk({ x: s * (HALF_W + 1.2), z }, { x: along, z }, rects);
       for (const end of [BALCONY.minZ, BALCONY.maxZ]) {
         const far = walk(out, { x: along, z: end + Math.sign(end) * 3 }, rects);
@@ -406,6 +408,27 @@ describe('outside: side doors, windows and balconies', () => {
       expect(outsideColliders(kind)).toEqual(expect.arrayContaining([...rail, ...planters, bench]));
     }
     expect(all(kind)).toEqual(expect.arrayContaining(outsideColliders(kind)));
+  });
+
+  it("gives every office balcony's bench a little table, 0.7 m clear of both it and the rail; the lobby's is unchanged", () => {
+    for (const side of SIDES) {
+      const s = sideSign(side);
+      const floor = balconyFloor(side);
+      const rail = balconyRailing(side);
+      const { bench, table } = balconyFurniture('office', side);
+      expect(table).not.toBeNull();
+      const t = table!;
+      expect(contains(floor, t)).toBe(true);
+      expect(rail.some((r) => touches(r, t))).toBe(false);
+      expect(touches(bench, t)).toBe(false);
+      const gapToBench = Math.min(Math.abs(t.minX - bench.maxX), Math.abs(t.maxX - bench.minX));
+      expect(gapToBench).toBeCloseTo(SMOKE_GAP);
+      const railInner = s * (BALCONY_OUT - BALCONY.railT);
+      const gapToRail = Math.min(Math.abs(t.minX - railInner), Math.abs(t.maxX - railInner));
+      expect(gapToRail).toBeCloseTo(SMOKE_GAP);
+      expect(outsideColliders('office')).toEqual(expect.arrayContaining([t]));
+      expect(balconyFurniture('lobby', side).table).toBeNull();
+    }
   });
 
   it("drops the lobby's west patio (rail, planters, bench) for the revolving door's grounds, but keeps every office's (#41)", () => {
