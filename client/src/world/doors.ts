@@ -1,4 +1,5 @@
 import { DOOR_SENSOR, HALF_W, SIDE_OPENINGS, SIDES, WALL_T, outsideAt, sideDoorway, sideSign, type Rect, type Side } from './layout';
+import { liveDoorState } from './revolvingDoor';
 
 // The side doors: a glass door in the west and east wall of every floor that slides open when the player comes near
 // and closes behind them. The pure rules are tested; the state below is the floor you're on, stepped by SideDoors
@@ -39,6 +40,10 @@ const doors: Record<Side, Door> = {
 const player = { x: 0, z: 0, floor: 0, kind: 'office' as FloorKind, live: false };
 const shut: Rect[] = [];
 
+/** The sides that still slide open and shut on `kind`'s floor: the lobby's west side is a revolving door now
+ * (#41, revolvingDoor.ts), which never slides and never blocks. */
+const slidingSides = (kind: FloorKind): readonly Side[] => (kind === 'lobby' ? (['east'] as const) : SIDES);
+
 /** A floor came into view: both doors shut. `live` is false once it's gone. */
 export function resetDoors(kind: FloorKind, floor: number, live = true) {
   player.kind = kind;
@@ -59,7 +64,7 @@ export function tickDoors(x: number, z: number, dt: number, moved: (side: Side, 
     for (const w of walkers) if (nearDoor(player.kind, side, w.x, w.z)) return true;
     return false;
   };
-  for (const side of SIDES) {
+  for (const side of slidingSides(player.kind)) {
     const d = doors[side];
     const want = near(side);
     if (want !== d.want && (want ? d.open < 1 : d.open > 0)) moved(side, want);
@@ -74,7 +79,7 @@ export const doorOpen = (side: Side) => doors[side].open;
 /** The doorways whose doors are too shut to walk through, for collide(). The same array every call: don't keep it. */
 export function shutDoorways(): Rect[] {
   shut.length = 0;
-  if (player.live) for (const side of SIDES) if (doors[side].open < DOOR_PASSABLE) shut.push(doors[side].doorway);
+  if (player.live) for (const side of slidingSides(player.kind)) if (doors[side].open < DOOR_PASSABLE) shut.push(doors[side].doorway);
   return shut;
 }
 
@@ -89,12 +94,15 @@ export interface OutsideSnapshot {
   side: Side | null;
   x: number;
   z: number;
+  /** The lobby's west revolving door (#41): its wings' turn and how fast. */
+  revolving: { angle: number; speed: number };
 }
 
 function snapshot(): OutsideSnapshot {
   const side = outsideAt(player.x);
   const door = (s: Side) => ({ open: doors[s].open, phase: doorPhase(doors[s].open, doors[s].want) });
-  return { floor: player.floor, kind: player.kind, doors: { west: door('west'), east: door('east') }, out: side !== null, side, x: player.x, z: player.z };
+  const rev = liveDoorState();
+  return { floor: player.floor, kind: player.kind, doors: { west: door('west'), east: door('east') }, out: side !== null, side, x: player.x, z: player.z, revolving: { angle: rev.angle, speed: rev.speed } };
 }
 
 // window.__swarmOutside: the side doors and whether you're out, for QA and Playwright (a fresh snapshot per read).

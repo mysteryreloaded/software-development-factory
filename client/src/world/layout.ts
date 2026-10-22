@@ -1,5 +1,7 @@
 // Every floor of the building shares one footprint. Units are metres; -Z is "north".
 
+import { drumColliders } from './revolvingDoor';
+
 export const FLOOR_W = 32; // x from -16 to 16
 export const FLOOR_D = 24; // z from -12 to 12
 export const WALL_H = 3.6;
@@ -111,9 +113,11 @@ export function balconyFurniture(kind: FloorKind, side: Side): { planters: Rect[
   };
 }
 
-/** Both balconies' railings, planters and benches. */
+/** Both balconies' railings, planters and benches. The lobby's west patio is gone (#41): a revolving door leads
+ * straight out to the grounds there, so only its east side keeps a railed patio. */
 export function outsideColliders(kind: FloorKind): Rect[] {
-  return SIDES.flatMap((side) => {
+  const sides = kind === 'lobby' ? (['east'] as const satisfies readonly Side[]) : SIDES;
+  return sides.flatMap((side) => {
     const { planters, bench } = balconyFurniture(kind, side);
     return [...balconyRailing(side), ...planters, bench];
   });
@@ -388,6 +392,8 @@ export function missionRects(): Rect[] {
 
 export function lobbyColliders(): Rect[] {
   const out = [...shellColliders('lobby'), ...outsideColliders('lobby')];
+  // the west revolving door's drum (#41): its curved sides are the only solid part (revolvingDoor.ts)
+  out.push(...drumColliders(sideSign('west') * (HALF_W + WALL_T / 2), SIDE_OPENINGS.lobby.west.door));
   const m = MANAGER_ROOM;
   const t = 0.12;
   out.push({ minX: m.maxX - t, maxX: m.maxX + t, minZ: m.minZ, maxZ: m.maxZ, h: SOLID_H.glass }); // glass east wall

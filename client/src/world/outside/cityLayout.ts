@@ -150,8 +150,9 @@ export function cityLayout(seed = CITY.seed): CityLayout {
   for (const b of blocks) {
     const roll = r();
     const landmark = landmarks.get(b);
+    const home = b.ix === -1 && b.iz === 0; // our neighbour park (#41): flat grass only, no trees or fountain
     if (landmark !== undefined) addLandmark(out, landmark, b.cx, b.cz);
-    else if ((b.ix === -1 && b.iz === 0) || roll < 0.05) addPark(out, r, b.x, b.z);
+    else if (home || roll < 0.05) addPark(out, r, b.x, b.z, home);
     else addBlock(out, r, pickOf, b.x, b.z);
   }
   return out;
@@ -234,15 +235,19 @@ function addLandmark(out: CityLayout, which: number, x: number, z: number) {
   }
 }
 
-function addPark(out: CityLayout, r: () => number, bx: Span, bz: Span) {
+function addPark(out: CityLayout, r: () => number, bx: Span, bz: Span, home = false) {
   const w = bx.max - bx.min;
   const d = bz.max - bz.min;
   const x = (bx.min + bx.max) / 2;
   const z = (bz.min + bz.max) / 2;
   out.parks.push({ x: bx, z: bz });
-  out.boxes.push({ x, z, y: 0, w, h: 0.15, d, color: LAWN });
-  out.cylinders.push({ x, z, y: 0.15, w: 9, h: 0.5, d: 9, color: STONE });
-  out.cylinders.push({ x, z, y: 0.2, w: 8, h: 0.5, d: 8, color: WATER });
+  // our neighbour park is flat grass flush with the paving next door: no raised lawn, trees or fountain. Still
+  // draws exactly as many numbers from `r` either way, so skipping it never shifts any other block's seeded layout.
+  out.boxes.push({ x, z, y: 0, w, h: home ? 0.02 : 0.15, d, color: LAWN });
+  if (!home) {
+    out.cylinders.push({ x, z, y: 0.15, w: 9, h: 0.5, d: 9, color: STONE });
+    out.cylinders.push({ x, z, y: 0.2, w: 8, h: 0.5, d: 8, color: WATER });
+  }
   // trees on a jittered grid, leaving the fountain clear
   const step = 7;
   for (let tx = bx.min + 4.5; tx <= bx.max - 4.5; tx += step)
@@ -251,8 +256,10 @@ function addPark(out: CityLayout, r: () => number, bx: Span, bz: Span) {
       const jz = tz + (r() - 0.5) * 2;
       if (Math.hypot(jx - x, jz - z) < 8 || r() < 0.3) continue;
       const s = 0.8 + r() * 0.5;
+      const pattern = Math.floor(r() * TREE.length);
+      if (home) continue;
       out.cylinders.push({ x: jx, z: jz, y: 0.15, w: 0.5, h: 1.4 * s, d: 0.5, color: TRUNK });
-      out.cones.push({ x: jx, z: jz, y: 0.15 + 1.2 * s, w: 3.6 * s, h: 5 * s, d: 3.6 * s, color: TREE[Math.floor(r() * TREE.length)] });
+      out.cones.push({ x: jx, z: jz, y: 0.15 + 1.2 * s, w: 3.6 * s, h: 5 * s, d: 3.6 * s, color: TREE[pattern] });
     }
 }
 
@@ -317,9 +324,11 @@ export function carRoutes(seed = CITY.seed): CarRoute[] {
   const zs = streetLines(CITY.homeHalfZ);
   const mx = xs.length / 2;
   const mz = zs.length / 2;
-  // roads along z at x = ±(first ring), roads along x at z = ±(first ring), then one of each further out
+  // roads along z at x = ±(first ring), roads along x at z = ±(first ring), then one of each further out; the
+  // west street (xs[mx - 1]) is paved over as part of the lobby's grounds (#41), so no car drives it: its two
+  // routes move to the next ring out instead.
   const streets: { axis: 'x' | 'z'; line: number }[] = [
-    { axis: 'z', line: xs[mx - 1] },
+    { axis: 'z', line: xs[mx - 2] },
     { axis: 'z', line: xs[mx] },
     { axis: 'x', line: zs[mz - 1] },
     { axis: 'x', line: zs[mz] },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cleanColor, cleanHeld, cleanName, cleanText, NAME_MAX, parsePresenceEvent, wrapAngle } from './presence.ts';
+import { BOUNDS, cleanColor, cleanHeld, cleanName, cleanText, NAME_MAX, parsePresenceEvent, wrapAngle } from './presence.ts';
 
 describe('cleanName', () => {
   it('trims, collapses whitespace and caps the length', () => {
@@ -60,7 +60,12 @@ describe('cleanText, cleanColor, cleanHeld', () => {
 describe('parsePresenceEvent', () => {
   it('reads a pose, rounding and clamping its numbers', () => {
     const m = parsePresenceEvent(JSON.stringify({ type: 'pose', ts: 1234.5, f: 2, x: 1.23456, z: 999, h: 7, p: -9, held: null }));
-    expect(m).toEqual({ type: 'pose', ts: 1235, f: 2, x: 1.23, z: 18, h: Math.round(wrapAngle(7) * 1000) / 1000, p: -1.6, held: null });
+    expect(m).toEqual({ type: 'pose', ts: 1235, f: 2, x: 1.23, z: BOUNDS.zMax, h: Math.round(wrapAngle(7) * 1000) / 1000, p: -1.6, held: null });
+  });
+
+  it('keeps a floor-0 pose out on the lobby grounds unclamped (#41)', () => {
+    const m = parsePresenceEvent({ type: 'pose', ts: 1, f: 0, x: -80, z: -20, h: 0, p: 0 });
+    expect(m).toMatchObject({ x: -80, z: -20 });
   });
 
   it('rejects bad floors, non-numbers and unknown kinds', () => {

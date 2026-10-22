@@ -11,6 +11,7 @@ import { CameraRig } from './camera/CameraRig';
 import { Chatter } from './Chatter';
 import { CUT_PLANES } from './camera/rig';
 import { lobbyColliders, officeColliders, ROOF, roofColliders } from './layout';
+import { groundsColliders } from './outside/grounds';
 import { decorRects } from './decor/decor';
 import { Graphics } from './gfx/Graphics';
 import { Lobby } from './Lobby';
@@ -84,7 +85,10 @@ export function Game() {
     () =>
       onRoof
         ? roofColliders()
-        : [...(isOffice ? [...officeColliders(), ...decorRects(placed ?? {})] : lobbyColliders()), ...decorColliders(theme, isOffice ? 'office' : 'lobby')],
+        : [
+            ...(isOffice ? [...officeColliders(), ...decorRects(placed ?? {})] : [...lobbyColliders(), ...groundsColliders()]),
+            ...decorColliders(theme, isOffice ? 'office' : 'lobby'),
+          ],
     [onRoof, isOffice, placed, theme],
   );
   const toRoof = useStore((s) => s.travel?.to === ROOF);
