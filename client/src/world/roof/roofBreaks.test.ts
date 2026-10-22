@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { endVisit, freeChair, planVisit, ROOF_BREAK, roofVisit, roofVisits, roomFor, startVisit, updateVisit, visitOn, visitStage, type RoofVisit } from './roofBreaks.ts';
+import { endVisit, freeBenchSeat, freeChair, planVisit, ROOF_BREAK, roofVisit, roofVisits, roomFor, startVisit, updateVisit, visitOn, visitStage, type RoofVisit } from './roofBreaks.ts';
 
 const S = 1000;
-const visit = (id: string, kind: RoofVisit['kind'], chair: number, arrive = 0, leave = 60 * S): RoofVisit => ({ id, kind, chair, arrive, leave });
+const visit = (id: string, kind: RoofVisit['kind'], chair: number, arrive = 0, leave = 60 * S): RoofVisit => ({ id, kind, chair, bench: null, arrive, leave });
 const o = { chairs: 4, playerChair: null };
 
 afterEach(() => {
@@ -49,6 +49,27 @@ describe('roof visits', () => {
     expect(call).toMatchObject({ kind: 'call', chair: -1, arrive: 2 * S, leave: 32 * S });
     expect(planVisit([visit('a', 'break', 0), visit('b', 'break', 1)], 'c', 'break', 0, 0.5, o)).toBeNull();
     expect(planVisit([], 'c', 'break', 0, 0.5, { chairs: 1, playerChair: 0 })).toBeNull();
+  });
+
+  it("a break visitor sometimes takes the smoke bench instead, only when a seat there is free, never for the CEO's call", () => {
+    // both bench seats free: a low roll (under benchChance) takes one, and no deck chair
+    const v = planVisit([], 'a', 'break', 0, 0, o)!;
+    expect(v.bench).toBe(0);
+    expect(v.chair).toBe(-1);
+    // seat 0 already held (by the other visit up there): the next low roll gets the one that's free
+    const v2 = planVisit([v], 'b', 'break', 0, 0.1, o)!;
+    expect(v2.bench).toBe(1);
+    // a high roll (at or past benchChance) never tries the bench, free seats or not
+    const v3 = planVisit([], 'c', 'break', 0, ROOF_BREAK.benchChance, o)!;
+    expect(v3.bench).toBeNull();
+    expect(v3.chair).toBeGreaterThanOrEqual(0);
+    // freeBenchSeat itself: both free, one held (another visit's, or the player's own), both held
+    expect(freeBenchSeat([], [], 0)).toBe(0);
+    expect(freeBenchSeat([v], [], 0)).toBe(1);
+    expect(freeBenchSeat([], [0], 0)).toBe(1);
+    expect(freeBenchSeat([v], [1], 0)).toBe(-1);
+    // the CEO's call never takes the bench, however the roll falls
+    for (const rand of [0, 0.1, 0.2, 0.3]) expect(planVisit([], 'ceo', 'call', 0, rand, o)!.bench).toBeNull();
   });
 
   it('are shared by every floor until they end, or their time is up', () => {

@@ -49,8 +49,8 @@ describe('a roof break, downstairs', () => {
   });
 
   it('steps back out if the roof filled up while they walked over', () => {
-    startVisit({ id: 'a', kind: 'break', chair: 0, arrive: Date.now(), leave: Date.now() + 60_000 });
-    startVisit({ id: 'b', kind: 'break', chair: 1, arrive: Date.now(), leave: Date.now() + 60_000 });
+    startVisit({ id: 'a', kind: 'break', chair: 0, bench: null, arrive: Date.now(), leave: Date.now() + 60_000 });
+    startVisit({ id: 'b', kind: 'break', chair: 1, bench: null, arrive: Date.now(), leave: Date.now() + 60_000 });
     const script = rideUp('kai', 'break');
     script.tick(me(true));
     let act = 'stand';

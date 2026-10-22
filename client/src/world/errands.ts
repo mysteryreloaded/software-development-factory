@@ -81,6 +81,12 @@ export interface Errand {
   cue?(agentId: string, cue: string): boolean;
   /** They're done with it and heading back ('done' after every step), or it was cut short or never got going ('cut'). */
   end?(agentId: string, how: 'done' | 'cut'): void;
+  /**
+   * The floor itself is being left behind (or they're gone entirely), on top of `end`: whatever `end` left to
+   * finish later by itself (a door that stays open until they're back inside, say) must happen right now instead,
+   * since nothing will be ticking any more to do it.
+   */
+  discard?(agentId: string): void;
   /** At most this many people on this errand per floor at once. */
   max?: number;
   /** Seconds a script may run once there before it's cut short (default a few minutes: a game of ping-pong takes longer). */

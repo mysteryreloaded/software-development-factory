@@ -9,6 +9,7 @@ import { WALK_SPEED, type Gesture } from './body';
 import { chatSay } from './Chatter';
 import { playerAt } from './camera/rig';
 import './coffeeErrand';
+import { tickSmokeDoorWalkers } from './smokeErrand';
 import {
   HURRY_SPEED,
   admit,
@@ -203,6 +204,11 @@ export function ErrandDirector({
 
   /** Let go: up to the spot behind their chair to pick up a box (then out: see 'there'). */
   const depart = (p: Person) => {
+    if (p.phase !== 'seated') {
+      // let go of anything an errand was holding (a seat, say); discard forces what end() left for later right now
+      p.errand?.end?.(p.id, 'cut');
+      p.errand?.discard?.(p.id);
+    }
     endScript(p); // let go of a toy first
     p.queue = [];
     walk(p, 'leaving', LEAVE, p.home, [{ x: p.home.x, z: p.home.z }]);
@@ -271,7 +277,11 @@ export function ErrandDirector({
     }
     for (const [id, p] of people) {
       if (seen.has(id)) continue;
-      if (p.errand === TOUR && p.phase !== 'seated') tourEnded(id, 'cut');
+      // TOUR's own end is tourEnded; smoke's lets go of its seat, and discard forces its door walker right now too
+      if (p.phase !== 'seated') {
+        p.errand?.end?.(id, 'cut');
+        p.errand?.discard?.(id);
+      }
       endScript(p);
       p.actor?.abort();
       p.actor?.end(false);
@@ -286,7 +296,10 @@ export function ErrandDirector({
   useEffect(
     () => () => {
       for (const [id, p] of people) {
-        if (p.errand === TOUR && p.phase !== 'seated') tourEnded(id, 'cut');
+        if (p.phase !== 'seated') {
+          p.errand?.end?.(id, 'cut');
+          p.errand?.discard?.(id);
+        }
         endScript(p);
         p.actor?.end(false);
         seatBody(id);
@@ -643,6 +656,7 @@ export function ErrandDirector({
     const dt = run.fresh ? 0 : Math.min(delta, 0.1);
     run.fresh = false;
     run.clock += dt;
+    tickSmokeDoorWalkers(); // a side door stays open for someone walking home from one until they're actually back in
     const byId = new Map(latest.current.map((a) => [a.id, a]));
 
     // Who's up and about, for steering round each other.

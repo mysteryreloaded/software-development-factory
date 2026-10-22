@@ -8,6 +8,7 @@ import { ding } from '../../ui/sfx';
 import { isFree, registerErrand, type Act, type Errand, type ErrandAgent, type ErrandScript, type ErrandState } from '../errands';
 import { DECK_CHAIRS, HALF_D, ROOF } from '../layout';
 import { setHidden } from '../people';
+import { playerSeatsAt } from '../smokeBreak';
 import { CABIN, DOORS_SECONDS } from '../socials';
 import { endVisit, planVisit, ROOF_BREAK, roofVisit, roofVisits, roomFor, startVisit, type VisitKind } from './roofBreaks';
 
@@ -34,7 +35,7 @@ export function rideUp(id: string, kind: VisitKind): ErrandScript {
           t += me.dt;
           if (t < DOORS_SHUT) return doing('stand');
           const now = Date.now();
-          const v = roofVisit(id) ?? planVisit(roofVisits(now), id, kind, now, Math.random(), { chairs: DECK_CHAIRS.xs.length, playerChair: null });
+          const v = roofVisit(id) ?? planVisit(roofVisits(now), id, kind, now, Math.random(), { chairs: DECK_CHAIRS.xs.length, playerChair: null, playerBenchSeats: playerSeatsAt('roof') });
           if (!v) return doing('done'); // someone took the last chair meanwhile: back out
           startVisit(v);
           setHidden(id, true);
