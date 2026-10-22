@@ -203,6 +203,7 @@ export function ErrandDirector({
 
   /** Let go: up to the spot behind their chair to pick up a box (then out: see 'there'). */
   const depart = (p: Person) => {
+    if (p.phase !== 'seated') p.errand?.end?.(p.id, 'cut'); // let go of anything an errand was holding (a seat, say)
     endScript(p); // let go of a toy first
     p.queue = [];
     walk(p, 'leaving', LEAVE, p.home, [{ x: p.home.x, z: p.home.z }]);
@@ -271,7 +272,7 @@ export function ErrandDirector({
     }
     for (const [id, p] of people) {
       if (seen.has(id)) continue;
-      if (p.errand === TOUR && p.phase !== 'seated') tourEnded(id, 'cut');
+      if (p.phase !== 'seated') p.errand?.end?.(id, 'cut'); // TOUR's own end is tourEnded; smoke's lets go of its seat
       endScript(p);
       p.actor?.abort();
       p.actor?.end(false);
@@ -286,7 +287,7 @@ export function ErrandDirector({
   useEffect(
     () => () => {
       for (const [id, p] of people) {
-        if (p.errand === TOUR && p.phase !== 'seated') tourEnded(id, 'cut');
+        if (p.phase !== 'seated') p.errand?.end?.(id, 'cut');
         endScript(p);
         p.actor?.end(false);
         seatBody(id);

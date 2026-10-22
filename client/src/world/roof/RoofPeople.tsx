@@ -119,12 +119,18 @@ export function RoofPeople() {
   const walkers = useMemo(() => new Map<string, Walker>(), []);
   const run = useMemo(() => ({ roll: ROLL.every, mounted: Date.now(), dirty: false }), []);
 
-  // Off the roof: their visits carry on (roofBreaks.ts), but nobody here is driving their bodies any more.
+  // Off the roof: their visits carry on (roofBreaks.ts), but nobody here is driving their bodies any more. A bench
+  // seat and a lit joint are this component's own (nothing else frees them), so a bench walker lets go of both:
+  // nobody will be back to stub it out before the visit's own time runs out and roofVisits() forgets it.
   useEffect(
     () => () => {
-      for (const id of walkers.keys()) {
-        seatBody(id);
-        say(id, null);
+      for (const w of walkers.values()) {
+        if (w.bench != null) {
+          setAgentSeat('roof', w.bench, null);
+          setHandJoint(w.id, null);
+        }
+        seatBody(w.id);
+        say(w.id, null);
       }
       walkers.clear();
     },
@@ -337,8 +343,9 @@ export function RoofPeople() {
               w.stage = 'call';
               w.t = 0;
             } else if (w.bench != null) {
-              // the seat may have gone to someone else a moment ago: back up and sit a while longer
-              if (agentAtSeat('roof', w.bench) != null) {
+              // the seat may have gone to someone else a moment ago (another visit's, or the player's own): back
+              // up and head home instead
+              if (agentAtSeat('roof', w.bench) != null || playerSeatsAt('roof').includes(w.bench)) {
                 leave(w, false, st!);
                 break;
               }

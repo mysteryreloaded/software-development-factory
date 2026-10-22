@@ -105,6 +105,33 @@ describe('the smoke errand', () => {
     }
   });
 
+  it('the player sitting down mid-walk, before the cue fires, cancels the sit: no seat claimed', () => {
+    let youSeat: 0 | 1 | null = null;
+    const unregister = registerNook('office-west', {
+      focusAt: () => null,
+      sit: () => {},
+      press: () => {},
+      label: () => '',
+      stub: () => {},
+      report: () => ({
+        seats: [0, 1].map((i): 'free' | 'you' | `agent:${string}` => (i === youSeat ? 'you' : 'free')) as ['free' | 'you' | `agent:${string}`, 'free' | 'you' | `agent:${string}`],
+        butts: 0,
+        stage: 'empty' as Stage,
+        puffsLeft: 0,
+      }),
+    });
+    try {
+      setErrand('kai', { name: 'smoke', phase: 'there', spot: 'smoke-office-west-0' });
+      youSeat = 0; // sat down while kai was still walking over
+      expect(smoke.cue!('kai', 'sit')).toBe(false);
+      expect(agentAtSeat('office-west', 0)).toBeNull();
+      expect(handJoint('kai')).toBeNull();
+      setErrand('kai', null);
+    } finally {
+      unregister();
+    }
+  });
+
   it('a second agent never gets a seat the first is already sitting in', () => {
     const unWest = registerNook('office-west', fakeNook('office-west'));
     const unEast = registerNook('office-east', fakeNook('office-east'));

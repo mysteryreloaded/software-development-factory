@@ -7,7 +7,7 @@ import type { Gesture } from './body';
 import { registerErrand, isFree, type ErrandStep } from './errands';
 import { doorWalkers } from './hiringState';
 import { errandOf, handJoint, setHandJoint } from './people';
-import { agentAtSeat, NPC_SMOKE, nookStub, setAgentSeat, smokeNookReports, type NookId } from './smokeBreak';
+import { NPC_SMOKE, nookStub, setAgentSeat, smokeNookReports, type NookId } from './smokeBreak';
 
 /** Nook and seat a smoke-break spot id (`smoke-<nookId>-<0|1>`, walkways.ts) names. */
 function parseSmokeSpot(spotId: string): { nook: NookId; seat: 0 | 1 } | null {
@@ -50,8 +50,10 @@ registerErrand({
   },
   cue(agentId, cue) {
     if (cue === 'sit') {
-      const parsed = parseSmokeSpot(errandOf(agentId)?.spot ?? '');
-      if (!parsed || agentAtSeat(parsed.nook, parsed.seat)) return false; // taken a moment ago after all
+      const spotId = errandOf(agentId)?.spot ?? '';
+      const parsed = parseSmokeSpot(spotId);
+      // taken a moment ago after all (an agent's, or the player's own, sitting down while this one walked over)
+      if (!parsed || !freeSmokeSpots().includes(spotId)) return false;
       seated.set(agentId, parsed);
       setAgentSeat(parsed.nook, parsed.seat, agentId);
       setHandJoint(agentId, { lit: false, puffsLeft: NPC_SMOKE.puffs, exhaleAt: 0 });
