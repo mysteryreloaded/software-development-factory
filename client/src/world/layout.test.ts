@@ -429,6 +429,8 @@ describe('outside: side doors, windows and balconies', () => {
       expect(outsideColliders('office')).toEqual(expect.arrayContaining([t]));
       expect(balconyFurniture('lobby', side).table).toBeNull();
     }
+  });
+
   it("drops the lobby's west patio (rail, planters, bench) for the revolving door's grounds, but keeps every office's (#41)", () => {
     const west = balconyFurniture('lobby', 'west');
     const lobbyWestStuff = [...balconyRailing('west'), ...west.planters, west.bench];

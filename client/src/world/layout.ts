@@ -128,8 +128,8 @@ export function balconyFurniture(kind: FloorKind, side: Side): { planters: Rect[
 export function outsideColliders(kind: FloorKind): Rect[] {
   const sides = kind === 'lobby' ? (['east'] as const satisfies readonly Side[]) : SIDES;
   return sides.flatMap((side) => {
-    const { planters, bench } = balconyFurniture(kind, side);
-    return [...balconyRailing(side), ...planters, bench];
+    const { planters, bench, table } = balconyFurniture(kind, side);
+    return table ? [...balconyRailing(side), ...planters, bench, table] : [...balconyRailing(side), ...planters, bench];
   });
 }
 
