@@ -70,8 +70,9 @@ test('a match without skipWalk reaches live: ParkOpponent.tsx claims and walks t
   // tickPenalty() abort as 'an agent called back to work leaves no result'): retry with a fresh one rather than
   // flaking on bad luck.
   let stage: string | null = null;
+  let opponentId: string | null = null;
   for (let attempt = 0; attempt < 3 && stage !== 'live'; attempt++) {
-    const opponentId = await freeAgent(page);
+    opponentId = await freeAgent(page);
     expect(await call(page, 'start', opponentId)).toBe(true);
     try {
       await expect
@@ -91,6 +92,13 @@ test('a match without skipWalk reaches live: ParkOpponent.tsx claims and walks t
     }
   }
   expect(stage).toBe('live');
+
+  // the walk-out must never leave them hidden (ParkOpponent.tsx no longer calls setHidden: that hid every
+  // Character for that id, its own included, which is how the opponent went invisible)
+  const people = await page.evaluate(
+    () => (window as unknown as { __swarmPeople: { list(): { id: string; hidden: boolean }[] } }).__swarmPeople.list(),
+  );
+  expect(people.find((p) => p.id === opponentId)?.hidden).toBe(false);
 });
 
 test('a probe-driven match reports the winner and the hardest shot to the office-wide board', async ({ page }) => {
