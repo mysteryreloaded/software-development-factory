@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { agentsOnRepo, kanbanFor, useStore, type Agent } from '../store';
 import { CEO_ID, type RepoView } from '../../../shared/types';
+import { MAX_FILES } from '../../../shared/attachments';
 import { agentLabel } from '../ui/floorRows';
+import { AttachButton, AttachmentChips, usePendingAttachments } from '../ui/AttachButton';
 import { MessageBox } from '../ui/MessageBox';
 import { toolVerb } from '../world/draw';
 import { agentActions, assignChoices, doing } from './pocketData';
@@ -43,15 +45,19 @@ function AgentCard({ agent, repo }: { agent: Agent; repo: RepoView }) {
   const [pick, setPick] = useState('');
   const [writing, setWriting] = useState(false);
   const [text, setText] = useState('');
+  const attach = usePendingAttachments();
   const can = agentActions(agent);
   const choices = assignChoices(cols);
   const chosen = choices.find((c) => c.key === pick);
   const working = agent.status === 'working' || agent.status === 'preparing';
   const send = async () => {
+    if (attach.busy) return;
     const t = text.trim();
-    if (!t) return;
-    if (await run(() => api.message(agent.id, t))) {
+    const ids = attach.ids();
+    if (!t && ids.length === 0) return;
+    if (await run(() => api.message(agent.id, t, ids))) {
       setText('');
+      attach.reset();
       setWriting(false);
     }
   };
@@ -113,24 +119,29 @@ function AgentCard({ agent, repo }: { agent: Agent; repo: RepoView }) {
         </button>
       </div>
       {writing && can.message && (
-        <form
-          className="pk-msg"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send();
-          }}
-        >
-          <MessageBox
-            value={text}
-            onChange={setText}
-            autoFocus
-            aria-label={`Message ${agent.name}`}
-            placeholder={working ? `Tell ${agent.name} something while they work…` : `Ask ${agent.name} for a follow-up…`}
-          />
-          <button className="btn btn-small btn-good" disabled={busy || !text.trim()}>
-            Send
-          </button>
-        </form>
+        <>
+          <AttachmentChips files={attach.files} remove={attach.remove} />
+          <form
+            className="pk-msg"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void send();
+            }}
+          >
+            <AttachButton onFiles={attach.add} disabled={attach.files.length >= MAX_FILES} />
+            <MessageBox
+              value={text}
+              onChange={setText}
+              onFiles={attach.add}
+              autoFocus
+              aria-label={`Message ${agent.name}`}
+              placeholder={working ? `Tell ${agent.name} something while they work…` : `Ask ${agent.name} for a follow-up…`}
+            />
+            <button className="btn btn-small btn-good" disabled={busy || attach.busy || (!text.trim() && attach.files.length === 0)}>
+              Send
+            </button>
+          </form>
+        </>
       )}
     </div>
   );
