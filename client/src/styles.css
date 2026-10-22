@@ -3446,6 +3446,131 @@ input.inline:focus {
   background: #fff;
 }
 
+/* ui/AttachButton.tsx: the 📎 by a message box, the chip row for files it's picked up, and attachments in a bubble (#48) */
+.btn-attach {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: #fff;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.btn-attach:hover:not(:disabled) {
+  background: #ffe9a8;
+}
+.btn-attach:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.attach-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.attach-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px 0;
+  background: #fff;
+}
+.attach-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  padding: 3px 6px;
+  border: 1.5px solid rgba(31, 29, 43, 0.3);
+  border-radius: 999px;
+  background: #f4f1ea;
+  font-size: 0.76rem;
+}
+.attach-chip-failed {
+  border-color: #d9480f;
+  background: #ffe6db;
+}
+.attach-chip-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.attach-chip-icon {
+  font-size: 0.9rem;
+}
+.attach-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-chip-spin {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid rgba(31, 29, 43, 0.25);
+  border-top-color: var(--ink);
+  animation: spin 0.8s linear infinite;
+}
+.attach-chip-warn {
+  color: #d9480f;
+}
+.attach-chip-x {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  cursor: pointer;
+  color: var(--muted);
+  line-height: 1;
+}
+.attach-chip-x:hover {
+  color: var(--ink);
+}
+.bubble-attachments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.bubble-img-link {
+  display: block;
+}
+.bubble-img {
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: 10px;
+  display: block;
+}
+.bubble-video {
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: 10px;
+  display: block;
+}
+.bubble-doc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1.5px solid rgba(31, 29, 43, 0.3);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+.bubble-doc-chip:hover {
+  border-color: var(--accent);
+}
+
 /* ui/MicButton.tsx: the 🎙 by a message box's Send, and what it's doing */
 .mic {
   position: relative;

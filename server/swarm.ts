@@ -28,6 +28,7 @@ import { checkTriageTarget, triageStep, type TriagePr } from './triage.ts';
 import { DEFAULT_PREVIEW, Previews, parsePreviewPatch } from './previews.ts';
 import { PREVIEW_SLUG } from './previewRunner.ts';
 import { pruneQaShots, qaShotsDir, readQaShot, removeQaShots, saveQaShots } from './qaShots.ts';
+import { copyUpload, pruneUploads } from './uploads.ts';
 import { agentPromptPreview, ceoPromptPreview, devBranch, devSystemPrompt, failedLogLines, noPushNudge, ownPrLine, qaBranch, qaSystemPrompt } from './prompts.ts';
 import { QA_RESUME_PROMPT, qaRetry } from './qaRetry.ts';
 import { drainDecision, lastUpdateMessage, POSTPONE_MS, type DrainInput, type LastUpdate } from './officeUpdate.ts';
@@ -53,6 +54,7 @@ import { WeatherService } from './weather.ts';
 import { blockers, holdUps, waitsMessage } from '../shared/issues.ts';
 import { dayKey, journalFrame, legacyAgent, legacyRequest } from '../shared/journal.ts';
 import { cleanStyle, HAIR_COLORS, SKIN_TONES, type AgentStyle } from '../shared/looks.ts';
+import { attachedBlock, MAX_FILES } from '../shared/attachments.ts';
 import { MESSAGE_MAX, messageProblem } from '../shared/message.ts';
 import { achievementDef, type ProgressView } from '../shared/progress.ts';
 import { parsePongResult, PONG_PLAYER, recordGame } from '../shared/pong.ts';
@@ -69,6 +71,7 @@ import type {
   AgentStatus,
   AgentTask,
   AgentView,
+  AttachmentView,
   CeoInfo,
   CliView,
   ClientEvent,
@@ -308,6 +311,8 @@ const CEO_EFFORT: EffortLevel = 'xhigh';
 const CEO_NAME = 'Morgan';
 // The CEO's own folder: its notes about the company live here. Repos are read through their clones.
 const CEO_DIR = path.join(HOME_DIR, 'ceo');
+/** Files the manager attaches to a phone message (#48), before being copied into CEO_DIR/attachments for a chat. */
+export const UPLOADS_DIR = path.join(HOME_DIR, 'uploads');
 const DEFAULT_PROJECTS_DIR = defaultProjectsDir(path.resolve(import.meta.dirname, '..'));
 const MAX_ISSUES_PER_JOB = 12;
 const KEEP_MESSAGES = 200;
@@ -784,6 +789,7 @@ export class Swarm {
     ]);
     for (const r of this.state.repos) void this.previews.refreshDefault(r);
     void pruneQaShots(QA_SHOTS_DIR, new Set(this.state.qa.map((q) => `${q.repoId}#${q.prNumber}`)));
+    void pruneUploads(UPLOADS_DIR);
     this.finishRestart(restart);
     // A PR the restart left in "testing" with nobody on it: test it again (the result, if any, was lost).
     for (const rec of orphanedQa(this.state.qa, this.state.agents, BUSY)) this.setQa(rec, { status: 'queued', qaAgentId: null });
@@ -3964,22 +3970,44 @@ export class Swarm {
     setTimeout(() => this.schedule(), 300);
   }
 
-  /** The manager's phone → the CEO. Injected into a running session, otherwise the CEO picks it up next. */
-  async messageCeo(text: string) {
-    const problem = messageProblem(text);
-    if (problem) throw new HttpError(400, problem);
+  /** Copies the manager's picked uploads (server/uploads.ts) into the CEO's own folder, where its Read tool can
+   * open them; throws on an id that isn't a saved upload. */
+  private async attachFiles(ids: string[]): Promise<{ path: string; view: AttachmentView }[]> {
+    if (ids.length === 0) return [];
+    if (ids.length > MAX_FILES) throw new HttpError(400, `Up to ${MAX_FILES} files per message.`);
+    const destDir = path.join(CEO_DIR, 'attachments');
+    const out: { path: string; view: AttachmentView }[] = [];
+    for (const id of ids) {
+      const copied = await copyUpload(UPLOADS_DIR, id, destDir);
+      if (!copied) throw new HttpError(400, `Unknown attachment: ${id}`);
+      out.push(copied);
+    }
+    return out;
+  }
+
+  /** The manager's phone → the CEO, with up to MAX_FILES files already uploaded (POST /api/uploads). The text may be
+   * empty when there's a file. Injected into a running session, otherwise the CEO picks it up next. */
+  async messageCeo(text: string, ids: string[] = []) {
     const t = text.trim();
+    if (!t && ids.length === 0) throw new HttpError(400, 'Empty message');
+    if (t) {
+      const problem = messageProblem(text);
+      if (problem) throw new HttpError(400, problem);
+    }
+    const attached = await this.attachFiles(ids);
+    const block = attachedBlock(attached.map((f) => ({ path: f.path, info: f.view })));
+    const forCeo = [t, block].filter(Boolean).join('\n\n');
     const a = this.ceo();
-    this.postMessage('manager', t);
+    this.postMessage('manager', t, undefined, attached.map((f) => f.view));
     const rt = this.agentRt.get(a.id)!;
     if (rt.session) {
-      this.appendLog(a, [{ kind: 'manager', text: `▶ Manager: ${t}` }]);
+      this.appendLog(a, [{ kind: 'manager', text: `▶ Manager: ${forCeo}` }]);
       this.ceoIssues.managerMessage(); // a new request: the issue cap counts from here
       this.ceoAsked = true;
-      rt.session.send(`Message from the manager (they read your reply on their phone, so keep it short):\n${t}`);
+      rt.session.send(`Message from the manager (they read your reply on their phone, so keep it short):\n${forCeo}`);
       return;
     }
-    this.enqueueCeo({ kind: 'chat', text: t, at: Date.now() });
+    this.enqueueCeo({ kind: 'chat', text: forCeo, at: Date.now() });
   }
 
   requestReview() {
@@ -4678,9 +4706,9 @@ export class Swarm {
 
   // ---------- the phone ----------
 
-  private postMessage(from: PhoneMessage['from'], text: string, requestId?: string) {
+  private postMessage(from: PhoneMessage['from'], text: string, requestId?: string, attachments?: AttachmentView[]) {
     const clipped = from === 'manager' ? text.trim().slice(0, MESSAGE_MAX) : text.trim().slice(0, 6000);
-    const m: PhoneMessage = { id: this.messageSeq++, from, text: clipped, at: Date.now(), ...(requestId ? { requestId } : {}) };
+    const m: PhoneMessage = { id: this.messageSeq++, from, text: clipped, at: Date.now(), ...(requestId ? { requestId } : {}), ...(attachments?.length ? { attachments } : {}) };
     const v = this.state.settings.voice;
     if (v.provider !== 'off' && speaks(m, v)) m.voice = v.provider; // what the phone's ▶ replays it with
     this.state.messages.push(m);
