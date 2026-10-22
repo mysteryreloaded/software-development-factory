@@ -1,5 +1,5 @@
 import { GROUNDS } from '../client/src/world/outside/grounds';
-import { HALF_W, SIDE_OPENINGS, WALL_T } from '../client/src/world/layout';
+import { balconySides, HALF_W, SIDE_OPENINGS, WALL_T } from '../client/src/world/layout';
 import { enterOffice, expect, startAt, test } from './helpers';
 
 // The lobby's grounds (#41): out through the west revolving door onto the plaza, across the paved street, to the
@@ -8,6 +8,7 @@ import { enterOffice, expect, startAt, test } from './helpers';
 
 interface Outside {
   floor: number;
+  kind: 'office' | 'lobby';
   x: number;
   z: number;
   out: boolean;
@@ -165,4 +166,34 @@ test('shows the park and the building from outside', async ({ page }) => {
   await page.waitForTimeout(300);
   await expect(page.locator('canvas').first()).toBeVisible();
   await page.screenshot({ path: 'test-results/grounds-park-view.png' });
+});
+
+// #78: the ground floor must never show a balcony (railing, glass, slab, planter, flowers, bench or table) in front
+// of its west wall, however you get there. balconySides('lobby') is the pure switch both Outside.tsx's own-floor
+// furniture and themes/christmas.tsx's SnowCover read to decide that; it drives the assertions below as well as the
+// rendering itself, so a regression in either file shows up here.
+
+test('no balcony in front of the lobby, looking back at it from outside the door (#78)', async ({ page }, testInfo) => {
+  expect(balconySides('lobby')).toEqual(['east']);
+
+  // clear of the building, facing it (yaw -π/2 faces +x, back towards the building, as in the park view above)
+  await startAt(page, { floor: 0, x: wall - 4, z: door, yaw: -Math.PI / 2, pitch: 0 });
+  await enterOffice(page);
+
+  await expect.poll(() => outsideOf(page), { timeout: 60_000 }).toMatchObject({ floor: 0, kind: 'lobby', out: true });
+  await page.waitForTimeout(300); // let the frame settle before capturing it
+  await page.screenshot({ path: testInfo.outputPath('before-door.png') });
+});
+
+test('reload while standing on the grounds keeps the lobby view, not an office balcony (#78)', async ({ page }, testInfo) => {
+  // just outside the door, as the saved view would leave you (Player.tsx:263-280)
+  await startAt(page, { floor: 0, x: wall - 2, z: door, yaw: -Math.PI / 2, pitch: 0 });
+  await enterOffice(page);
+  await expect.poll(() => outsideOf(page), { timeout: 60_000 }).toMatchObject({ floor: 0, kind: 'lobby', out: true });
+
+  await page.reload();
+  await enterOffice(page, { loaded: true });
+  await expect.poll(() => outsideOf(page), { timeout: 60_000 }).toMatchObject({ floor: 0, kind: 'lobby', out: true });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: testInfo.outputPath('after-reload.png') });
 });

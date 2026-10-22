@@ -6,7 +6,7 @@ import { doorSlide } from '../ui/sfx';
 import { playerAt } from './camera/rig';
 import { doorOpen, resetDoors, tickDoors } from './doors';
 import { drawFacade } from './draw';
-import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, BENCH, FLOOR_HEIGHT, HALF_D, HALF_W, PLANTER, SIDE_DOOR, SIDE_OPENINGS, SIDES, WALL_H, WALL_T, WINDOW, balconyFurniture, floorElevation, sideSign, type Side } from './layout';
+import { BALCONY, BALCONY_LIGHTS, BALCONY_OUT, balconySides, BENCH, FLOOR_HEIGHT, HALF_D, HALF_W, PLANTER, SIDE_DOOR, SIDE_OPENINGS, SIDES, WALL_H, WALL_T, WINDOW, balconyFurniture, floorElevation, sideSign, type Side } from './layout';
 import { toon, toonMap } from './materials';
 import { OutsideSounds } from './OutsideSounds';
 import { doorWalkers } from './hiringState';
@@ -196,7 +196,7 @@ function balconyGeometry(floor: number, top: number) {
  * The lobby's west side has no balcony any more (its patio is gone, #41), so it gets no furniture or lamps there;
  * offices keep theirs on both sides. */
 function furnitureGeometry(kind: FloorKind) {
-  const sides = kind === 'lobby' ? (['east'] as const satisfies readonly Side[]) : SIDES;
+  const sides = balconySides(kind);
   const planters: BoxSpec[] = [];
   const bench: BoxSpec[] = [];
   const legs: BoxSpec[] = [];
