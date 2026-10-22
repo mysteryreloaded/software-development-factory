@@ -331,7 +331,8 @@ test('leaving the floor mid-break (#58) frees the seat: it never stays agent:<id
   await goToFloor(other);
   await goToFloor(floor);
   expect((await smoke()).nooks.flatMap((n) => n.seats)).not.toContain(`agent:${who}`);
-test('two tabs: a visitor sees the other sit, roll, light and puff, and can share the bench but not the seat (#59)', async ({ page, baseURL }) => {}});
+});  
+test('two tabs: a visitor sees the other sit, roll, light and puff, and can share the bench but not the seat (#59)', async ({ page, baseURL }) => {}
   test.setTimeout(120_000);
   const n = nook('office-west');
   const gap = { x: (n.gap.minX + n.gap.maxX) / 2, z: (n.gap.minZ + n.gap.maxZ) / 2 };
