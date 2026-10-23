@@ -977,6 +977,31 @@ input.inline:focus {
   font-weight: 700;
   margin-right: 4px;
 }
+/* Issue #86: the overview/building toolbar fades its own background (and its buttons') to 20% opacity, the same
+   treatment #85 gives the floor card. Only `background`, never `opacity`: the title, labels, kbd, the 3px border
+   and the drop shadow stay opaque, and a light halo keeps the text readable over a dark or night floor. High
+   contrast restores solid backgrounds (below). */
+.cam-bar {
+  background: color-mix(in srgb, var(--paper) 20%, transparent);
+}
+.cam-bar .cam-title {
+  text-shadow: 0 0 3px var(--paper), 0 0 6px var(--paper);
+}
+.cam-bar .btn {
+  background: color-mix(in srgb, #fff 20%, transparent);
+  text-shadow: 0 0 3px var(--paper), 0 0 6px var(--paper);
+}
+.cam-bar .btn-good {
+  background: color-mix(in srgb, #80ed99 20%, transparent);
+}
+.cam-bar .btn:hover:not(:disabled),
+.cam-bar .btn:focus-visible {
+  background: color-mix(in srgb, #fff 45%, transparent);
+}
+.cam-bar .btn-good:hover:not(:disabled),
+.cam-bar .btn-good:focus-visible {
+  background: color-mix(in srgb, #80ed99 45%, transparent);
+}
 .cam-tip {
   position: absolute;
   left: 50%;
@@ -5594,6 +5619,28 @@ html[data-high-contrast] .hud-top-scroll .usage-chip-paused {
 }
 html[data-high-contrast] .hud-top-scroll .doctor-chip {
   background: #d9d2ff;
+}
+/* Issue #86: high contrast keeps the overview/building toolbar's solid backgrounds the 20% fade above gives up. */
+html[data-high-contrast] .cam-bar {
+  background: var(--paper);
+}
+html[data-high-contrast] .cam-bar .cam-title {
+  text-shadow: none;
+}
+html[data-high-contrast] .cam-bar .btn {
+  background: #fff;
+  text-shadow: none;
+}
+html[data-high-contrast] .cam-bar .btn-good {
+  background: #80ed99;
+}
+html[data-high-contrast] .cam-bar .btn:hover:not(:disabled),
+html[data-high-contrast] .cam-bar .btn:focus-visible {
+  background: #fff;
+}
+html[data-high-contrast] .cam-bar .btn-good:hover:not(:disabled),
+html[data-high-contrast] .cam-bar .btn-good:focus-visible {
+  background: #80ed99;
 }
 html[data-high-contrast] .hud-resume {
   padding: 4px 12px;
