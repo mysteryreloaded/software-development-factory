@@ -378,4 +378,21 @@ describe('a visitor match (#47): refereed by the server, applyPkState/applyPkKic
     applyPkKick({ type: 'pk-kick', shot: { x: 1, y: 2, power: 0.8 }, dive: null, result: 'goal', kmh: 130 });
     expect(penaltyMatch()!.stage).toBe('flight'); // now settled
   });
+
+  it("pk-kick keeps pk-strike's own timing for this same kick, rather than restarting the flight from the spot", () => {
+    applyPkState({ type: 'pk-state', phase: 'live', turn: 'player', players: [{ id: 'me', name: 'Me', side: 'player' }, { id: 'other', name: 'Other', side: 'opponent' }], kicks: [] });
+    vi.advanceTimersByTime(500);
+    tickPenalty();
+
+    applyPkStrike({ type: 'pk-strike', shot: { x: 1, y: 2, power: 0.8 } });
+    const strikeAt = penaltyMatch()!.strikeAt;
+    expect(strikeAt).not.toBeNull();
+
+    vi.advanceTimersByTime(10_000); // well past this kmh's flight time, still waiting on pk-kick to settle it
+    applyPkKick({ type: 'pk-kick', shot: { x: 1, y: 2, power: 0.8 }, dive: null, result: 'goal', kmh: 130 });
+    expect(penaltyMatch()!.strikeAt).toBe(strikeAt); // unchanged - restarting it would fly the ball a second time
+
+    tickPenalty(); // flight (relative to the ORIGINAL strikeAt) is already well past: resolves at once, not another wait
+    expect(penaltyMatch()!.stage).toBe('result');
+  });
 });

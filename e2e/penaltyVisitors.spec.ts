@@ -25,8 +25,6 @@ interface PenaltyProbe {
 }
 // A backgrounded tab's rAF (so its own clock: world/park/penaltyState.ts tickPenalty, run every frame from
 // ParkOpponent.tsx) is throttled hard by Chrome; bringToFront() before touching a page keeps its match ticking.
-// A backgrounded tab's rAF (so its own clock: world/park/penaltyState.ts tickPenalty, run every frame from
-// ParkOpponent.tsx) is throttled hard by Chrome; bringToFront() before touching a page keeps its match ticking.
 const penalty = async (page: Page) => {
   await page.bringToFront();
   return page.evaluate(() => (window as unknown as { __swarmPenalty: PenaltyProbe }).__swarmPenalty.state);

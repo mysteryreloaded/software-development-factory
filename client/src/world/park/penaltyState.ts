@@ -330,7 +330,11 @@ export function applyPkKick(ev: Extract<ServerEvent, { type: 'pk-kick' }>) {
   m.shot = ev.shot;
   m.dive = ev.dive;
   m.outcome = { result: ev.result, kmh: ev.kmh, flightMs: flightMsOf(ev.kmh) };
-  m.strikeAt = performance.now();
+  // pk-strike already started the clock for this kick (applyPkStrike, while still 'live'): keep that strikeAt so
+  // the ball's flight doesn't restart from the spot (and sit there ~150-250ms) once pk-kick settles it a moment
+  // later. A bystander who missed pk-strike, or one still on the previous kick's 'result', has no such strikeAt
+  // yet (or a stale one from an earlier kick) and still gets a fresh one here, same as before.
+  if (m.stage !== 'live' || m.strikeAt === null) m.strikeAt = performance.now();
   m.charging = false;
   m.stage = 'flight';
   m.since = performance.now();
