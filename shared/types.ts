@@ -628,6 +628,13 @@ export interface PkKickEvent {
   kmh: number;
 }
 
+/** The shooter's strike, relayed the instant the server accepts it (server/penaltyMatch.ts shot()) - well before
+ * the kick itself resolves (flight time plus grace) - so the keeper sees the ball leave at once. pk-kick settles
+ * what actually happened to it. */
+export interface PkStrikeEvent {
+  shot: { x: number; y: number; power: number };
+}
+
 export interface WorldSnapshot {
   user: string | null; // gh login
   ghReady: boolean;
@@ -713,6 +720,7 @@ export type ServerEvent =
   | { type: 'visitorPing'; id: string; x: number; y: number; z: number; label: string }
   // Visitor penalty matches (#47), relayed to floor 0 the same way (server/presence.ts, server/penaltyMatch.ts).
   | ({ type: 'pk-state' } & PkStateView)
+  | ({ type: 'pk-strike' } & PkStrikeEvent)
   | ({ type: 'pk-kick' } & PkKickEvent);
 
 /** What a tab shows of the agents' terminals, so the office sends it only those lines (shared/watch.ts). */

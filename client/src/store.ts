@@ -14,7 +14,7 @@ import { alarm, audioUnlocked, chirp, cue } from './ui/sfx';
 import { claimVoice } from './ui/voiceClaim';
 import { speakable } from './ui/voiceQueue';
 import { emitMerge, mergeBursts, recentQaRecord, rememberQa } from './world/confetti';
-import { applyPkKick, applyPkState } from './world/park/penaltyState';
+import { applyPkKick, applyPkState, applyPkStrike } from './world/park/penaltyState';
 import { takeEmote, takePing, takePose, takeRoster } from './world/presence/presenceState';
 import { gongForMerge } from './world/gongRunner';
 import { ROOF } from './world/layout';
@@ -544,6 +544,9 @@ export const useStore = create<State>((set, get) => ({
       // A visitor penalty match in the park (#47), refereed by the server: world/park/penaltyState.ts.
       case 'pk-state':
         applyPkState(ev);
+        break;
+      case 'pk-strike':
+        applyPkStrike(ev);
         break;
       case 'pk-kick':
         applyPkKick(ev);

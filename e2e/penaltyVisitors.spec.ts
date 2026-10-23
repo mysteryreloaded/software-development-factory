@@ -253,10 +253,14 @@ test('a third browser on floor 0 sees the same kicks and the billboard updates f
   await expect.poll(async () => (await penalty(other)).visitor, { timeout: 30_000 }).toBe(true);
 
   // the watcher never plays, but gets the same pk-state/pk-kick (server/presence.ts toFloorZero) and ends up with
-  // the same match too (penaltyState.ts applyPkState, a bystander's point of view): the same stage and kicks so far.
+  // the same match too (penaltyState.ts applyPkState, a bystander's point of view): the same stage and kicks so
+  // far - though `side` itself is perspective-relative (a real participant's own kicks always call themselves
+  // 'player'; a spectator, with no side of their own, keeps the server's own 'player'/'opponent' labels as-is),
+  // so only `scored`/`kmh` (what actually happened, kick by kick) are expected to line up, not the side label.
   await expect.poll(async () => (await penalty(watcher)).visitor, { timeout: 30_000 }).toBe(true);
   const [a0, w0] = await Promise.all([penalty(pageA), penalty(watcher)]);
-  expect(w0.kicks).toEqual(a0.kicks);
+  const outcomes = (kicks: { scored: boolean; kmh: number }[]) => kicks.map((k) => ({ scored: k.scored, kmh: k.kmh }));
+  expect(outcomes(w0.kicks)).toEqual(outcomes(a0.kicks));
 
   const a = await playMatch(pageA, other);
   expect(a.winner).toBeTruthy();

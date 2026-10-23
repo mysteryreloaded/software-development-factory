@@ -8,7 +8,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Focus } from '../../store';
 import { useStore } from '../../store';
-import { GOAL } from '../../../../shared/penalty';
+import { flightMsOf, GOAL, kmhOf } from '../../../../shared/penalty';
 import { roundRect, SANS } from '../draw';
 import { useCanvasTexture, useInteractable } from '../interact';
 import { toon } from '../materials';
@@ -102,12 +102,17 @@ function PenaltyBall() {
     const m = penaltyMatch();
     const mesh = ref.current;
     if (!mesh) return;
-    if (!m || m.stage === 'walkup' || m.stage === 'setup' || m.stage === 'live' || !m.shot) {
+    if (!m || m.stage === 'walkup' || m.stage === 'setup' || !m.shot || !m.strikeAt) {
       mesh.position.set(g.spotX, GOAL.ballR, g.z);
       return;
     }
-    if ((m.stage === 'flight' || m.stage === 'result' || m.stage === 'over') && m.strikeAt && m.outcome) {
-      const t = Math.min(1, (performance.now() - m.strikeAt) / Math.max(1, m.outcome.flightMs));
+    // A visitor match's strike is relayed (pk-strike) the instant the shooter's own browser sends it, well before
+    // the kick settles (pk-kick, applyPkKick) - the ball leaves the spot right away rather than only once the
+    // save/goal is known. `m.outcome` isn't set yet then (still 'live'); the flight time itself only depends on
+    // the shot's own power, so it's the same estimate either way.
+    if ((m.stage === 'flight' || m.stage === 'result' || m.stage === 'over' || m.stage === 'live') && m.shot) {
+      const flightMs = m.outcome?.flightMs ?? flightMsOf(kmhOf(m.shot.power));
+      const t = Math.min(1, (performance.now() - m.strikeAt) / Math.max(1, flightMs));
       const landX = g.lineX;
       const landY = Math.max(GOAL.ballR, Math.min(GOAL.height, m.shot.y));
       const landZ = g.z + Math.max(-GOAL.width, Math.min(GOAL.width, m.shot.x));

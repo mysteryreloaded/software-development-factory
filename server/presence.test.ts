@@ -294,6 +294,36 @@ describe('visitor penalty matches', () => {
     expect(c.last('pk-state')).toMatchObject({ turn: 'opponent', kicks: [{ side: 'player', scored: false }] });
   });
 
+  it('an accepted shot relays a pk-strike at once, well before the kick itself resolves (so the keeper sees the ball leave straight away)', () => {
+    const { tab } = setup();
+    const a = tab();
+    const b = tab();
+    const c = tab();
+    a.say(pose(0, -68));
+    b.say(pose(0, -68));
+    c.say(pose(0, -68));
+    a.say({ type: 'pk-join' });
+    b.say({ type: 'pk-join' });
+    a.say({ type: 'pk-shot', x: 1, y: 2, power: 0.6 });
+    const strike = { shot: { x: 1, y: 2, power: 0.6 } };
+    expect(a.last('pk-strike')).toMatchObject(strike);
+    expect(b.last('pk-strike')).toMatchObject(strike);
+    expect(c.last('pk-strike')).toMatchObject(strike);
+    expect(a.last('pk-kick')).toBeUndefined(); // not settled yet - that's tick(), later, once flight has passed
+  });
+
+  it('a shot rejected (not your turn, or the kick is already struck) relays no pk-strike', () => {
+    const { tab } = setup();
+    const a = tab();
+    const b = tab();
+    a.say(pose(0, -68));
+    b.say(pose(0, -68));
+    a.say({ type: 'pk-join' });
+    b.say({ type: 'pk-join' });
+    b.say({ type: 'pk-shot', x: 1, y: 2, power: 0.6 }); // b is the keeper this kick, not the shooter
+    expect(b.last('pk-strike')).toBeUndefined();
+  });
+
   it('an early dive saves a hard shot, the same for shooter and keeper', () => {
     const { hub, tab, advance } = setup();
     const a = tab();

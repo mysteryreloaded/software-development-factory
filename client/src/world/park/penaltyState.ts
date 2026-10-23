@@ -56,12 +56,21 @@ export interface Match {
   diveCommitted: boolean;
   diveAt: number | null; // performance.now() the keeper committed, while strikeAt (this kick's) is still unknown
   aiAt: number | null; // performance.now() the AI shooter will strike
-  /** A server-refereed match against another visitor (#47), instead of the AI; null for an agent match. */
-  visitor: { mySide: Side } | null;
+  /** A server-refereed match against another visitor (#47), instead of the AI; null for an agent match.
+   * `spectator`: neither side is this browser (just someone else on floor 0 watching) - no held, camera, input
+   * or pk-* sends, and this replica is display-only (Pitch.tsx's ball and billboard). `matchKey`: the two real
+   * players' ids, sorted and joined, so a NEW match (different players) is told apart from the SAME one still
+   * going - a mid-match arrival's own pk-join/pk-state race can otherwise leave a stale replica that never clears. */
+  visitor: { mySide: Side; spectator: boolean; matchKey: string } | null;
 }
 
 /** The server's Side (shared/penalty.ts) translated to this browser's own convention: always 'player' for itself. */
 const localSide = (serverSide: Side, mySide: Side): Side => (serverSide === mySide ? 'player' : 'opponent');
+
+/** The server's own kicks (shared/penalty.ts PenaltyKick, globally 'player'/'opponent') translated the same way -
+ * seeding or overwriting `match.kicks` straight from a server event without this swaps the score whenever this
+ * browser's own side isn't the server's 'player' (i.e. whenever `mySide` is 'opponent'). */
+const toLocalKicks = (kicks: PenaltyKick[], mySide: Side): PenaltyKick[] => kicks.map((k) => ({ ...k, side: localSide(k.side, mySide) }));
 
 let match: Match | null = null;
 let seq = 1;
@@ -161,9 +170,13 @@ export function startPenaltyMatch(opponentId: string, opponentName: string): Mat
   return match;
 }
 
-/** Work called the opponent back, or they left some other way: no result, the goal's free again. */
+/** Work called the opponent back, or they left some other way: no result, the goal's free again. An actual
+ * participant (not a spectator) dropping a visitor match this way has to tell the server too (#47): without a
+ * pk-leave it still thinks we're playing, so our own kicks time out one by one, the opponent can end up with a
+ * recorded win over someone who just walked off, and the next kick's pk-state pulls us straight back in. */
 export function abandonPenaltyMatch() {
   if (!match) return;
+  if (match.visitor && !match.visitor.spectator) sendWs({ type: 'pk-leave' });
   if (useStore.getState().held?.kind === 'penalty') useStore.getState().setHeld(null);
   match = null;
   stopVisitorClock();
@@ -190,9 +203,14 @@ function stopVisitorClock() {
   visitorClockTimer = null;
 }
 
-/** Starts a server-refereed match against another visitor: `turn` is already translated to this browser's own side. */
-function startVisitorMatch(otherId: string, otherName: string, mySide: Side, turn: Side) {
+/** Starts a server-refereed match against another visitor: `turn` is already translated to this browser's own
+ * side. `spectator`: neither side is us, just watching from floor 0 - no held (so no camera jump, no input, and
+ * Player.tsx never sends a pk-shot/pk-dive/pk-shuffle on our behalf: all of that is gated on `held`). `kicks`
+ * seeds the replica with whatever the server says has already happened, so a mid-match arrival shows the real
+ * score at once instead of starting over from 0-0. */
+function startVisitorMatch(otherId: string, otherName: string, mySide: Side, turn: Side, spectator: boolean, matchKey: string, kicks: PenaltyKick[]) {
   ensureHeldWatch();
+  ensureFloorWatch();
   ensureVisitorClock();
   match = {
     id: seq++,
@@ -201,7 +219,7 @@ function startVisitorMatch(otherId: string, otherName: string, mySide: Side, tur
     turn,
     stage: 'setup',
     since: performance.now(),
-    kicks: [],
+    kicks: [...kicks],
     shot: null,
     dive: null,
     strikeAt: null,
@@ -216,9 +234,9 @@ function startVisitorMatch(otherId: string, otherName: string, mySide: Side, tur
     diveCommitted: false,
     diveAt: null,
     aiAt: null,
-    visitor: { mySide },
+    visitor: { mySide, spectator, matchKey },
   };
-  useStore.getState().setHeld({ kind: 'penalty', id: 'match' });
+  if (!spectator) useStore.getState().setHeld({ kind: 'penalty', id: 'match' });
   penaltyChanged();
 }
 
@@ -233,17 +251,24 @@ export function applyPkState(ev: Extract<ServerEvent, { type: 'pk-state' }>) {
   const myId = myVisitorId();
   if (!myId) return;
   if (ev.phase === 'live') {
-    if (match && match.visitor) return; // already in it: only pk-kick moves it on from here
-    // Playing it, or just watching from floor 0 (#47's "others watch"): a bystander gets the same match too, so
-    // the billboard and the ball show it; mySide is then arbitrary (nobody ever shoots or dives from here).
-    const mine = ev.players.find((p) => p.id === myId);
-    const mySide: Side = mine?.side ?? 'player';
     const playerSide = ev.players.find((p) => p.side === 'player');
     const opponentSide = ev.players.find((p) => p.side === 'opponent');
     if (!playerSide || !opponentSide) return;
+    const matchKey = [playerSide.id, opponentSide.id].sort().join('|');
+    if (match && match.visitor) {
+      if (match.visitor.matchKey === matchKey) return; // already in it: only pk-kick moves it on from here
+      abandonPenaltyMatch(); // a stale replica (a match we never cleanly left) a NEW match has since replaced
+    }
+    // Playing it, or just watching from floor 0 (#47's "others watch"): a bystander gets a display-only replica
+    // too, so the billboard and the ball show it - but never touches held/camera/input, and leaves an unrelated
+    // agent match of their own alone (it isn't this match, so there's nothing here to take over from).
+    const mine = ev.players.find((p) => p.id === myId);
+    const spectator = !mine;
+    if (spectator && match && !match.visitor) return;
+    const mySide: Side = mine?.side ?? 'player';
     const other = mySide === 'player' ? opponentSide : playerSide;
     if (match) abandonPenaltyMatch(); // taking over from (or walking in on) a local agent match: no result for it
-    startVisitorMatch(other.id, other.name, mySide, localSide(ev.turn ?? mySide, mySide));
+    startVisitorMatch(other.id, other.name, mySide, localSide(ev.turn ?? mySide, mySide), spectator, matchKey, toLocalKicks(ev.kicks, mySide));
     return;
   }
   if (ev.phase === 'waiting') {
@@ -254,7 +279,33 @@ export function applyPkState(ev: Extract<ServerEvent, { type: 'pk-state' }>) {
     if (match && !match.visitor && waiting && waiting.id !== myId) sendWs({ type: 'pk-join' });
     return;
   }
+  if (ev.phase === 'done' && match?.visitor && match.winner === null) {
+    // The server's own decisive kick, settled - but this replica's own clock (tickPenalty) hasn't necessarily
+    // caught up yet (it only notices a winner a tick after RESULT_MS, once its own kicks array says so): without
+    // this, a mid-match arrival whose local kicks never fully line up (or any replica whose own clock is just
+    // running a little behind) could ride straight past 'done' into 'empty' below and get wiped with no result
+    // shown at all, even though the match it was watching was definitely won by someone.
+    const state = shootoutState(ev.kicks);
+    if (state.winner) {
+      match.kicks = toLocalKicks(ev.kicks, match.visitor.mySide);
+      match.winner = localSide(state.winner, match.visitor.mySide);
+      match.stage = 'over';
+      match.since = performance.now();
+      penaltyChanged();
+    }
+    return;
+  }
   if (ev.phase === 'empty' && match?.visitor && match.stage !== 'over') abandonPenaltyMatch(); // forfeited: no result
+}
+
+/** pk-strike (store.ts apply): the shooter's strike just landed on the server, well before the kick itself
+ * resolves - so the ball starts flying for everyone at once, not just once pk-kick settles what happened to it. */
+export function applyPkStrike(ev: Extract<ServerEvent, { type: 'pk-strike' }>) {
+  const m = match;
+  if (!m || !m.visitor || m.stage !== 'live') return;
+  m.shot = ev.shot;
+  m.strikeAt = performance.now();
+  penaltyChanged();
 }
 
 /** pk-kick (store.ts apply): a kick resolved, the same way for every browser on floor 0. Only this browser's own
@@ -296,6 +347,19 @@ function ensureHeldWatch() {
   heldWatchStarted = true;
   useStore.subscribe((s, prev) => {
     if (prev.held?.kind === 'penalty' && s.held?.kind !== 'penalty') abandonPenaltyMatch();
+  });
+}
+
+/** Leaving floor 0 (the only floor the pitch is on) ends a visitor replica too (#47): a real participant is
+ * already covered indirectly (goToFloor clears `held`, which the watch above catches), but a spectator never
+ * holds anything, so without this their replica would just sit there, stale, until some other kick's pk-state
+ * happens to arrive and clear it - or forever, if the match ends while they're already gone. */
+let floorWatchStarted = false;
+function ensureFloorWatch() {
+  if (floorWatchStarted) return;
+  floorWatchStarted = true;
+  useStore.subscribe((s, prev) => {
+    if (s.floor !== prev.floor && s.floor !== 0 && match?.visitor) abandonPenaltyMatch();
   });
 }
 

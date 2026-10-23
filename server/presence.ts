@@ -199,7 +199,9 @@ export class PresenceHub {
         if (this.penalty.join({ id: peer.id, name: peer.name })) this.broadcastPenalty();
         return;
       case 'pk-shot':
-        this.penalty.shot(peer.id, msg);
+        // Relayed the instant it's accepted, well before the kick itself resolves (flight time plus grace), so
+        // the keeper sees the ball leave at once; pk-kick (tickPenalty) settles what actually happened to it.
+        if (this.penalty.shot(peer.id, msg)) this.toFloorZero({ type: 'pk-strike', shot: { x: msg.x, y: msg.y, power: msg.power } });
         return;
       case 'pk-dive':
         this.penalty.dive(peer.id, msg);
