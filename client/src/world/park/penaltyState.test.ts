@@ -223,4 +223,41 @@ describe('a visitor match (#47): refereed by the server, applyPkState/applyPkKic
     expect(penaltyMatch()!.stage).toBe('result');
     expect(penaltyMatch()!.kicks).toEqual([{ side: 'player', scored: false, kmh: 0 }]);
   });
+
+  it("a bystander's own replica (never shoots, so its stage only cycles on local timers) still applies a kick that arrives while it's mid-'setup', not just exactly 'live'", () => {
+    // A real participant's own shot is what sends pk-shot in the first place, always while they're locally 'live' -
+    // a bystander never shoots, so nothing keeps its own setup/live/result cycle in lockstep with the server's
+    // actual kick cadence, and the server's pk-kick can arrive at any point in that cycle.
+    applyPkState({ type: 'pk-state', phase: 'live', turn: 'player', players: [{ id: 'other', name: 'Other', side: 'player' }, { id: 'another', name: 'Another', side: 'opponent' }], kicks: [] });
+    expect(penaltyMatch()!.stage).toBe('setup'); // never shot: still mid local setup when the kick lands
+    applyPkKick({ type: 'pk-kick', shot: { x: 0, y: 2, power: 0.5 }, dive: null, result: 'goal', kmh: 85 });
+    expect(penaltyMatch()!.stage).toBe('flight');
+    expect(penaltyMatch()!.winner).toBeNull();
+  });
+
+  it("the next kick landing while a bystander's own clock is still showing the PREVIOUS kick's 'result' flips the turn first, so kicks keep alternating sides", () => {
+    // tickPenalty's own 'result' case is the only place `turn` normally flips, and only once RESULT_MS has passed
+    // locally; skipping straight from 'result' to 'flight' for a new kick without that flip would record it under
+    // the same side as the one before it, corrupting every side label from there on (and so shootoutState()'s count
+    // of each side's kicks, which is what decides the match).
+    applyPkState({ type: 'pk-state', phase: 'live', turn: 'player', players: [{ id: 'other', name: 'Other', side: 'player' }, { id: 'another', name: 'Another', side: 'opponent' }], kicks: [] });
+    vi.advanceTimersByTime(500);
+    tickPenalty();
+    expect(penaltyMatch()!.stage).toBe('live');
+
+    applyPkKick({ type: 'pk-kick', shot: { x: 0, y: 2, power: 0.5 }, dive: null, result: 'goal', kmh: 85 });
+    // Just past this kick's flight (~466 ms) but well short of RESULT_MS (1600 ms) after it: the match's own
+    // visitor-clock interval (ensureVisitorClock, independent of this test calling tickPenalty itself) runs
+    // under these fake timers too, so advancing time alone already carries it from 'flight' into 'result'.
+    vi.advanceTimersByTime(1_000);
+    expect(penaltyMatch()!.stage).toBe('result');
+    expect(penaltyMatch()!.kicks).toEqual([{ side: 'player', scored: true, kmh: 85 }]);
+
+    applyPkKick({ type: 'pk-kick', shot: { x: 0, y: 2, power: 0.5 }, dive: null, result: 'goal', kmh: 85 }); // kick 2 arrives early
+    vi.advanceTimersByTime(1_000);
+    expect(penaltyMatch()!.kicks).toEqual([
+      { side: 'player', scored: true, kmh: 85 },
+      { side: 'opponent', scored: true, kmh: 85 }, // flipped, not another 'player'
+    ]);
+  });
 });

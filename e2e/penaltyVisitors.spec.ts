@@ -84,7 +84,7 @@ const CORNER = { x: GOAL.width / 2 - 0.3, y: GOAL.height - 0.3 };
 /** Drives the match to the end (or `maxKicks`): whichever page's probe says it's their turn shoots. Once, the
  * keeper dives early to CORNER just before the shooter strikes there too, to show an early guess saves a hard shot.
  * Returns pageA's own decisive snapshot (captured the instant `winner` was first seen, not re-read afterward). */
-async function playMatch(pageA: Page, pageB: Page, maxKicks = 14): Promise<PenaltyProbeState> {
+async function playMatch(pageA: Page, pageB: Page, maxKicks = 20): Promise<PenaltyProbeState> {
   let triedDive = false;
   for (let i = 0; i < maxKicks; i++) {
     // `stage` alone can't tell "this kick landed" from "still waiting on the last one": a page reads 'live' both
@@ -93,9 +93,12 @@ async function playMatch(pageA: Page, pageB: Page, maxKicks = 14): Promise<Penal
     // kicksBefore pins what actually has to change (a new kick recorded, or the match decided).
     const kicksBefore = (await penalty(pageA)).kicks.length;
     // re-reads turn/stage right before acting: switching focus between the two pages (bringToFront) costs a
-    // little real time, and the 15 s shot clock (server/penaltyMatch.ts) waits for nobody.
+    // little real time, and the 15 s shot clock (server/penaltyMatch.ts) waits for nobody: more, quicker attempts
+    // fit inside that window than fewer slow ones - 5 attempts at up to 5 s each can alone exceed 15 s, timing the
+    // kick out before ever landing a real shot (and enough of those in a row turns the deliberate miss/dive this
+    // match is scripted around into noise, which can leave a shoot-out tied forever in sudden death).
     let shot = false;
-    for (let attempt = 0; attempt < 5 && !shot; attempt++) {
+    for (let attempt = 0; attempt < 10 && !shot; attempt++) {
       let turnA: string | null = null;
       await expect
         .poll(async () => {
@@ -113,21 +116,28 @@ async function playMatch(pageA: Page, pageB: Page, maxKicks = 14): Promise<Penal
         .poll(async () => {
           const s = await penalty(shooter);
           return s.stage === 'live' && s.turn === 'player';
-        }, { timeout: 5_000 })
+        }, { timeout: 2_000 })
         .toBe(true)
         .then(() => true)
         .catch(() => false);
       if (!shooterAgrees) continue;
       if (i === 0) {
         shot = (await call(shooter, 'shoot', 0, GOAL.height + 1, 0.5)) as boolean; // kick 1: a clean, guaranteed miss
-      } else {
+      } else if (i === 2) {
         // once, the keeper guesses right before the shooter even strikes: an early dive saves a hard shot there.
-        // Best-effort (its own turn-check can race the same focus-switch): every other kick scores regardless,
-        // so the shoot-out still decides even on a machine too slow for the dive to land in time.
+        // Best-effort (its own turn-check can race the same focus-switch): every other kick scores regardless.
+        // On the SAME side as kick 1's guaranteed miss (alternating turns put kick 3 back with it, not the other
+        // side): a save here stacks onto that side's existing deficit instead of cancelling it out - the other
+        // arrangement (dived on the very next kick, the opposite side's) ties 2-2 after regulation whenever the
+        // dive actually lands in time, and with nothing to break a tie afterward (every later kick is identical,
+        // undefended), sudden death then never decides either - a shoot-out that gets MORE likely to hang the
+        // better-behaved the dive timing is, the opposite of what "best-effort" was meant to buy here.
         if (!triedDive) {
           triedDive = true;
           await call(keeper, 'dive', CORNER.x, CORNER.y);
         }
+        shot = (await call(shooter, 'shoot', CORNER.x, CORNER.y, 1)) as boolean;
+      } else {
         shot = (await call(shooter, 'shoot', CORNER.x, CORNER.y, 1)) as boolean;
       }
     }
@@ -152,7 +162,7 @@ async function playMatch(pageA: Page, pageB: Page, maxKicks = 14): Promise<Penal
 }
 
 test('page B takes the agent\'s place: the server referees a shared match with a matching score', async ({ page, baseURL }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
   const pageA = page;
   const other = await pageA.context().newPage();
   await other.route((url) => !url.href.startsWith(baseURL!) && !url.protocol.startsWith('data'), (route) => route.fulfill({ status: 200, body: '' }));
@@ -194,7 +204,7 @@ test('page B takes the agent\'s place: the server referees a shared match with a
 });
 
 test('a third browser on floor 0 sees the same kicks and the billboard updates for everyone', async ({ page, baseURL }) => {
-  test.setTimeout(210_000);
+  test.setTimeout(300_000);
   const pageA = page;
   const other = await pageA.context().newPage();
   const watcher = await pageA.context().newPage();
@@ -243,7 +253,7 @@ test('a third browser on floor 0 sees the same kicks and the billboard updates f
 });
 
 test('closing page A mid-match leaves no result', async ({ page, baseURL }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(240_000);
   const pageA = page;
   const other = await pageA.context().newPage();
   await other.route((url) => !url.href.startsWith(baseURL!) && !url.protocol.startsWith('data'), (route) => route.fulfill({ status: 200, body: '' }));

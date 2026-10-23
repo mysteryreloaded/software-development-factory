@@ -261,7 +261,21 @@ export function applyPkState(ev: Extract<ServerEvent, { type: 'pk-state' }>) {
  * ongoing visitor match animates it; tickPenalty() (unchanged) carries it through flight to the next kick or over. */
 export function applyPkKick(ev: Extract<ServerEvent, { type: 'pk-kick' }>) {
   const m = match;
-  if (!m || !m.visitor || m.stage !== 'live') return;
+  // A bystander's own stage (setup/live/result) cycles on its own local SETUP_MS/RESULT_MS timers with nothing to
+  // keep it in lockstep with the server's actual kick cadence (a real participant's shot is what triggers this
+  // event in the first place, always while they're exactly 'live'; a watcher has no such anchor). Requiring
+  // 'live' here used to drop the kick outright whenever a bystander's own clock had drifted even a tick out of
+  // phase - permanently, since no further kick was coming to retry it on. The server's kick is authoritative
+  // regardless of what stage a bystander's replica happens to be cycling through; only 'flight' (a kick already
+  // being animated: let it finish) and 'over' (decided; the server won't send another for it) are excluded.
+  if (!m || !m.visitor || m.stage === 'flight' || m.stage === 'over') return;
+  if (m.stage === 'result') {
+    // Still sitting on the PREVIOUS kick's result, which only flips `turn` (tickPenalty's own 'result' case) once
+    // RESULT_MS has passed locally: the server sending a new kick proves that previous one didn't decide the
+    // match (or it wouldn't have), so do that flip now rather than let the push below record this kick under the
+    // wrong side - skipping straight to 'flight' without it would leave every kick from here on mislabelled.
+    m.turn = m.turn === 'player' ? 'opponent' : 'player';
+  }
   m.shot = ev.shot;
   m.dive = ev.dive;
   m.outcome = { result: ev.result, kmh: ev.kmh, flightMs: flightMsOf(ev.kmh) };
