@@ -717,6 +717,7 @@ export function createDemoBackend(scale: DemoScale | null = null): Backend {
         if (pr.failedChecks.some((c) => runIds.some((id) => c.url?.includes(`/actions/runs/${id}/`)))) runChecks(pr, false);
       }
     },
+    neverStartedJobs: async () => new Set<string>(), // the demo never hits GitHub's billing block
     closePull: async (fullName, number) => {
       const pr = repos.get(fullName)?.pulls.find((p) => p.number === number);
       if (pr) pr.state = 'CLOSED';

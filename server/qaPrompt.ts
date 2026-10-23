@@ -12,6 +12,8 @@ export interface QaPromptInput extends Pick<PrDetails, 'headSha' | 'checks' | 'c
   summary: string | null; // last round's findings
   fixInstructions: string | null;
   defaultBranch: string;
+  /** Failed checks (by name) whose GitHub Actions job never started: a billing or spending-limit block, not a code problem. */
+  neverStartedChecks: string[];
 }
 
 export interface QaInstructions {
@@ -29,11 +31,12 @@ export function qaInstructions(i: QaPromptInput): QaInstructions {
 
 function checksLine(i: QaPromptInput): string {
   const names = (list: string[]) => list.join(', ') || 'unnamed';
+  const label = (name: string) => (i.neverStartedChecks.includes(name) ? `${name} (never started (GitHub Actions billing/spending limit, not a code problem))` : name);
   const state =
     i.checks === 'passing'
       ? `passing (${names(i.checkNames)})`
       : i.checks === 'failing'
-        ? `failing: ${names(i.failedChecks)}${i.pendingChecks.length ? `; still running: ${i.pendingChecks.join(', ')}` : ''}`
+        ? `failing: ${i.failedChecks.map(label).join(', ') || 'unnamed'}${i.pendingChecks.length ? `; still running: ${i.pendingChecks.join(', ')}` : ''}`
         : i.checks === 'pending'
           ? `pending: ${names(i.pendingChecks)}`
           : 'none';

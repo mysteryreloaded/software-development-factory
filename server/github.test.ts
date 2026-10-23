@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkRunOf, readTwice } from './github.ts';
+import { checkRunOf, jobNeverStarted, readTwice } from './github.ts';
 
 describe('readTwice', () => {
   it('tries a failed read once more', async () => {
@@ -39,5 +39,45 @@ describe('checkRunOf', () => {
     expect(checkRunOf([{ context: 'Vercel', state: 'SUCCESS' }])).toBeNull();
     expect(checkRunOf([])).toBeNull();
     expect(checkRunOf(null)).toBeNull();
+  });
+});
+
+describe('jobNeverStarted', () => {
+  // Recorded shapes: GET /repos/{owner}/{repo}/actions/jobs/{job_id} and /check-runs/{job_id}/annotations.
+  const billingAnnotations = [
+    {
+      path: '.github',
+      start_line: 0,
+      end_line: 0,
+      annotation_level: 'failure',
+      title: 'build',
+      message: 'The job was not started because recent account payments have failed or your spending limit needs to be increased.',
+      raw_details: null,
+    },
+  ];
+  const billingJob = { status: 'completed', conclusion: 'failure', steps: [], runner_id: null };
+
+  const ranAnnotations = [{ path: 'src/toolbar.test.ts', start_line: 12, end_line: 12, annotation_level: 'failure', title: 'build', message: 'AssertionError: expected "nowrap" to be "wrap"', raw_details: null }];
+  const ranJob = {
+    status: 'completed',
+    conclusion: 'failure',
+    runner_id: 7,
+    steps: [
+      { name: 'Checkout', status: 'completed', conclusion: 'success' },
+      { name: 'Run npm test', status: 'completed', conclusion: 'failure' },
+    ],
+  };
+
+  it('recognises a job GitHub billing blocked from its annotation, even once the job record itself has no steps or runner', () => {
+    expect(jobNeverStarted(billingJob, billingAnnotations)).toBe(true);
+    expect(jobNeverStarted(null, billingAnnotations)).toBe(true); // the job lookup itself can fail while this still tells the story
+  });
+
+  it('recognises the same block from a missing runner and no steps, with no annotations yet', () => {
+    expect(jobNeverStarted({ steps: [], runner_id: null }, [])).toBe(true);
+  });
+
+  it('is not never-started for a job that actually ran and failed', () => {
+    expect(jobNeverStarted(ranJob, ranAnnotations)).toBe(false);
   });
 });

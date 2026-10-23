@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHECKS_ALERT_MS, MAX_MERGE_FIXES, RERUN_GRACE_MS, failedRunIds, mergeStep, movedSincePass, type MergePull, type MergeRecord } from './mergeGate.ts';
+import { BLOCKED_NOTE, BLOCKED_RERUN_MS, CHECKS_ALERT_MS, MAX_MERGE_FIXES, RERUN_GRACE_MS, failedJobIds, failedRunIds, mergeStep, movedSincePass, type MergePull, type MergeRecord } from './mergeGate.ts';
 
 const NOW = 1_800_000_000_000;
 const base = { base: 'main' };
@@ -24,6 +24,7 @@ const record = (r: Partial<MergeRecord> = {}): MergeRecord => ({
   alerted: false,
   rerunSha: null,
   rerunAt: null,
+  blockedRerunAt: null,
   ...r,
 });
 
@@ -142,6 +143,56 @@ describe('mergeStep', () => {
         do: 'send-back',
         reason: 'checks',
       });
+    });
+  });
+
+  describe('GitHub Actions never started the failed jobs (billing or a spending limit)', () => {
+    const blocked = pull({
+      checks: 'failing',
+      failedChecks: [{ name: 'check (ubuntu-latest)', url: 'https://github.com/o/r/actions/runs/1/job/2' }],
+    });
+    const neverStarted = new Set(['2']);
+
+    it('waits instead of sending it back, and never spends a fix', () => {
+      expect(mergeStep(blocked, record(), NOW, { ...base, neverStarted })).toEqual({
+        do: 'rerun-blocked',
+        runIds: [1],
+        set: { blockedRerunAt: NOW + BLOCKED_RERUN_MS },
+      });
+      expect(mergeStep(blocked, record({ blockedRerunAt: NOW + 1 }), NOW, { ...base, neverStarted })).toEqual({ do: 'wait', note: BLOCKED_NOTE, blocked: true, set: {} });
+      expect(mergeStep(blocked, record({ mergeFixes: MAX_MERGE_FIXES }), NOW, { ...base, neverStarted })).toMatchObject({ do: 'rerun-blocked' });
+    });
+
+    it('is due again only after 30 minutes', () => {
+      expect(mergeStep(blocked, record({ blockedRerunAt: NOW - 1 }), NOW, { ...base, neverStarted }).do).toBe('rerun-blocked');
+      expect(mergeStep(blocked, record({ blockedRerunAt: NOW }), NOW, { ...base, neverStarted }).do).toBe('rerun-blocked');
+      expect(mergeStep(blocked, record({ blockedRerunAt: NOW + 1 }), NOW, { ...base, neverStarted }).do).toBe('wait');
+    });
+
+    it("takes today's path when at least one failed check really ran", () => {
+      const mixed = pull({
+        checks: 'failing',
+        failedChecks: [
+          { name: 'check (ubuntu-latest)', url: 'https://github.com/o/r/actions/runs/1/job/2' },
+          { name: 'lint', url: 'https://github.com/o/r/actions/runs/1/job/3' },
+        ],
+      });
+      expect(mergeStep(mixed, record(), NOW, { ...base, neverStarted }).do).toBe('rerun');
+    });
+
+    it('merges as usual once the checks go green', () => {
+      expect(mergeStep(pull({ headSha: 'abc123' }), record({ blockedRerunAt: NOW + 1 }), NOW, { ...base, neverStarted }).do).toBe('merge');
+    });
+
+    it('failedJobIds reads each job id once from the log URLs', () => {
+      expect(
+        failedJobIds([
+          { name: 'a', url: 'https://github.com/o/r/actions/runs/1/job/2' },
+          { name: 'b', url: 'https://github.com/o/r/actions/runs/1/job/2' },
+          { name: 'c', url: 'https://github.com/o/r/actions/runs/1/job/3' },
+          { name: 'd', url: null },
+        ]),
+      ).toEqual(['2', '3']);
     });
   });
 
