@@ -76,6 +76,25 @@ async function waitPresent(page: Page) {
     .toBe('pose');
 }
 
+type PresenceProbe = { me(): { id: string }; roster(): { id: string; floor: number }[] };
+const myId = (page: Page) => page.evaluate(() => (window as unknown as { __swarmPresence: PresenceProbe }).__swarmPresence.me().id);
+const theirRoster = (page: Page) => page.evaluate(() => (window as unknown as { __swarmPresence: PresenceProbe }).__swarmPresence.roster());
+
+/** waitPresent only confirms a page's own BELIEF it's sending poses - not that the server has actually received and
+ * broadcast one yet. A pk-join sent before the server has that peer as 'visible' on floor 0 is silently rejected
+ * (server/presence.ts's `peer.mode !== 'visible'` check), breaking the whole join/live handshake with no error -
+ * which reads exactly like "the visitor flag never turns true". Confirm each side shows up in the OTHER's own
+ * roster (populated only from the server's own 'visitors' broadcast) before either one calls takeover(). */
+async function waitSeesEachOther(a: Page, b: Page) {
+  const [aId, bId] = await Promise.all([myId(a), myId(b)]);
+  await expect
+    .poll(async () => {
+      const [ra, rb] = await Promise.all([theirRoster(a), theirRoster(b)]);
+      return ra.some((v) => v.id === bId && v.floor === 0) && rb.some((v) => v.id === aId && v.floor === 0);
+    }, { timeout: 30_000 })
+    .toBe(true);
+}
+
 const goal = goalPitch();
 const spot: { floor: number; x: number; z: number; yaw: number; pitch: number } = { floor: 0, x: goal.spotX, z: goal.z, yaw: Math.PI / 2, pitch: 0 };
 /** A clean, unguarded corner: a shot there scores unless the keeper dives right to it. */
@@ -181,6 +200,7 @@ test('page B takes the agent\'s place: the server referees a shared match with a
   // Bo takes Ada's agent's place: both browsers end up in the same server-refereed match.
   await waitPresent(pageA);
   await waitPresent(other);
+  await waitSeesEachOther(pageA, other);
   await call(other, 'takeover');
   await expect.poll(async () => (await penalty(pageA)).visitor, { timeout: 30_000 }).toBe(true);
   await expect.poll(async () => (await penalty(other)).visitor, { timeout: 30_000 }).toBe(true);
@@ -227,6 +247,7 @@ test('a third browser on floor 0 sees the same kicks and the billboard updates f
   await expect.poll(async () => (await penalty(pageA)).stage, { timeout: 30_000 }).not.toBe('walkup');
   await waitPresent(pageA);
   await waitPresent(other);
+  await waitSeesEachOther(pageA, other);
   await call(other, 'takeover');
   await expect.poll(async () => (await penalty(pageA)).visitor, { timeout: 30_000 }).toBe(true);
   await expect.poll(async () => (await penalty(other)).visitor, { timeout: 30_000 }).toBe(true);
@@ -270,6 +291,7 @@ test('closing page A mid-match leaves no result', async ({ page, baseURL }) => {
   await expect.poll(async () => (await penalty(pageA)).stage, { timeout: 30_000 }).not.toBe('walkup');
   await waitPresent(pageA);
   await waitPresent(other);
+  await waitSeesEachOther(pageA, other);
   await call(other, 'takeover');
   await expect.poll(async () => (await penalty(other)).visitor, { timeout: 30_000 }).toBe(true);
 
