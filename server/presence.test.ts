@@ -243,3 +243,171 @@ describe('PresenceHub', () => {
     expect(fakeSeats).not.toContain('office-west:0');
   });
 });
+
+// ---------- visitor penalty matches (#47) ----------
+
+describe('visitor penalty matches', () => {
+  it('two joins on floor 0 start a live match, relayed to a third tab on the same floor', () => {
+    const { tab } = setup();
+    const a = tab();
+    const b = tab();
+    const c = tab();
+    a.say({ type: 'hello', name: 'Ada', color: '#118ab2' });
+    b.say({ type: 'hello', name: 'Bo', color: '#118ab2' });
+    a.say(pose(0, -68));
+    b.say(pose(0, -68));
+    c.say(pose(0, -68));
+    a.say({ type: 'pk-join' });
+    expect(a.last('pk-state')).toMatchObject({ phase: 'waiting', players: [{ id: a.peer.id, name: 'Ada', side: 'player' }] });
+    b.say({ type: 'pk-join' });
+    const state = c.last('pk-state');
+    expect(state).toMatchObject({
+      phase: 'live',
+      turn: 'player',
+      players: [{ id: a.peer.id, side: 'player' }, { id: b.peer.id, side: 'opponent' }],
+    });
+  });
+
+  it("someone not on floor 0, or not appearing, can't join", () => {
+    const { tab } = setup();
+    const a = tab();
+    a.say(pose(1));
+    a.say({ type: 'pk-join' });
+    expect(a.last('pk-state')).toBeUndefined();
+  });
+
+  it('a kick resolves the same way for every tab on the floor, once flight and the grace have passed', () => {
+    const { hub, tab, advance } = setup();
+    const a = tab();
+    const b = tab();
+    const c = tab();
+    a.say(pose(0, -68));
+    b.say(pose(0, -68));
+    c.say(pose(0, -68));
+    a.say({ type: 'pk-join' });
+    b.say({ type: 'pk-join' });
+    a.say({ type: 'pk-shot', x: 0, y: 10, power: 0.5 }); // well over the bar: a clean miss
+    advance(10_000);
+    hub.tick();
+    expect(a.last('pk-kick')).toMatchObject({ result: 'over' });
+    expect(c.last('pk-kick')).toMatchObject({ result: 'over' });
+    expect(c.last('pk-state')).toMatchObject({ turn: 'opponent', kicks: [{ side: 'player', scored: false }] });
+  });
+
+  it('an accepted shot relays a pk-strike at once, well before the kick itself resolves (so the keeper sees the ball leave straight away)', () => {
+    const { tab } = setup();
+    const a = tab();
+    const b = tab();
+    const c = tab();
+    a.say(pose(0, -68));
+    b.say(pose(0, -68));
+    c.say(pose(0, -68));
+    a.say({ type: 'pk-join' });
+    b.say({ type: 'pk-join' });
+    a.say({ type: 'pk-shot', x: 1, y: 2, power: 0.6 });
+    const strike = { shot: { x: 1, y: 2, power: 0.6 } };
+    expect(a.last('pk-strike')).toMatchObject(strike);
+    expect(b.last('pk-strike')).toMatchObject(strike);
+    expect(c.last('pk-strike')).toMatchObject(strike);
+    expect(a.last('pk-kick')).toBeUndefined(); // not settled yet - that's tick(), later, once flight has passed
+  });
+
+  it('a shot rejected (not your turn, or the kick is already struck) relays no pk-strike', () => {
+    const { tab } = setup();
+    const a = tab();
+    const b = tab();
+    a.say(pose(0, -68));
+    b.say(pose(0, -68));
+    a.say({ type: 'pk-join' });
+    b.say({ type: 'pk-join' });
+    b.say({ type: 'pk-shot', x: 1, y: 2, power: 0.6 }); // b is the keeper this kick, not the shooter
+    expect(b.last('pk-strike')).toBeUndefined();
+  });
+
+  it('an early dive saves a hard shot, the same for shooter and keeper', () => {
+    const { hub, tab, advance } = setup();
+    const a = tab();
+    const b = tab();
+    a.say(pose(0, -68));
+    b.say(pose(0, -68));
+    a.say({ type: 'pk-join' });
+    b.say({ type: 'pk-join' });
+    b.say({ type: 'pk-dive', x: 2, y: 1 });
+    advance(300);
+    a.say({ type: 'pk-shot', x: 2, y: 1, power: 1 });
+    advance(10_000);
+    hub.tick();
+    expect(a.last('pk-kick')).toMatchObject({ result: 'saved' });
+  });
+
+  it('reports the finished match to onPenaltyResult, with the real names and the kicks', () => {
+    const results: unknown[] = [];
+    let now = 1_000;
+    const hub = new PresenceHub({ now: () => now, timer: false, onPenaltyResult: (r) => results.push(r) });
+    const got: Record<string, unknown[]> = {};
+    const tab = (id: string) => {
+      got[id] = [];
+      const p = hub.join((data) => got[id].push(JSON.parse(data)));
+      return { peer: p, say: (msg: unknown) => hub.receive(p, JSON.stringify(msg)) };
+    };
+    const a = tab('a');
+    const b = tab('b');
+    a.say({ type: 'hello', name: 'Ada', color: '#118ab2' });
+    b.say({ type: 'hello', name: 'Bo', color: '#118ab2' });
+    a.say(pose(0, -68));
+    b.say(pose(0, -68));
+    a.say({ type: 'pk-join' });
+    b.say({ type: 'pk-join' });
+    // Ada always scores, Bo always goes over the bar: decided 1-0 after 3 each.
+    for (let i = 0; i < 6 && results.length === 0; i++) {
+      const turn = (hub.penaltyState().turn ?? 'player') as 'player' | 'opponent';
+      if (turn === 'player') a.say({ type: 'pk-shot', x: 2, y: 1, power: 1 });
+      else b.say({ type: 'pk-shot', x: 0, y: 10, power: 0.5 });
+      now += 10_000;
+      hub.tick();
+    }
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ player: { name: 'Ada' }, opponent: { name: 'Bo' }, winner: 'player' });
+    expect(hub.penaltyState().phase).toBe('empty'); // the pitch is free again
+
+    // the decisive kick's own pk-state broadcasts 'done' (so a browser's applyPkState sees the win), not straight
+    // to 'empty' (which it reads as a forfeit and discards the match with no result, right on the winning kick).
+    const pkStates = (got.a as ServerEvent[]).filter((e) => e.type === 'pk-state');
+    expect(pkStates.some((e) => e.type === 'pk-state' && e.phase === 'done')).toBe(true);
+  });
+
+  it('a disconnect, leaving floor 0, or wandering too far forfeits the match, with no result', () => {
+    const results: unknown[] = [];
+    let now = 1_000;
+    const hub = new PresenceHub({ now: () => now, timer: false, onPenaltyResult: (r) => results.push(r) });
+    const got: ServerEvent[][] = [[], []];
+    const peers = [hub.join((d) => got[0].push(JSON.parse(d))), hub.join((d) => got[1].push(JSON.parse(d)))];
+    hub.receive(peers[0], JSON.stringify(pose(0, -68)));
+    hub.receive(peers[1], JSON.stringify(pose(0, -68)));
+    hub.receive(peers[0], JSON.stringify({ type: 'pk-join' }));
+    hub.receive(peers[1], JSON.stringify({ type: 'pk-join' }));
+    expect(hub.penaltyState().phase).toBe('live');
+
+    hub.leave(peers[1]);
+    expect(hub.penaltyState().phase).toBe('empty');
+    expect(results).toHaveLength(0);
+
+    // a fresh match, this time ended by walking off floor 0
+    hub.receive(peers[0], JSON.stringify({ type: 'pk-join' }));
+    const c = hub.join((d) => got[0].push(JSON.parse(d)));
+    hub.receive(c, JSON.stringify(pose(0, -68)));
+    hub.receive(c, JSON.stringify({ type: 'pk-join' }));
+    expect(hub.penaltyState().phase).toBe('live');
+    hub.receive(peers[0], JSON.stringify(pose(1)));
+    expect(hub.penaltyState().phase).toBe('empty');
+
+    // and once more, ended by wandering more than 15 m from the pitch
+    hub.receive(peers[0], JSON.stringify(pose(0, -68))); // back on floor 0, at the pitch
+    hub.receive(peers[0], JSON.stringify({ type: 'pk-join' }));
+    hub.receive(c, JSON.stringify({ type: 'pk-join' }));
+    expect(hub.penaltyState().phase).toBe('live');
+    hub.receive(c, JSON.stringify(pose(0, 100, 0)));
+    expect(hub.penaltyState().phase).toBe('empty');
+    expect(results).toHaveLength(0);
+  });
+});

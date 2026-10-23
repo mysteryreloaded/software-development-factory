@@ -14,6 +14,7 @@ import { alarm, audioUnlocked, chirp, cue } from './ui/sfx';
 import { claimVoice } from './ui/voiceClaim';
 import { speakable } from './ui/voiceQueue';
 import { emitMerge, mergeBursts, recentQaRecord, rememberQa } from './world/confetti';
+import { applyPkKick, applyPkState, applyPkStrike } from './world/park/penaltyState';
 import { takeEmote, takePing, takePose, takeRoster } from './world/presence/presenceState';
 import { gongForMerge } from './world/gongRunner';
 import { ROOF } from './world/layout';
@@ -70,7 +71,9 @@ export interface Focus {
     /** Pick up a paddle at that end of the ping-pong table (toys/pongState.ts). */
     | { kind: 'pong'; end: 'west' | 'east' }
     /** Play a penalty shoot-out against a free agent, from the park's penalty spot (world/park/penaltyState.ts). */
-    | { kind: 'penalty' };
+    | { kind: 'penalty' }
+    /** Take an agent's place in a penalty shoot-out, or join a visitor waiting for a second (#47). */
+    | { kind: 'penalty-takeover' };
 }
 
 /** What the player is carrying. Other items (a blaster, say) join the union with their own kind. */
@@ -537,6 +540,16 @@ export const useStore = create<State>((set, get) => ({
         break;
       case 'visitorPing':
         takePing(ev);
+        break;
+      // A visitor penalty match in the park (#47), refereed by the server: world/park/penaltyState.ts.
+      case 'pk-state':
+        applyPkState(ev);
+        break;
+      case 'pk-strike':
+        applyPkStrike(ev);
+        break;
+      case 'pk-kick':
+        applyPkKick(ev);
         break;
       case 'progress':
         set({ progress: ev.progress });

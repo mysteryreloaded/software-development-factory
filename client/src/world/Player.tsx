@@ -38,7 +38,7 @@ import { roofAction } from './roof/roofState';
 import { parseSmokePerchId, runSmokeBreakOp, smokeBreakFocus, smokeFocusAt, type SmokeFocus } from './smokeBreak';
 import { greet } from './Chatter';
 import { joinPong, pongCamera, pongMouse, tickPaddle } from './toys/pongState';
-import { penaltyAim, penaltyAimDive, penaltyCamera, penaltyCharge, penaltyCommitDive, penaltyShuffle, playerRole, requestPenaltyMatch } from './park/penaltyState';
+import { penaltyAim, penaltyAimDive, penaltyCamera, penaltyCharge, penaltyCommitDive, penaltyShuffle, playerRole, requestPenaltyMatch, requestPenaltyTakeover } from './park/penaltyState';
 import { gesture, touchInput, useTouch } from './touch';
 import { groundedJump, jumpHeight, startJump, stepJump } from './jump';
 
@@ -136,6 +136,10 @@ export function runFocusAction(focus: Focus, via: 'key' | 'click' = 'key') {
   }
   if (focus.action.kind === 'penalty') {
     if (!requestPenaltyMatch()) s.pushToast('info', "Everyone's busy, try again later");
+    return;
+  }
+  if (focus.action.kind === 'penalty-takeover') {
+    requestPenaltyTakeover();
     return;
   }
   if (focus.action.kind === 'theme') {

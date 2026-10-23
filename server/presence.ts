@@ -6,9 +6,18 @@
 
 import crypto from 'node:crypto';
 import type { WebSocket } from 'ws';
+import { parsePenaltyMessage } from '../shared/penalty.ts';
 import { DEMO_FAKES, FLOOR_CAP, MAX_FAKES, MAX_MESSAGE, cleanName, parsePresenceEvent } from '../shared/presence.ts';
 import type { ServerEvent, VisitorPose, VisitorView } from '../shared/types.ts';
 import { fakeProfile, newWalker, poseOf, stepWalker, type Walker } from './demoVisitors.ts';
+import { PenaltyMatch, type MatchResult } from './penaltyMatch.ts';
+
+/** The park's penalty spot (#47), in floor-0 world metres: client/src/world/park/parkPitch.ts goalPitch().spotX/z,
+ * worked out from outside/grounds.ts HOME_PARK (kept here as plain numbers, not imported, so the server never
+ * depends on the 3D client). Used for the 15 m forfeit distance. */
+const PITCH_SPOT = { x: -68, z: 0 };
+/** Walking this far from the spot while playing a visitor match forfeits it (#47). */
+const PITCH_FORFEIT_RANGE = 15;
 
 /** away: not in the office · watching: in it, on `floor`, but not appearing · visible: appearing at `pose`. */
 export type Mode = 'away' | 'watching' | 'visible';
@@ -77,6 +86,8 @@ export interface HubOptions {
   now?: () => number;
   /** Tick on a timer (flush held-back poses, walk the fakes); tests call tick() themselves. */
   timer?: boolean;
+  /** A visitor penalty match (#47) just finished: record it on the office-wide board. */
+  onPenaltyResult?: (result: MatchResult) => void;
 }
 
 export class PresenceHub {
@@ -89,11 +100,16 @@ export class PresenceHub {
   private readonly now: () => number;
   private readonly demo: boolean;
   private readonly useTimer: boolean;
+  private readonly onPenaltyResult?: (result: MatchResult) => void;
+  /** The park's one visitor penalty match (#47), floor 0 only. */
+  private readonly penalty: PenaltyMatch;
 
   constructor(opts: HubOptions = {}) {
     this.now = opts.now ?? Date.now;
     this.demo = opts.demo ?? false;
     this.useTimer = opts.timer ?? true;
+    this.onPenaltyResult = opts.onPenaltyResult;
+    this.penalty = new PenaltyMatch(() => this.now());
     if (this.demo) this.setFakes(DEMO_FAKES);
   }
 
@@ -119,6 +135,7 @@ export class PresenceHub {
 
   leave(peer: Peer) {
     if (!this.peers.has(peer.id)) return;
+    this.forfeitPenalty(peer.id);
     this.move(peer, 'away', null, null);
     this.peers.delete(peer.id);
     if (![...this.peers.values()].some((p) => !p.walker)) this.stopTimer();
@@ -126,8 +143,17 @@ export class PresenceHub {
 
   /** A message from a browser (anything: it's parsed and cleaned here). */
   receive(peer: Peer, raw: unknown) {
+    if (!this.peers.has(peer.id)) return;
     const msg = parsePresenceEvent(raw);
-    if (!msg || !this.peers.has(peer.id)) return;
+    if (msg) {
+      this.receivePresence(peer, msg);
+      return;
+    }
+    const pk = parsePenaltyMessage(raw);
+    if (pk) this.receivePenalty(peer, pk);
+  }
+
+  private receivePresence(peer: Peer, msg: NonNullable<ReturnType<typeof parsePresenceEvent>>) {
     const now = this.now();
     switch (msg.type) {
       case 'hello':
@@ -165,6 +191,39 @@ export class PresenceHub {
     }
   }
 
+  /** A pk-* message (#47): join, a shot, a dive, a shuffle, or leaving the match on purpose. */
+  private receivePenalty(peer: Peer, msg: NonNullable<ReturnType<typeof parsePenaltyMessage>>) {
+    switch (msg.type) {
+      case 'pk-join':
+        if (peer.mode !== 'visible' || peer.floor !== 0) return;
+        if (this.penalty.join({ id: peer.id, name: peer.name })) this.broadcastPenalty();
+        return;
+      case 'pk-shot':
+        // Relayed the instant it's accepted, well before the kick itself resolves (flight time plus grace), so
+        // the keeper sees the ball leave at once; pk-kick (tickPenalty) settles what actually happened to it.
+        if (this.penalty.shot(peer.id, msg)) this.toFloorZero({ type: 'pk-strike', shot: { x: msg.x, y: msg.y, power: msg.power } });
+        return;
+      case 'pk-dive':
+        this.penalty.dive(peer.id, msg);
+        return;
+      case 'pk-shuffle':
+        this.penalty.shuffle(peer.id);
+        return;
+      case 'pk-leave':
+        this.forfeitPenalty(peer.id);
+        return;
+    }
+  }
+
+  /** `peer` is gone from the match (disconnected, left floor 0, or wandered too far, #47): no result either way. */
+  private forfeitPenalty(id: string) {
+    if (this.penalty.forfeit(id)) this.broadcastPenalty();
+  }
+
+  private broadcastPenalty() {
+    this.toFloorZero({ type: 'pk-state', ...this.penalty.view });
+  }
+
   /** Held-back poses go out, and the fakes take a step. Runs every TICK_MS while anyone is connected. */
   tick() {
     const now = this.now();
@@ -182,6 +241,24 @@ export class PresenceHub {
         this.stepFake(p, dt, takenSeats);
         if (p.walker.smoke) takenSeats.add(`${p.walker.smoke.nook}:${p.walker.smoke.seat}`);
       } else if (p.dirty && due(p.relayedAt, now, RELAY_GAP_MS)) this.relayNow(p);
+    }
+    this.tickPenalty();
+  }
+
+  /** A visitor match's kick resolves, or times out (#47): relay it, and the result if it just decided the match. */
+  private tickPenalty() {
+    const resolved = this.penalty.tick();
+    if (!resolved) return;
+    this.toFloorZero({ type: 'pk-kick', ...resolved });
+    // 'done' broadcasts (the winner, one tick) before clearDone() wipes it back to 'empty': clearing first would
+    // send 'empty' instead, which applyPkState (penaltyState.ts) reads as a forfeit and discards the match with
+    // no result, right on its decisive kick.
+    const done = this.penalty.view.phase === 'done';
+    const result = done ? this.penalty.result() : null;
+    this.broadcastPenalty();
+    if (done) {
+      this.penalty.clearDone();
+      if (result) this.onPenaltyResult?.(result);
     }
   }
 
@@ -204,6 +281,11 @@ export class PresenceHub {
   /** What the probe and tests see: everyone, by mode and floor. */
   state() {
     return [...this.peers.values()].map((p) => ({ id: p.id, name: p.name, mode: p.mode, floor: p.floor, fake: !!p.walker }));
+  }
+
+  /** The park's visitor penalty match (#47), for tests. */
+  penaltyState() {
+    return this.penalty.view;
   }
 
   stop() {
@@ -233,6 +315,11 @@ export class PresenceHub {
 
   /** Someone arrives on, leaves or moves about a floor, or (dis)appears. */
   private move(peer: Peer, mode: Mode, floor: number | null, pose: VisitorPose | null) {
+    if (this.penalty.has(peer.id)) {
+      const leftThePitch = mode !== 'visible' || floor !== 0;
+      const tooFar = !leftThePitch && !!pose && Math.hypot(pose.x - PITCH_SPOT.x, pose.z - PITCH_SPOT.z) > PITCH_FORFEIT_RANGE;
+      if (leftThePitch || tooFar) this.forfeitPenalty(peer.id);
+    }
     if (peer.mode === mode && peer.floor === floor) {
       if (pose) {
         peer.pose = pose;
@@ -269,6 +356,14 @@ export class PresenceHub {
 
   private toFloor(sender: Peer, ev: ServerEvent) {
     const to = recipients(this.peers.values(), sender);
+    if (!to.length) return;
+    const msg = JSON.stringify(ev);
+    for (const p of to) p.send(msg);
+  }
+
+  /** Everyone on floor 0, the server's own voice (no sender): a visitor match's state and kicks (#47). */
+  private toFloorZero(ev: ServerEvent) {
+    const to = [...this.peers.values()].filter((p) => !p.walker && p.mode !== 'away' && p.floor === 0);
     if (!to.length) return;
     const msg = JSON.stringify(ev);
     for (const p of to) p.send(msg);
