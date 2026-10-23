@@ -565,6 +565,22 @@ function IssuesTab({ initialRepo }: { initialRepo?: string }) {
       </div>
       <div className="card">
         <h3>Open issues on {repo?.fullName}</h3>
+        {!!repo?.held.length && (
+          <button
+            className="btn btn-small"
+            onClick={() =>
+              void confirmDialog({
+                title: `Release ${repo.held.length} held issue${repo.held.length === 1 ? '' : 's'}?`,
+                body: 'Auto-assign can start them as soon as their blockers are closed.',
+                confirm: 'Release',
+              }).then((ok) => {
+                if (ok) void attempt(() => api.releaseHeld(repo.id));
+              })
+            }
+          >
+            Release {repo.held.length} held issue{repo.held.length === 1 ? '' : 's'}
+          </button>
+        )}
         <div className="repo-list tall">
           {repo?.issues.length === 0 && <div className="muted small">None. Nice.</div>}
           {repo?.issues.map((i) => {

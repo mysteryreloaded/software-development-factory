@@ -92,6 +92,7 @@ export const api = {
   syncFolder: (repoId: string) => call<{ folderSync: string | null }>('POST', `${r(repoId)}/sync-folder`),
   createIssue: (repoId: string, title: string, body: string, assignTo?: string) => call<{ number: number }>('POST', `${r(repoId)}/issues`, { title, body, assignTo }),
   closeIssue: (repoId: string, n: number) => call('POST', `${r(repoId)}/issues/${n}/close`),
+  releaseHeld: (repoId: string) => call<{ released: number }>('POST', `${r(repoId)}/release-held`),
   planFloor: (repoId: string, mission?: string) => call('POST', `${r(repoId)}/plan`, { mission }),
   onboardFloor: (repoId: string) => call('POST', `${r(repoId)}/onboard`),
   mergePull: (repoId: string, n: number, method: 'squash' | 'merge' | 'rebase' = 'squash') => call('POST', `${r(repoId)}/pulls/${n}/merge`, { method }),

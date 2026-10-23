@@ -2062,6 +2062,20 @@ export class Swarm {
     return this.state.held.some((h) => h.repoId === repoId && h.issue === n);
   }
 
+  /** Frees every held issue on a floor at once, back to auto-assign (still waiting on their own blockers). */
+  releaseHeld(repoId: string) {
+    const repo = this.repo(repoId);
+    const before = this.state.held.length;
+    this.state.held = this.state.held.filter((h) => h.repoId !== repo.id);
+    const released = before - this.state.held.length;
+    if (released) {
+      this.save();
+      this.emitRepo(repo);
+      setTimeout(() => this.schedule(), 200);
+    }
+    return released;
+  }
+
   // ---------- agents ----------
 
   hireAgent(

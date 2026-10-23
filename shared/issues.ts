@@ -1,11 +1,35 @@
 // Issue conventions shared by the server's scheduler and the client's whiteboard.
 
-/** Open issues this issue waits for, from "Depends on #3" / "Blocked by #4, #5" in its body. */
+/** A "## Blocked by" / "**Depends on**" / "Blocked by:" heading, on its own line. */
+const DEPENDENCY_HEADING =
+  /^\s*(?:#{1,6}\s*(?:depends\s+on|blocked\s+by)\s*:?|\*\*\s*(?:depends\s+on|blocked\s+by)\s*:?\s*\*\*|(?:depends\s+on|blocked\s+by)\s*:)\s*$/i;
+
+/** A list item: "-"/"*"/"+"/"1." with an optional checkbox, then a leading "#N". */
+const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?#(\d+)\b/;
+
+/** Open issues a "Depends on"/"Blocked by" heading lists, each on its own "- #N" (etc.) line underneath. */
+function headingBlockers(body: string, open: Set<number>) {
+  const out = new Set<number>();
+  const lines = (body ?? '').split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (!DEPENDENCY_HEADING.test(lines[i])) continue;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (!lines[j].trim()) continue; // blank lines within (or before) the list are skipped
+      const m = lines[j].match(LIST_ITEM);
+      if (!m) break; // the next heading, or any other non-list line, ends the list
+      if (open.has(Number(m[1]))) out.add(Number(m[1]));
+    }
+  }
+  return out;
+}
+
+/** Open issues this issue waits for, from "Depends on #3" / "Blocked by #4, #5" or a "## Blocked by" list in its body. */
 export function blockers(body: string, open: Set<number>) {
   const out = new Set<number>();
   for (const m of (body ?? '').matchAll(/\b(?:depends\s+on|blocked\s+by)\s*:?\s*((?:#\d+(?:\s*(?:,|and|&)\s*)?)+)/gi)) {
     for (const n of m[1].matchAll(/#(\d+)/g)) if (open.has(Number(n[1]))) out.add(Number(n[1]));
   }
+  for (const n of headingBlockers(body, open)) out.add(n);
   return [...out];
 }
 
@@ -18,6 +42,34 @@ export function waitsMessage(issue: number, waits: number[]) {
 const DEPENDENCY = /\b(?:depends\s+on|blocked\s+by)\s*:?\s*(?:#\d+(?:\s*(?:,|and|&)\s*)?)+/gi;
 const STATEMENT = new RegExp(`\\s*${DEPENDENCY.source}[.;,]?`, 'gi'); // with the space before it and a full stop after
 
+/** Drops every "Depends on"/"Blocked by" heading and the "#N" list under it, collapsing the gap it leaves. */
+function dropHeadingBlockers(rawLines: string[]) {
+  const out: string[] = [];
+  let dropped = false;
+  for (let i = 0; i < rawLines.length; i++) {
+    if (DEPENDENCY_HEADING.test(rawLines[i])) {
+      let j = i + 1;
+      let lastItem = i;
+      while (j < rawLines.length) {
+        if (!rawLines[j].trim()) {
+          j++;
+          continue;
+        }
+        if (!LIST_ITEM.test(rawLines[j])) break;
+        lastItem = j;
+        j++;
+      }
+      i = lastItem; // the outer loop's i++ resumes right after the block
+      dropped = true;
+      continue;
+    }
+    if (dropped && !rawLines[i].trim() && !out[out.length - 1]?.trim()) continue;
+    dropped = false;
+    out.push(rawLines[i]);
+  }
+  return out;
+}
+
 /**
  * An issue body with its "Depends on #N" / "Blocked by #N" statements replaced by one "Depends on #a, #b" line at the
  * top ([] removes them). A line that only said that goes; the rest of the body is left alone.
@@ -25,7 +77,7 @@ const STATEMENT = new RegExp(`\\s*${DEPENDENCY.source}[.;,]?`, 'gi'); // with th
 export function setDependsOn(body: string, deps: number[]) {
   const lines: string[] = [];
   let dropped = false;
-  for (const line of (body ?? '').split(/\r?\n/)) {
+  for (const line of dropHeadingBlockers((body ?? '').split(/\r?\n/))) {
     const rest = line.match(DEPENDENCY) ? line.replace(STATEMENT, '').trimEnd() : line;
     if (rest !== line && !/[\p{L}\p{N}]/u.test(rest)) {
       dropped = true;
