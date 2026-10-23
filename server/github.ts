@@ -227,6 +227,41 @@ export async function rerunFailedJobs(fullName: string, runIds: number[]): Promi
   for (const id of runIds) await gh(['run', 'rerun', String(id), '--failed', '-R', fullName], { timeoutMs: 60_000 });
 }
 
+interface ActionsJob {
+  steps: { name: string; status: string }[] | null;
+  runner_id: number | null;
+}
+
+interface CheckAnnotation {
+  title: string | null;
+  message: string | null;
+}
+
+// GitHub's wording for an Actions job it refused to start over billing: an annotation with one of these in its
+// title or message, or (no annotations yet) a job with no steps and no runner at all.
+const NEVER_STARTED_RE = /job was not started|spending limit|account payments/i;
+
+/** A job (server/github.ts's ActionsJob) and its check-run annotations say GitHub never started it. */
+export function jobNeverStarted(job: ActionsJob | null, annotations: CheckAnnotation[]): boolean {
+  if (annotations.some((a) => NEVER_STARTED_RE.test(`${a.title ?? ''} ${a.message ?? ''}`))) return true;
+  return !!job && !job.runner_id && !job.steps?.length;
+}
+
+/** Ask GitHub, for each of these Actions job ids, whether it ever started (a billing or spending-limit block). */
+export async function neverStartedJobs(fullName: string, jobIds: string[]): Promise<Set<string>> {
+  const blocked = new Set<string>();
+  await Promise.all(
+    jobIds.map(async (id) => {
+      const [job, annotations] = await Promise.all([
+        ghJson<ActionsJob>(['api', `repos/${fullName}/actions/jobs/${id}`]).catch(() => null),
+        ghJson<CheckAnnotation[]>(['api', `repos/${fullName}/check-runs/${id}/annotations`]).catch(() => []),
+      ]);
+      if (jobNeverStarted(job, annotations)) blocked.add(id);
+    }),
+  );
+  return blocked;
+}
+
 export async function closePull(fullName: string, number: number): Promise<void> {
   await gh(['pr', 'close', String(number), '-R', fullName]);
 }

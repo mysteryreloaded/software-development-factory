@@ -37,6 +37,8 @@ export interface Backend {
   failedRunLog(fullName: string, runId: string): Promise<string>;
   /** Re-run the failed jobs of these GitHub Actions runs. */
   rerunFailedJobs(fullName: string, runIds: number[]): Promise<void>;
+  /** Which of these Actions job ids GitHub never started (a billing or spending-limit block), not a real failure. */
+  neverStartedJobs(fullName: string, jobIds: string[]): Promise<Set<string>>;
   closePull(fullName: string, number: number): Promise<void>;
   prForBranch(fullName: string, branch: string): Promise<{ number: number; url: string } | null>;
   prDetails(fullName: string, number: number): Promise<github.PrDetails>;
@@ -133,6 +135,7 @@ export const realBackend: Backend = {
   updateBranch: github.updateBranch,
   failedRunLog: github.failedRunLog,
   rerunFailedJobs: github.rerunFailedJobs,
+  neverStartedJobs: github.neverStartedJobs,
   closePull: github.closePull,
   prForBranch: github.prForBranch,
   prDetails: github.prDetails,

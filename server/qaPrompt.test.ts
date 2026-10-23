@@ -16,6 +16,7 @@ const input = (i: Partial<QaPromptInput> = {}): QaPromptInput => ({
   summary: null,
   fixInstructions: null,
   defaultBranch: 'main',
+  neverStartedChecks: [],
   ...i,
 });
 
@@ -33,6 +34,11 @@ describe('qaInstructions: GitHub checks', () => {
     const qa = qaInstructions(input({ checks: 'failing', failedChecks: ['e2e', 'lint'] }));
     expect(qa.checks).toBe('GitHub checks right now: failing: e2e, lint');
     expect(qa.testStep).toContain('A failing check is a finding');
+  });
+
+  it('failing with a GitHub Actions billing/spending-limit block: marks that check so QA does not fail the PR for it', () => {
+    const qa = qaInstructions(input({ checks: 'failing', failedChecks: ['e2e', 'lint'], neverStartedChecks: ['e2e'] }));
+    expect(qa.checks).toBe('GitHub checks right now: failing: e2e (never started (GitHub Actions billing/spending limit, not a code problem)), lint');
   });
 
   it('failing while others still run: says which are still running', () => {

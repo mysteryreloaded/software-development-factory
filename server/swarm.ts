@@ -15,7 +15,7 @@ import { fixGoesTo, pickTester, PREP_HOLD_MS, prepFailure, prepHeld, type PrepSt
 import { HttpError } from './httpError.ts';
 import { IssueAges } from './issueAges.ts';
 import { issuesResolvedBy, issueTaken } from './issueClaims.ts';
-import { CHECKS_ALERT_MS, failedRunIds, MAX_MERGE_FIXES, MERGE_RETRY_MS, mergeStep, movedSincePass } from './mergeGate.ts';
+import { BLOCKED_NOTE, CHECKS_ALERT_MS, failedJobIds, failedRunIds, MAX_MERGE_FIXES, MERGE_RETRY_MS, mergeStep, movedSincePass, neverStartedNames } from './mergeGate.ts';
 import { orphanedQa } from './qaOrphans.ts';
 import { catchUp, failedRunId, logTail, noChangeReason, PR_LIMITS_VERSION, QA_STOPPED, unpushedFix } from './prOwnership.ts';
 import { conflictFixInstructions, MAX_QA_ROUNDS, qaGate, qaOutcome, type PreQa, type QaNext } from './qaOutcome.ts';
@@ -179,6 +179,7 @@ interface QaRecord extends Omit<QaView, 'ceoLooking' | 'ceoReview'> {
   alerted: boolean; // the manager has been told it's stuck
   rerunSha: string | null; // the head commit whose failed checks the office re-ran (once per commit)
   rerunAt: number | null;
+  blockedRerunAt: number | null; // next time it's due to re-run jobs GitHub Actions never started (billing/spending limit)
   qaChecks: PullInfo['checks'] | null; // GitHub's checks when QA last failed it: a later re-run can be the fix
   stuckWhy: string | null; // why it last became needs-human, for the CEO's triage and the manager's alert
   triages: number; // CEO triage jobs it has had (triage.ts caps them)
@@ -259,6 +260,8 @@ interface RepoRuntime {
   closedIssues: Map<number, number>; // issues the office learned are closed, and when (closeCleanup.ts)
   closedPulls: Map<number, LearnedPull>; // PRs it learned are closed or merged
   openAt: Map<string, number>; // `issue#<n>` / `pr#<n>` -> when GitHub said one the sync doesn't list is open
+  neverStarted: Map<string, boolean>; // `<headSha>:<jobId>` -> GitHub never started that job (billing/spending limit), cached so a sync asks once per job
+  actionsBilling: boolean; // the manager has been told Actions isn't starting jobs on this floor; cleared once nothing is blocked
 }
 
 /** What startup reconciliation decided (reconcileRestart), for finishRestart once the floors have synced. */
@@ -280,6 +283,8 @@ interface QaReport {
 }
 
 // ---------- flavour ----------
+
+const EMPTY_JOB_SET: ReadonlySet<string> = new Set();
 
 const FLOOR_COLORS = ['#ff8a5b', '#4fb3e8', '#8fd14f', '#c77dff', '#ffc93c', '#ff6fb5', '#2ec4b6', '#f25f5c'];
 const SHIRTS = ['#e63946', '#457b9d', '#2a9d8f', '#f4a261', '#9b5de5', '#f15bb5', '#00bbf9', '#06d6a0', '#ffbe0b', '#8338ec', '#fb5607', '#3a86ff'];
@@ -673,6 +678,7 @@ export class Swarm {
           noChangeSha: q.noChangeSha ?? null,
           rerunSha: q.rerunSha ?? null,
           rerunAt: q.rerunAt ?? null,
+          blockedRerunAt: q.blockedRerunAt ?? null,
           qaChecks: q.qaChecks ?? null,
           stuckWhy: q.stuckWhy ?? null,
           triages: q.triages ?? 0,
@@ -749,7 +755,7 @@ export class Swarm {
         console.warn('could not reconnect to the terminal keeper', err);
         return [];
       });
-    for (const r of this.state.repos) this.repoRt.set(r.id, { issues: [], pulls: [], lastSync: null, syncing: false, cloneStatus: 'pending', lastMergedAt: null, folderSync: null, merging: false, closedIssues: new Map(), closedPulls: new Map(), openAt: new Map() });
+    for (const r of this.state.repos) this.repoRt.set(r.id, { issues: [], pulls: [], lastSync: null, syncing: false, cloneStatus: 'pending', lastMergedAt: null, folderSync: null, merging: false, closedIssues: new Map(), closedPulls: new Map(), openAt: new Map(), neverStarted: new Map(), actionsBilling: false });
     const restart = await this.reconcileRestart((a) => followKeptCli(a, back.find((c) => c.agentId === a.id)));
     interrupted.push(...restart.interrupted);
     for (const c of back) if (c.busy && !restart.carryOn.some((a) => a.id === c.agentId)) this.agentRt.get(c.agentId)?.terminal?.releaseIdle?.();
@@ -1348,7 +1354,7 @@ export class Swarm {
     };
     this.backend.setLocalPath(repo.fullName, folder);
     this.state.repos.push(repo);
-    this.repoRt.set(repo.id, { issues: [], pulls: [], lastSync: null, syncing: false, cloneStatus: 'pending', lastMergedAt: null, folderSync: null, merging: false, closedIssues: new Map(), closedPulls: new Map(), openAt: new Map() });
+    this.repoRt.set(repo.id, { issues: [], pulls: [], lastSync: null, syncing: false, cloneStatus: 'pending', lastMergedAt: null, folderSync: null, merging: false, closedIssues: new Map(), closedPulls: new Map(), openAt: new Map(), neverStarted: new Map(), actionsBilling: false });
     this.save();
     this.emitRepo(repo);
     this.toast('success', `${repo.fullName} moved into floor ${floor}`);
@@ -1487,6 +1493,7 @@ export class Swarm {
     if (!rt || !repo.autoMerge || rt.merging) return;
     rt.merging = true;
     let merged = false;
+    const blocked = new Set<number>(); // PRs this pass found waiting on a GitHub Actions billing/spending-limit block
     try {
       for (const rec of this.state.qa.filter((q) => q.repoId === repo.id && q.status === 'passed')) {
         const pr = rt.pulls.find((p) => p.number === rec.prNumber && p.state === 'OPEN');
@@ -1494,7 +1501,7 @@ export class Swarm {
         // Only act on PR data fetched after the record last changed (a fix may have just pushed).
         if ((rt.fetchedAt ?? 0) < rec.updatedAt) continue;
         try {
-          if (await this.advanceMerge(repo, rec, pr)) merged = true;
+          if (await this.advanceMerge(repo, rec, pr, blocked)) merged = true;
         } catch (err) {
           console.warn(`auto-merge of ${repo.fullName}#${pr.number} failed`, err);
           this.mergeNote(rec, `auto-merge hit a problem: ${oneLine(err)}`);
@@ -1503,10 +1510,40 @@ export class Swarm {
     } finally {
       rt.merging = false;
     }
+    if (blocked.size) this.alertActionsBilling(repo);
+    else rt.actionsBilling = false;
     if (merged) {
       await this.syncRepo(repo.id);
       setTimeout(() => this.schedule(), 200);
     }
+  }
+
+  /** One office message per floor while GitHub Actions won't start jobs (billing or a spending limit); it posts again once a later block starts. */
+  private alertActionsBilling(repo: PersistedRepo) {
+    const rt = this.repoRt.get(repo.id);
+    if (!rt || rt.actionsBilling) return;
+    rt.actionsBilling = true;
+    this.postMessage(
+      'office',
+      `⚠️ GitHub Actions isn't starting jobs on ${repo.fullName} (billing or a spending limit): fix that, the spending limit, or the runner. The office merges the waiting PRs by itself once jobs run again.`,
+    );
+  }
+
+  /** Which of these failed checks' Actions jobs GitHub never started, cached per head commit and job (mergeGate.ts). */
+  private async neverStartedFor(repo: PersistedRepo, headSha: string, failedChecks: PullInfo['failedChecks']): Promise<ReadonlySet<string>> {
+    const rt = this.repoRt.get(repo.id);
+    if (!rt) return EMPTY_JOB_SET;
+    const jobIds = failedJobIds(failedChecks);
+    if (!jobIds.length) return EMPTY_JOB_SET;
+    const missing = jobIds.filter((id) => !rt.neverStarted.has(`${headSha}:${id}`));
+    if (missing.length) {
+      const found = await this.backend.neverStartedJobs(repo.fullName, missing).catch((err) => {
+        console.warn(`could not check whether GitHub Actions started ${repo.fullName}'s jobs`, err);
+        return new Set<string>();
+      });
+      for (const id of missing) rt.neverStarted.set(`${headSha}:${id}`, found.has(id));
+    }
+    return new Set(jobIds.filter((id) => rt.neverStarted.get(`${headSha}:${id}`)));
   }
 
   /** Hand-merge floors: a passed PR whose swarm head moved on goes back to QA, same as advanceMerge's 'requeue' step. */
@@ -1516,14 +1553,15 @@ export class Swarm {
     if (moved.length) setTimeout(() => this.schedule(), 200);
   }
 
-  /** One step toward merging a QA-passed PR. Returns true when it merged. */
-  private async advanceMerge(repo: PersistedRepo, rec: QaRecord, pr: PullInfo): Promise<boolean> {
-    let step = mergeStep(pr, rec, Date.now(), { base: repo.defaultBranch, ceoReview: repo.ceoReview });
+  /** One step toward merging a QA-passed PR. Returns true when it merged. `blocked`: this pass's PRs waiting on GitHub Actions. */
+  private async advanceMerge(repo: PersistedRepo, rec: QaRecord, pr: PullInfo, blocked: Set<number>): Promise<boolean> {
+    const neverStarted = pr.checks === 'failing' ? await this.neverStartedFor(repo, pr.headSha, pr.failedChecks) : EMPTY_JOB_SET;
+    let step = mergeStep(pr, rec, Date.now(), { base: repo.defaultBranch, ceoReview: repo.ceoReview, neverStarted });
     if (step.do === 'details') {
       // GitHub works mergeability out lazily and lists often say UNKNOWN; asking about the PR itself gets an answer.
       const d = await this.backend.prDetails(repo.fullName, pr.number);
       pr = { ...pr, headSha: d.headSha, mergeable: d.mergeable, mergeState: d.mergeState };
-      step = mergeStep(pr, rec, Date.now(), { base: repo.defaultBranch, detailed: true, ceoReview: repo.ceoReview });
+      step = mergeStep(pr, rec, Date.now(), { base: repo.defaultBranch, detailed: true, ceoReview: repo.ceoReview, neverStarted });
     }
     Object.assign(rec, step.set);
     if (step.do === 'requeue') {
@@ -1543,11 +1581,23 @@ export class Swarm {
       this.setQa(rec, { rerunSha: pr.headSha, rerunAt: Date.now(), pendingSince: null, alerted: false, mergeNote: 're-running a failed check' });
       return false;
     }
+    if (step.do === 'rerun-blocked') {
+      // GitHub never started these jobs (billing/spending limit): re-run them hoping it's fixed, but never send the PR back.
+      blocked.add(pr.number);
+      try {
+        await this.backend.rerunFailedJobs(repo.fullName, step.runIds);
+      } catch (err) {
+        console.warn(`could not re-run the blocked checks of ${repo.fullName}#${pr.number}`, err);
+      }
+      this.setQa(rec, { pendingSince: null, mergeNote: BLOCKED_NOTE });
+      return false;
+    }
     if (step.do === 'send-back') return this.sendBack(repo, rec, step.reason, step.instructions, step.needsHuman);
     if (step.do === 'wait') {
       if (step.alert) {
         this.postMessage('office', `⏳ PR #${pr.number} on ${repo.fullName} passed QA, but its checks (${pr.pendingChecks.join(', ')}) have been running for over ${CHECKS_ALERT_MS / 60_000} minutes. It merges as soon as they finish.`);
       }
+      if (step.blocked) blocked.add(pr.number);
       return step.note === undefined ? false : this.mergeNote(rec, step.note);
     }
     if (step.do === 'update-branch') {
@@ -2760,6 +2810,7 @@ export class Swarm {
         noChangeSha: null,
         rerunSha: null,
         rerunAt: null,
+        blockedRerunAt: null,
         qaChecks: null,
         stuckWhy: null,
         triages: 0,
@@ -2901,6 +2952,10 @@ export class Swarm {
     const dev = rec.devAgentId ? this.state.agents.find((x) => x.id === rec.devAgentId) : null;
     // A last-round fail sent back for a merge fix (QA never passed it): QA's findings first, then a full re-check.
     const failedConflict = rec.fixReason === 'conflict' && !rec.passedSha;
+    // The urls behind the failed checks' names (for a billing/spending-limit check) come from the last sync; a stale
+    // head just means none are marked, since QA re-fetched this PR's details fresh above.
+    const live = this.repoRt.get(repo.id)?.pulls.find((p) => p.number === pr.number && p.headSha === pr.headSha);
+    const neverStarted = pr.checks === 'failing' && live ? await this.neverStartedFor(repo, live.headSha, live.failedChecks) : EMPTY_JOB_SET;
     const qa = qaInstructions({
       ...pr,
       round: rec.round,
@@ -2909,6 +2964,7 @@ export class Swarm {
       summary: rec.summary,
       fixInstructions: rec.fixInstructions,
       defaultBranch: repo.defaultBranch,
+      neverStartedChecks: live ? neverStartedNames(live.failedChecks, neverStarted) : [],
     });
     const prompt = [
       `Please QA pull request #${pr.number}: ${pr.title}`,
