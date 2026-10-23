@@ -51,6 +51,56 @@ describe('blockers', () => {
     expect(blockers(undefined as unknown as string, open(1))).toEqual([]);
     expect(blockers(null as unknown as string, open(1))).toEqual([]);
   });
+
+  it('reads a "## Blocked by" heading followed by a list', () => {
+    const body = '## Blocked by\n\n- #36\n- #39 Sign in with Google';
+    expect(blockers(body, open(36, 39)).sort((a, b) => a - b)).toEqual([36, 39]);
+  });
+
+  it('reads any heading level, bold, or a plain "Blocked by:" line', () => {
+    expect(blockers('### Blocked by\n- #1', open(1))).toEqual([1]);
+    expect(blockers('###### Depends on\n- #2', open(2))).toEqual([2]);
+    expect(blockers('**Blocked by**\n- #3', open(3))).toEqual([3]);
+    expect(blockers('**Depends on:**\n- #4', open(4))).toEqual([4]);
+    expect(blockers('Blocked by:\n- #5', open(5))).toEqual([5]);
+  });
+
+  it('accepts *, + and numbered list items, with an optional checkbox and trailing text', () => {
+    const body = '## Blocked by\n* #1\n+ #2\n1. #3\n- [ ] #4\n- [x] #5 done already';
+    expect(blockers(body, open(1, 2, 3, 4, 5)).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('allows a blank line between the heading and the list', () => {
+    expect(blockers('## Blocked by\n\n\n- #1', open(1))).toEqual([1]);
+  });
+
+  it('ends the list at the next heading', () => {
+    const body = '## Blocked by\n- #1\n## Related\n- #2';
+    expect(blockers(body, open(1, 2))).toEqual([1]);
+  });
+
+  it('ends the list at the first line that is not blank and not a list item', () => {
+    const body = '## Blocked by\n- #1\nSome prose.\n- #2';
+    expect(blockers(body, open(1, 2))).toEqual([1]);
+  });
+
+  it('a heading with no #N items means no blockers', () => {
+    expect(blockers('## Blocked by\n\nNone', open(1))).toEqual([]);
+  });
+
+  it('a #N under another heading is not a blocker', () => {
+    const body = '## Related\n- #12';
+    expect(blockers(body, open(12))).toEqual([]);
+  });
+
+  it('combines inline and list forms into the union, without duplicates', () => {
+    const body = 'Depends on #1\n\n## Blocked by\n- #1\n- #2';
+    expect(blockers(body, open(1, 2)).sort((a, b) => a - b)).toEqual([1, 2]);
+  });
+
+  it('drops closed blockers from a list too', () => {
+    expect(blockers('## Blocked by\n- #1\n- #2', open(1))).toEqual([1]);
+  });
 });
 
 describe('holdUps', () => {
@@ -101,6 +151,12 @@ describe('setDependsOn', () => {
     const body = 'Context\r\n\r\n- [ ] one\r\n- [ ] two\r\n\r\n---\r\n_Filed by Morgan_';
     expect(setDependsOn(body, [])).toBe(body.replace(/\r\n/g, '\n'));
     expect(blockers(setDependsOn(body, [7]), open(7))).toEqual([7]);
+  });
+
+  it('removes a "Blocked by" heading and its list, with [] or with new deps', () => {
+    const body = 'Intro\n\n## Blocked by\n\n- #36\n- #39 Sign in with Google\n\nMore context.';
+    expect(setDependsOn(body, [])).toBe('Intro\n\nMore context.');
+    expect(setDependsOn(body, [5])).toBe('Depends on #5\n\nIntro\n\nMore context.');
   });
 });
 
