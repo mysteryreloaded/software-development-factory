@@ -3473,7 +3473,8 @@ export class Swarm {
    * failing to set up sits out.
    */
   private startPipelineWork(repo: PersistedRepo): boolean {
-    const free = this.available(repo);
+    // The usage brake holds Claude agents only: a held one at a lower desk must not block the free agents behind it.
+    const free = this.available(repo).filter((a) => this.mayStart('qa', a));
     if (!free.length) return false;
     const now = Date.now();
     const floor = this.floorState(this.repoRt.get(repo.id)!);
@@ -3493,7 +3494,6 @@ export class Swarm {
       const othersCan = this.state.agents.some((a) => a.repoId === repo.id && a.role !== 'ceo' && a.id !== rec.devAgentId && a.status !== 'stopped');
       const tester = pickTester(free, rec.devAgentId, owed, othersCan, now - rec.updatedAt);
       if (!tester) continue;
-      if (!this.mayStart('qa', tester)) continue; // the usage brake holds a Claude tester only
       void this.runQa(tester, repo, rec);
       return true;
     }
@@ -3503,7 +3503,6 @@ export class Swarm {
       const to = fixGoesTo(author, !!author && free.includes(author), rec.prNumber, headRef);
       if (to === 'wait') continue; // the author gets it when their session ends
       const fixer = to === 'author' ? author! : (free.find((a) => !owed.has(a.id)) ?? free[0]);
-      if (!this.mayStart('fix', fixer)) continue; // the usage brake holds a Claude fixer only
       void this.runFix(fixer, repo, rec);
       return true;
     }
@@ -3516,11 +3515,10 @@ export class Swarm {
    */
   private startIssueWork(repo: PersistedRepo): boolean {
     if (!repo.autoAssign) return false;
-    const agent = this.available(repo)[0];
+    // The usage brake holds Claude sessions only: a held Claude agent at a lower desk must not block the free agents behind it.
+    const agent = this.available(repo).find((a) => this.mayStart('issue', a));
     const next = agent ? this.readyIssues(repo)[0] : undefined;
     if (!agent || !next) return false;
-    // The usage brake holds Claude sessions only: a Claude agent's new issues wait out a pause or the pacing cap.
-    if (!this.mayStart('issue', agent)) return false;
     // assign() flips the agent to 'preparing' synchronously, so the next pass sees it as busy.
     void this.assign(agent.id, next.issue.number).catch((err) => console.warn('auto-assign failed', err));
     return agent.status === 'preparing';
