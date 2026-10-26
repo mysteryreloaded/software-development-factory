@@ -4,7 +4,7 @@
 // nobody on it goes back in its queue. At most one remedy per item per hour: anything that's still stuck after that,
 // or has no safe remedy, becomes a finding for the office doctor, with the console's own buttons to fix it.
 
-import type { DoctorFinding, DoctorFix } from '../shared/types.ts';
+import type { AgentCli, DoctorFinding, DoctorFix } from '../shared/types.ts';
 import type { WorkState } from './reconcile.ts';
 
 /** A session with no output and no tool activity for this long is quiet. */
@@ -19,6 +19,11 @@ export const ORPHAN_GRACE_MS = 3 * 60_000;
 export const UNCLOSED_GRACE_MS = 10 * 60_000;
 /** At most one automatic remedy per item in this window. */
 export const REMEDY_EVERY_MS = 60 * 60_000;
+
+/** When a working agent last showed a sign of life: activity the office saw (tool steps, log lines), or, when the session running now isn't Claude Code (which reports every step), its terminal output too. */
+export function signOfLifeAt(activityAt: number, runningCli: AgentCli, terminalOutputAt: number | null): number {
+  return Math.max(activityAt, runningCli !== 'claude' && terminalOutputAt != null ? terminalOutputAt : 0);
+}
 
 export interface WatchAgent {
   id: string;

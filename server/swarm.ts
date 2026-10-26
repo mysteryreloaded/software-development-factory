@@ -22,7 +22,7 @@ import { conflictFixInstructions, MAX_QA_ROUNDS, qaGate, qaOutcome, type PreQa, 
 import { qaInstructions } from './qaPrompt.ts';
 import { followKeptCli, resumeNote, resumesAfterRestart } from './restartRecovery.ts';
 import { reconcileStep, restartMessage, sessionStart, workState, type ReconcileStep, type RestartCounts, type WorkState } from './reconcile.ts';
-import { diagnose, finding, forget, NUDGE_WAIT_MS, nudgeText, QUIET_MS, triage, unclosedIssues, type Problem, type Remedy, type WatchAgent, type WatchMemory } from './watchdog.ts';
+import { diagnose, finding, forget, NUDGE_WAIT_MS, nudgeText, QUIET_MS, signOfLifeAt, triage, unclosedIssues, type Problem, type Remedy, type WatchAgent, type WatchMemory } from './watchdog.ts';
 import { sendBackPatch } from './sendBack.ts';
 import { checkTriageTarget, triageStep, type TriagePr } from './triage.ts';
 import { DEFAULT_PREVIEW, Previews, parsePreviewPatch } from './previews.ts';
@@ -238,6 +238,7 @@ interface AgentRuntime {
   log: LogLine[];
   session: SessionHandle | null;
   currentTool: string | null;
+  cli?: AgentCli; // the CLI of the session running now; a.sessionCli is the CLI that made the resumable session, which can be older
   browserUrl: string | null;
   screenshot: { data: Buffer; mime: string; at: number } | null;
   shots: Shot[]; // every screenshot of the current session (QA evidence)
@@ -2611,6 +2612,7 @@ export class Swarm {
     a.status = 'working';
     this.activity.set(a.id, Date.now());
     const how = this.sessionRuntime(a, resumeSessionId);
+    rt.cli = how.cli ?? 'claude';
     this.emitAgent(a);
     const active = (entries: LogEntry[]) => {
       if (entries.some((e) => e.kind !== 'manager')) this.activity.set(a.id, Date.now());
@@ -4498,11 +4500,11 @@ export class Swarm {
     return desk?.cwd ?? null;
   }
 
-  /** When an agent's session last showed signs of life. Claude Code reports every step; other CLIs may only report a turn's end, so their terminal output counts too. */
+  /** When an agent's session last showed a sign of life, judged by the CLI of the session running now (Claude Code reports every step; other CLIs' terminal output counts too). */
   private activeAt(a: PersistedAgent) {
-    const term = this.agentRt.get(a.id)?.terminal;
-    const cli = a.sessionCli ?? (a.cli || this.state.settings.defaultCli);
-    return Math.max(this.activity.get(a.id) ?? a.startedAt ?? Date.now(), cli !== 'claude' && term ? term.outputAt : 0);
+    const rt = this.agentRt.get(a.id);
+    const cli = rt?.cli ?? a.sessionCli ?? (a.cli || this.state.settings.defaultCli);
+    return signOfLifeAt(this.activity.get(a.id) ?? a.startedAt ?? Date.now(), cli, rt?.terminal ? rt.terminal.outputAt : null);
   }
 
   /** The agent's task as the office knows it now (closeCleanup.ts). */
