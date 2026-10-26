@@ -8,6 +8,7 @@ import {
   PREPARING_MS,
   QUIET_MS,
   REMEDY_EVERY_MS,
+  signOfLifeAt,
   triage,
   UNCLOSED_GRACE_MS,
   unclosedIssues,
@@ -86,6 +87,28 @@ describe('unclosedIssues', () => {
       { number: 216, state: 'OPEN', mergedAt: null, closesIssues: [209] },
     ];
     expect(unclosedIssues('r1', [207, 209], pulls)).toEqual([{ repoId: 'r1', issue: 207, pr: 215, mergedAt: NOW }]);
+  });
+});
+
+describe('signOfLifeAt', () => {
+  it('counts newer terminal output for a session running OpenCode or Codex', () => {
+    const newer = NOW - MIN;
+    expect(signOfLifeAt(NOW - 30 * MIN, 'opencode', newer)).toBe(newer);
+    expect(signOfLifeAt(NOW - 30 * MIN, 'codex', newer)).toBe(newer);
+  });
+
+  it('ignores the terminal output of a Claude Code session', () => {
+    expect(signOfLifeAt(NOW - 30 * MIN, 'claude', NOW - MIN)).toBe(NOW - 30 * MIN);
+  });
+
+  it('falls back to the activity when the terminal has no output', () => {
+    expect(signOfLifeAt(NOW - 30 * MIN, 'opencode', null)).toBe(NOW - 30 * MIN);
+    expect(signOfLifeAt(NOW - 30 * MIN, 'codex', null)).toBe(NOW - 30 * MIN);
+  });
+
+  it('keeps the activity when the terminal output is older', () => {
+    expect(signOfLifeAt(NOW - MIN, 'opencode', NOW - 30 * MIN)).toBe(NOW - MIN);
+    expect(signOfLifeAt(NOW - MIN, 'codex', NOW - 30 * MIN)).toBe(NOW - MIN);
   });
 });
 
