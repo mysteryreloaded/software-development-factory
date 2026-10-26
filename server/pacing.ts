@@ -6,8 +6,10 @@ export { clock };
 // Pacing new work on Claude's usage warnings (#40). Every agent shares one subscription. When Claude warns that
 // usage is getting high, the office slows down instead of running into the hard limit: finishing beats starting.
 // The brake is Claude's: it holds Claude sessions (and the CEO, who always runs Claude), while agents on other
-// coding agents carry on. QA, QA fixes and CEO jobs start as normal; new issues from Claude agents only while fewer
-// than settings.pacingSessions Claude sessions run; new issues from other agents always.
+// coding agents carry on. A session uses Claude when, in the terminal runtime, the CEO runs it or the agent's next
+// session runs the `claude` CLI (the same rule as the swarm's sessionRuntime); in the SDK runtime the Agent SDK
+// runs Claude Code, so every session does. QA, QA fixes and CEO jobs start as normal; new issues from Claude
+// agents only while fewer than settings.pacingSessions Claude sessions run; new issues from other agents always.
 
 /** How long pacing lasts when Claude doesn't say when the window resets. */
 export const PACING_MS = 60 * 60_000;
@@ -23,10 +25,13 @@ export interface UsageClock {
 }
 
 /**
- * Whether a session uses Claude: the CEO always runs Claude, an agent their own CLI, or the office's default CLI
- * (the same rule as the swarm's sessionRuntime). Only these sessions draw on Claude's shared subscription.
+ * Whether a session uses Claude. In the terminal runtime, the CEO always runs Claude, an agent their own CLI or the
+ * office's default (the same rule as the swarm's sessionRuntime). In the SDK runtime the Agent SDK runs Claude Code,
+ * so every session is Claude's whatever CLI the agent has (`inTerminal` false). Only these sessions draw on Claude's
+ * shared subscription.
  */
-export function usesClaude(facts: { role: AgentRole; cli: AgentCli | '' }, defaultCli: AgentCli): boolean {
+export function usesClaude(facts: { role: AgentRole; cli: AgentCli | '' }, defaultCli: AgentCli, inTerminal: boolean): boolean {
+  if (!inTerminal) return true;
   return (facts.role === 'ceo' ? 'claude' : facts.cli || defaultCli) === 'claude';
 }
 

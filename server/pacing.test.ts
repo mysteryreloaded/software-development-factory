@@ -133,14 +133,24 @@ describe('the brake is Claude’s only (#97)', () => {
     expect(mayStart('issue', at({ ...capFull, claude: false }))).toBe(true); // even when the cap is full of Claude sessions
   });
 
-  it('uses Claude: the CEO always, an agent its own CLI or the office default', () => {
+  it('in the terminal runtime: the CEO always uses Claude, an agent its own CLI or the office default', () => {
     const a = (role: AgentRole, cli: AgentCli | '') => ({ role, cli });
-    expect(usesClaude(a('ceo', 'opencode'), 'opencode')).toBe(true); // the CEO always runs Claude
-    expect(usesClaude(a('agent', 'claude'), 'opencode')).toBe(true); // the agent's own CLI
-    expect(usesClaude(a('agent', ''), 'claude')).toBe(true); // the office default
-    expect(usesClaude(a('agent', 'opencode'), 'claude')).toBe(false);
-    expect(usesClaude(a('agent', 'codex'), 'claude')).toBe(false);
-    expect(usesClaude(a('agent', ''), 'opencode')).toBe(false);
+    const terminal = true;
+    expect(usesClaude(a('ceo', 'opencode'), 'opencode', terminal)).toBe(true); // the CEO always runs Claude
+    expect(usesClaude(a('agent', 'claude'), 'opencode', terminal)).toBe(true); // the agent's own CLI
+    expect(usesClaude(a('agent', ''), 'claude', terminal)).toBe(true); // the office default
+    expect(usesClaude(a('agent', 'opencode'), 'claude', terminal)).toBe(false);
+    expect(usesClaude(a('agent', 'codex'), 'claude', terminal)).toBe(false);
+    expect(usesClaude(a('agent', ''), 'opencode', terminal)).toBe(false);
+  });
+
+  it('in the SDK runtime the Agent SDK runs Claude Code, so an opencode agent uses Claude too', () => {
+    const a = (role: AgentRole, cli: AgentCli | '') => ({ role, cli });
+    const sdk = false;
+    expect(usesClaude(a('agent', 'opencode'), 'claude', sdk)).toBe(true); // the office default is Claude
+    expect(usesClaude(a('agent', 'opencode'), 'opencode', sdk)).toBe(true); // even when the office default is opencode
+    expect(usesClaude(a('agent', 'codex'), 'claude', sdk)).toBe(true);
+    expect(usesClaude(a('ceo', 'opencode'), 'claude', sdk)).toBe(true);
   });
 
   it('exempts a failure from the strikes only while paused and only for a Claude session', () => {

@@ -1256,7 +1256,7 @@ export class Swarm {
 
   /** The pacing cap's count: the busy sessions that draw on Claude's shared subscription. */
   private runningClaude() {
-    return this.state.agents.filter((a) => BUSY.includes(a.status) && usesClaude(a, this.state.settings.defaultCli)).length;
+    return this.state.agents.filter((a) => BUSY.includes(a.status) && usesClaude(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals)).length;
   }
 
   /** True when the manager has set a session limit and every slot is taken. */
@@ -2997,7 +2997,7 @@ export class Swarm {
     const rt = this.agentRt.get(a.id)!;
     const report = result.ok ? parseReport(result) : null;
     const resume = rt.qaResume;
-    const next = qaRetry({ stopped: a.status === 'stopped', limited: limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli)), ok: result.ok, report: !!report, canResume: !!resume && !!a.sessionId });
+    const next = qaRetry({ stopped: a.status === 'stopped', limited: limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals)), ok: result.ok, report: !!report, canResume: !!resume && !!a.sessionId });
     if (next === 'resume' && resume && a.sessionId) {
       // Same session, context and screenshots: they likely ended a turn to wait on something that never woke them.
       rt.qaResume = null;
@@ -3010,7 +3010,7 @@ export class Swarm {
     if (next === 'give-up' || !report) {
       if (a.status !== 'stopped') this.fail(a, { ...result, errors: result.errors.length ? result.errors : ['QA finished without a usable report'] }, `QA of PR #${a.prNumber}`);
       if (rec) {
-        const failures = rec.sessionFailures + (limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli)) ? 0 : 1); // the usage limit isn't the PR's fault
+        const failures = rec.sessionFailures + (limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals)) ? 0 : 1); // the usage limit isn't the PR's fault
         const patch = { qaAgentId: null, sessionFailures: failures, summary: a.status === 'stopped' ? QA_STOPPED : rec.summary };
         if (a.status === 'stopped') this.setQa(rec, { ...patch, status: 'needs-human', escalated: true }); // the manager stopped it: theirs to decide
         else if (failures >= MAX_QA_FAILURES) this.stuck(rec, patch, `QA ended without a usable report ${failures} times in a row`);
@@ -3223,7 +3223,7 @@ export class Swarm {
     if (!result.ok) {
       this.fail(a, result, `the fix for PR #${a.prNumber}`);
       // Someone else gets a go before it lands on the manager.
-      const failures = rec ? rec.sessionFailures + (limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli)) ? 0 : 1) : 0;
+      const failures = rec ? rec.sessionFailures + (limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals)) ? 0 : 1) : 0;
       if (rec && failures >= MAX_FIX_FAILURES) this.stuck(rec, { sessionFailures: failures }, `${failures} fix sessions in a row failed`);
       else if (rec) this.setQa(rec, { status: 'failed', sessionFailures: failures });
       return;
@@ -3234,12 +3234,12 @@ export class Swarm {
       return;
     }
     const head = current?.headSha ?? null;
-    const step = fixOutcome(rec, head, this.minutes(a), !limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli)), current?.checks ?? null);
+    const step = fixOutcome(rec, head, this.minutes(a), !limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals)), current?.checks ?? null);
     if (!step.pushed && head) {
       // Asked once to push or say why nothing needs to change, before it counts as a strike.
       const key = `${repo.id}#${rec.prNumber}`;
       const noChange = noChangeReason(result.text);
-      const next = unpushedFix(rec, head, { nudged: this.fixNudged.has(key), noChange, counts: !limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli)) });
+      const next = unpushedFix(rec, head, { nudged: this.fixNudged.has(key), noChange, counts: !limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals)) });
       if (next.do === 'retest') {
         this.fixNudged.delete(key);
         a.status = 'done';
@@ -3602,7 +3602,7 @@ export class Swarm {
       running: this.running(),
       runningClaude: this.runningClaude(),
       pacingSessions: this.state.settings.pacingSessions,
-      claude: usesClaude(a, this.state.settings.defaultCli),
+      claude: usesClaude(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals),
     });
   }
 
@@ -3683,7 +3683,7 @@ export class Swarm {
 
   /** A failed session releases its issue for someone else; an issue that keeps failing waits for the manager. */
   private issueFailed(repo: PersistedRepo, n: number | null, a: PersistedAgent) {
-    if (n == null || limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli))) return; // the usage limit isn't the issue's fault
+    if (n == null || limitExempt(this.limited(), usesClaude(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals))) return; // the usage limit isn't the issue's fault
     const key = `${repo.id}#${n}`;
     const failures = (this.issueFailures.get(key) ?? 0) + 1;
     this.issueFailures.set(key, failures);
