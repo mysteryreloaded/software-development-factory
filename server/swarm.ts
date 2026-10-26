@@ -2369,11 +2369,12 @@ export class Swarm {
   /**
    * How an agent's next session runs: the CLI in their terminal (the terminal runtime), or Claude Code through the
    * SDK. A session can only be resumed by the CLI that made it (resumeChoice): a live follow-up stays with that
-   * CLI, every other start runs on the agent's own CLI and drops a session made by another one.
+   * CLI, every other start runs on the agent's own CLI and drops a session made by another one; no resumeCli means
+   * the agent's own last session's CLI, so a same-CLI resume keeps running (a chat carries on).
    */
   private sessionRuntime(a: PersistedAgent, resume?: string, resumeCli?: AgentCli | null, live = false): { terminal?: AgentTerminal; cli?: AgentCli; label?: string; resumeSessionId?: string; dropped: boolean } {
     const inTerminal = this.state.settings.runtime === 'terminal' && this.backend.terminals;
-    const choice = resumeChoice({ agentCli: a.role === 'ceo' ? 'claude' : a.cli || this.state.settings.defaultCli, inTerminal, resumeId: resume, resumeCli, live });
+    const choice = resumeChoice({ agentCli: a.role === 'ceo' ? 'claude' : a.cli || this.state.settings.defaultCli, inTerminal, resumeId: resume, resumeCli: resumeCli ?? a.sessionCli, live });
     if (!inTerminal) return { resumeSessionId: choice.resumeId, dropped: choice.dropped };
     const what = a.role === 'ceo' ? a.issueTitle : a.task === 'qa' ? `QA · PR #${a.prNumber}` : a.task === 'fix' ? `fixing PR #${a.prNumber}` : a.issueNumber ? `#${a.issueNumber} ${a.issueTitle ?? ''}` : null;
     return { terminal: this.terminalFor(a), cli: choice.cli, label: `${a.name}${what ? ` · ${what}` : ''}`.slice(0, 80).trim(), resumeSessionId: choice.resumeId, dropped: choice.dropped };
@@ -2618,9 +2619,9 @@ export class Swarm {
     }
     a.status = 'working';
     this.activity.set(a.id, Date.now());
-    const how = this.sessionRuntime(a, resumeSessionId, resumeCli ?? a.sessionCli, mode === 'typed' || mode === 'reattach');
+    const { dropped, ...how } = this.sessionRuntime(a, resumeSessionId, resumeCli, mode === 'typed' || mode === 'reattach');
     rt.cli = how.cli ?? 'claude';
-    if (how.dropped)
+    if (dropped)
       this.appendLog(a, [{ kind: 'system', text: `↻ Their last session was ${cliLabel((resumeCli ?? a.sessionCli) ?? 'claude')}'s; starting a fresh ${cliLabel(how.cli ?? 'claude')} session.` }]);
     this.emitAgent(a);
     const active = (entries: LogEntry[]) => {
@@ -4026,7 +4027,7 @@ export class Swarm {
       return;
     }
     // A chat carries on from the CEO's last session, so "why did you propose that?" has an answer.
-    const how = this.sessionRuntime(a, job.kind === 'chat' ? (a.sessionId ?? undefined) : undefined);
+    const { dropped, ...how } = this.sessionRuntime(a, job.kind === 'chat' ? (a.sessionId ?? undefined) : undefined);
     rt.session = this.backend.startSession(
       {
         cwd: CEO_DIR,
