@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { HOME_DIR, WORKSPACE_ROOT } from './config.ts';
+import { findBun } from './deps.ts';
 import { type CommandError, gh, git, run } from './exec.ts';
 
 // Layout on disk:
@@ -77,6 +78,14 @@ function npmInstall(dir: string) {
   const next = prev
     .catch(() => undefined)
     .then(() => (process.platform === 'win32' ? run('cmd.exe', ['/d', '/s', '/c', 'npm install --no-audit --no-fund'], opts) : run('npm', ['install', '--no-audit', '--no-fund'], opts)));
+  installs.set(dir, next);
+  return next;
+}
+
+/** bun install in a folder, one at a time per folder. --frozen-lockfile: never a lockfile-writing command in the manager's folder. */
+function bunInstall(dir: string, bun: string) {
+  const prev = installs.get(dir) ?? Promise.resolve();
+  const next = prev.catch(() => undefined).then(() => run(bun, ['install', '--frozen-lockfile'], { cwd: dir, timeoutMs: 600_000 }));
   installs.set(dir, next);
   return next;
 }
@@ -164,7 +173,11 @@ export async function syncMain(fullName: string, defaultBranch: string, opts: { 
         return { status: `${behind} behind: local files are in the way${files.length ? `: ${fileList(files)}` : ''}`, behind, updatable: true };
       }
       const changed = (await g(['diff', '--name-only', before, 'HEAD'])).split(/\r?\n/);
-      const install = changed.some((f) => f === 'package.json' || f === 'package-lock.json') && (await exists(path.join(dir, 'package.json')));
+      // bun.lock (or bun.lockb) marks a Bun checkout, even with a stale package-lock.json beside it: that one is not read.
+      const isBun = (await exists(path.join(dir, 'bun.lock'))) || (await exists(path.join(dir, 'bun.lockb')));
+      const install =
+        changed.some((f) => (isBun ? f === 'package.json' || f === 'bun.lock' || f === 'bun.lockb' : f === 'package.json' || f === 'package-lock.json')) &&
+        (await exists(path.join(dir, 'package.json')));
       return { status: `updated to ${await g(['rev-parse', '--short', 'HEAD'])}`, behind: 0, updatable: false, install };
     } catch (err) {
       return { status: `sync failed: ${(err as Error).message.split(/\r?\n/)[0].slice(0, 160)}`, behind, updatable: false };
@@ -172,7 +185,19 @@ export async function syncMain(fullName: string, defaultBranch: string, opts: { 
   });
   if (!result?.install) return result;
   const { install: _install, ...sync } = result;
-  // Outside the repo lock: agents' worktrees don't wait for npm.
+  // Outside the repo lock: agents' worktrees don't wait for the install.
+  const isBun = (await exists(path.join(dir, 'bun.lock'))) || (await exists(path.join(dir, 'bun.lockb')));
+  if (isBun) {
+    const bun = await findBun();
+    if (bun === null) return { ...sync, status: `${sync.status} · bun not found` };
+    try {
+      await bunInstall(dir, bun);
+      return { ...sync, status: `${sync.status} · dependencies installed` };
+    } catch (err) {
+      console.warn(`bun install in ${dir} failed:`, (err as Error).message);
+      return { ...sync, status: `${sync.status} · bun install failed` };
+    }
+  }
   try {
     await npmInstall(dir);
     return { ...sync, status: `${sync.status} · dependencies installed` };
