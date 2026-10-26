@@ -6,3 +6,4 @@ dist-server
 playwright-report
 test-results
 .swarm-home
+.idea/
