@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { bunInstall, createLimiter, depsCurrent, depsHash, depsPromptLine, deskDepsPlan, findBun, installerOf, installDesk, MAX_DESK_INSTALLS, readDeps, stopTree, writeMarker, type DepsState } from './deps.ts';
+import { bunInstall, createLimiter, deskInstaller, depsCurrent, depsHash, depsPromptLine, deskDepsPlan, findBun, installerOf, installDesk, MAX_DESK_INSTALLS, readDeps, stopTree, writeMarker, type DepsState } from './deps.ts';
 
 const PKG = '{"name":"app","dependencies":{"left-pad":"^1.3.0"}}';
 const LOCK = '{"lockfileVersion":3}';
@@ -322,6 +322,35 @@ describe('depsPromptLine', () => {
     expect(depsPromptLine('agent')).toBe('');
     expect(depsPromptLine('none')).toBe('');
     expect(depsPromptLine(undefined)).toBe('');
+  });
+
+  it('on a bun checkout, adds the never-npm warning, and tells the agent to run bun itself when the office left it alone', () => {
+    expect(depsPromptLine('installed', 'bun')).toBe(
+      'Dependencies are already installed for this checkout; run bun install only if you change package.json. This checkout uses Bun: never run npm install or npm ci here (it would add a package-lock.json).',
+    );
+    expect(depsPromptLine('skipped', 'bun')).toBe(depsPromptLine('installed', 'bun'));
+    expect(depsPromptLine('failed', 'bun')).toBe(
+      "The office couldn't install this checkout's dependencies: run bun install yourself first. This checkout uses Bun: never run npm install or npm ci here (it would add a package-lock.json).",
+    );
+    expect(depsPromptLine('agent', 'bun')).toBe('This checkout uses Bun: install its dependencies with bun install, never npm install or npm ci (it would add a package-lock.json).');
+    expect(depsPromptLine('none', 'bun')).toBe('');
+    expect(depsPromptLine(undefined, 'bun')).toBe('');
+  });
+});
+
+describe('deskInstaller', () => {
+  const dirOf = async (files: Record<string, string>) => {
+    const dir = path.join(ROOT, `installer desk ${++seq}`);
+    await fs.mkdir(dir, { recursive: true });
+    for (const [name, text] of Object.entries(files)) await fs.writeFile(path.join(dir, name), text);
+    return dir;
+  };
+  it('reads the checkout lockfiles: bun.lock or bun.lockb (even beside a package-lock.json) is bun, otherwise npm', async () => {
+    expect(await deskInstaller(await dirOf({ 'bun.lock': BUN_LOCK }))).toBe('bun');
+    expect(await deskInstaller(await dirOf({ 'bun.lockb': 'binary-lock' }))).toBe('bun');
+    expect(await deskInstaller(await dirOf({ 'bun.lock': BUN_LOCK, 'package-lock.json': LOCK }))).toBe('bun');
+    expect(await deskInstaller(await dirOf({ 'package-lock.json': LOCK }))).toBe('npm');
+    expect(await deskInstaller(await dirOf({}))).toBe('npm');
   });
 });
 
