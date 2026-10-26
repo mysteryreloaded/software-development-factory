@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 // A checkout's npm dependencies, installed by the office before an agent (or a preview) needs them: package.json and
@@ -18,7 +19,9 @@ export interface DepsState {
   pkg: string | null;
   /** package-lock.json's text; null when there is none. */
   lock: string | null;
-  /** package.json + lockfile hash. */
+  /** bun.lock's (or bun.lockb's) text; null when the checkout has neither. */
+  bun?: string | null;
+  /** package.json + the lockfile the checkout's installer reads, hashed. */
   hash: string;
   /** The marker the last install left in node_modules ('' when there is none). */
   marker: string;
@@ -27,8 +30,14 @@ export interface DepsState {
 
 export const depsHash = (pkg: string, lock: string | null) => crypto.createHash('sha256').update(pkg).update('\0').update(lock ?? '').digest('hex');
 
+/** Which installer a checkout uses: bun when it has a bun lockfile, even with a (stale) package-lock.json beside it. */
+export type Installer = 'npm' | 'bun';
+export const installerOf = (s: DepsState): Installer => (s.bun != null ? 'bun' : 'npm');
+
 export async function readDeps(dir: string): Promise<DepsState> {
   const read = (file: string) => fs.readFile(path.join(dir, file), 'utf8').catch(() => null);
+  // bun.lockb is binary; the lossy utf8 text is only hashed, never shown, and is stable per file content.
+  const bun = (await read('bun.lock')) ?? (await read('bun.lockb'));
   const [pkg, lock, marker, nodeModules] = await Promise.all([
     read('package.json'),
     read('package-lock.json'),
@@ -38,7 +47,8 @@ export async function readDeps(dir: string): Promise<DepsState> {
       .then((s) => s.isDirectory())
       .catch(() => false),
   ]);
-  return { pkg, lock, hash: depsHash(pkg ?? '', lock), marker: marker ?? '', nodeModules };
+  const isBun = bun !== null;
+  return { pkg, lock, bun, hash: depsHash(pkg ?? '', isBun ? bun : lock), marker: marker ?? '', nodeModules };
 }
 
 /** Whether node_modules was installed from exactly this package.json and lockfile. */
@@ -47,22 +57,68 @@ export const depsCurrent = (s: DepsState) => s.nodeModules && s.marker === s.has
 export const writeMarker = (dir: string, hash: string) => fs.writeFile(path.join(dir, 'node_modules', INSTALL_MARKER), hash).catch(() => undefined);
 
 /**
- * What the office does for a desk: nothing without a package.json; leave it to the agent without a lockfile (so the
- * office never creates one that ends up in a PR); skip when node_modules matches; otherwise npm ci.
+ * What the office does for a desk: nothing without a package.json; a Bun checkout is always the office's to install
+ * (bun install --frozen-lockfile), never the agent's; otherwise npm ci with a lockfile, or left to the agent without
+ * one (so the office never creates one that ends up in a PR); skip when node_modules matches.
  */
 export function deskDepsPlan(s: DepsState): 'none' | 'agent' | 'skip' | 'install' {
   if (s.pkg === null) return 'none';
+  if (s.bun != null) return depsCurrent(s) ? 'skip' : 'install';
   if (s.lock === null) return 'agent';
   return depsCurrent(s) ? 'skip' : 'install';
 }
 
 export type DepsOutcome = 'none' | 'agent' | 'skipped' | 'installed' | 'failed';
 
-/** The line for the agent's instructions ('' when the office left the dependencies alone). */
-export function depsPromptLine(outcome: DepsOutcome | null | undefined): string {
-  if (outcome === 'installed' || outcome === 'skipped') return 'Dependencies are already installed for this checkout; run npm install only if you change package.json.';
-  if (outcome === 'failed') return "The office couldn't install this checkout's dependencies: run npm install yourself first.";
+/** The line for the agent's instructions ('' when the office left the dependencies alone), for the checkout's installer. */
+export function depsPromptLine(outcome: DepsOutcome | null | undefined, installer: Installer = 'npm'): string {
+  const install = installer === 'bun' ? 'bun install' : 'npm install';
+  if (outcome === 'installed' || outcome === 'skipped') return `Dependencies are already installed for this checkout; run ${install} only if you change package.json.`;
+  if (outcome === 'failed') return `The office couldn't install this checkout's dependencies: run ${install} yourself first.`;
   return '';
+}
+
+/** Where the office finds bun: on PATH, else where its installer puts it, which the office's PATH doesn't carry. */
+export async function findBun(): Promise<string | null> {
+  const name = process.platform === 'win32' ? 'bun.exe' : 'bun';
+  const present = async (p: string) => ((await fs.stat(p).catch(() => null)) != null ? p : null);
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!dir) continue;
+    const p = await present(path.join(dir, name));
+    if (p) return p;
+  }
+  return present(path.join(os.homedir(), '.bun', 'bin', name));
+}
+
+/** bun install --frozen-lockfile in a folder (argument array, since bun's path may carry spaces); rejects on failure, and kills the tree after `timeoutMs`. */
+export function bunInstall(dir: string, bun: string, timeoutMs = INSTALL_TIMEOUT_MS): Promise<void> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    // Same rule as the agents and previews: no Claude credentials or config, and not the office's own settings.
+    if (v !== undefined && !/^(ANTHROPIC_|CLAUDE|SWARM_)/i.test(k)) env[k] = v;
+  }
+  env.NO_COLOR = '1';
+  const child = spawn(bun, ['install', '--frozen-lockfile'], { cwd: dir, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+  let tail = '';
+  const keep = (buf: Buffer) => (tail = (tail + buf.toString()).slice(-4000));
+  child.stdout?.on('data', keep);
+  child.stderr?.on('data', keep);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      void killTree(child);
+      reject(new Error(`bun install took longer than ${Math.round(timeoutMs / 60_000)} minutes`));
+    }, timeoutMs);
+    child.once('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) return resolve();
+      const last = tail.split(/\r?\n/).filter((l) => l.trim()).slice(-3).join(' · ');
+      reject(new Error(`bun install failed (code ${code})${last ? `: ${last.slice(0, 300)}` : ''}`));
+    });
+  });
 }
 
 /** Run at most `max` tasks at once; the rest wait their turn, in order. */
@@ -179,8 +235,11 @@ export interface DepsCallbacks {
  */
 export async function installDesk(dir: string, cb: DepsCallbacks, install: (dir: string) => Promise<void> = npmCi): Promise<DepsOutcome> {
   const { log } = cb;
+  let installer: Installer = 'npm';
+  let bunPath: string | null = null;
   try {
     const state = await readDeps(dir);
+    installer = installerOf(state);
     const plan = deskDepsPlan(state);
     if (plan === 'none') return 'none';
     if (plan === 'agent') {
@@ -191,17 +250,24 @@ export async function installDesk(dir: string, cb: DepsCallbacks, install: (dir:
       log(['Dependencies unchanged since the last install; skipping it.']);
       return 'skipped';
     }
+    // A Bun checkout never falls back to npm: npm would write a package-lock.json that doesn't belong there.
+    bunPath = installer === 'bun' ? await findBun() : null;
+    if (installer === 'bun' && bunPath === null) {
+      log(['bun is not installed on this machine; leaving the dependencies to the agent.']);
+      return 'agent';
+    }
     log(['Installing dependencies…']);
     cb.installing();
     await deskInstalls(async () => {
-      log(['$ npm ci']);
-      await install(dir);
+      log([installer === 'bun' ? '$ bun install --frozen-lockfile' : '$ npm ci']);
+      // bunPath is non-null whenever the installer is bun: the block above returned early when it wasn't.
+      await (installer === 'bun' ? bunInstall(dir, bunPath!) : install(dir));
     });
     await writeMarker(dir, state.hash);
     log(['Dependencies installed.']);
     return 'installed';
   } catch (err) {
-    log([`⚠ Could not install the dependencies (${(err as Error).message.split(/\r?\n/)[0].slice(0, 300)}); the agent will run npm install itself.`]);
+    log([`⚠ Could not install the dependencies (${(err as Error).message.split(/\r?\n/)[0].slice(0, 300)}); the agent will run ${installer === 'bun' ? 'bun install' : 'npm install'} itself.`]);
     return 'failed';
   }
 }

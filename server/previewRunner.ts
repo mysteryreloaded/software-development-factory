@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
-import { depsCurrent, INSTALL_TIMEOUT_MS, killTree, readDeps, stopTree, writeMarker } from './deps.ts';
+import { depsCurrent, findBun, installerOf, INSTALL_TIMEOUT_MS, killTree, readDeps, stopTree, writeMarker } from './deps.ts';
 import { git } from './exec.ts';
 import * as workspace from './workspace.ts';
 
@@ -188,11 +188,30 @@ class RealPreview implements PreviewHandle {
     cb.failed(`The app stopped (exit code ${code}).`);
   }
 
-  /** npm ci (or npm install without a lockfile), skipped when package.json and the lockfile haven't changed. */
+  /** npm ci (or npm install without a lockfile), bun install for a Bun checkout; skipped when package.json and the lockfile haven't changed. */
   private async install(wt: string, env: Record<string, string>) {
     const deps = await readDeps(wt);
     if (depsCurrent(deps)) {
       this.cb.log(['Dependencies unchanged since the last install; skipping it.']);
+      return;
+    }
+    if (installerOf(deps) === 'bun') {
+      // A Bun checkout is never installed with npm: that would write a package-lock.json that doesn't belong there.
+      const bun = await findBun();
+      if (bun === null) {
+        this.cb.log(['bun is not installed on this machine; skipping the install.']);
+        return;
+      }
+      this.cb.log(['$ bun install --frozen-lockfile']);
+      const code = await Promise.race([this.spawnArgs([bun, 'install', '--frozen-lockfile'], wt, env), sleep(INSTALL_TIMEOUT_MS).then(() => 'timeout' as const)]);
+      this.check();
+      if (code === 'timeout') {
+        if (this.child) await killTree(this.child);
+        throw new Error(`bun install took longer than ${INSTALL_TIMEOUT_MS / 60_000} minutes.`);
+      }
+      if (code !== 0) throw new Error(`bun install failed (code ${code}).`);
+      this.child = null;
+      await writeMarker(wt, deps.hash);
       return;
     }
     const cmd = deps.lock !== null ? 'npm ci' : 'npm install';
@@ -208,10 +227,8 @@ class RealPreview implements PreviewHandle {
     await writeMarker(wt, deps.hash);
   }
 
-  /** Run a command line through the platform shell; resolves with its exit code. */
-  private spawn(cmd: string, cwd: string, env: Record<string, string>): Promise<number | null> {
-    this.check();
-    const child = spawn(cmd, { cwd, env, shell: true, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+  /** Wire a spawned process's output into the preview log; resolves with its exit code. */
+  private watch(child: ChildProcess): Promise<number | null> {
     this.child = child;
     const onData = (buf: Buffer) => {
       const text = this.partial + buf.toString().replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
@@ -233,6 +250,20 @@ class RealPreview implements PreviewHandle {
         resolve(code);
       });
     });
+  }
+
+  /** Run a command line through the platform shell; resolves with its exit code. */
+  private spawn(cmd: string, cwd: string, env: Record<string, string>): Promise<number | null> {
+    this.check();
+    return this.watch(spawn(cmd, { cwd, env, shell: true, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] }));
+  }
+
+  /** Run a program (argument array, since its path may carry spaces) without a shell; resolves with its exit code. */
+  private spawnArgs(args: string[], cwd: string, env: Record<string, string>): Promise<number | null> {
+    this.check();
+    return this.watch(
+      spawn(args[0], args.slice(1), { cwd, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] }),
+    );
   }
 }
 

@@ -8,8 +8,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 // "upstream" clone that pushes new work. Everything lives in one temp folder whose path has spaces in it.
 
 const npmRuns = vi.hoisted(() => [] as { cmd: string; cwd?: string }[]);
+// The stubbed bun install: the runs it was asked for, a failure to report, and where findBun points (null: not on the machine).
+const bunStub = vi.hoisted(() => ({ runs: [] as { cmd: string; cwd?: string }[], fails: false, found: 'bun' as string | null }));
 
-// npm install is stubbed: only what it was asked to do is recorded. git still runs for real.
+// npm install and bun install are stubbed: only what they were asked to do is recorded. git still runs for real.
 vi.mock('./exec.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./exec.ts')>();
   return {
@@ -19,9 +21,18 @@ vi.mock('./exec.ts', async (importOriginal) => {
         npmRuns.push({ cmd, cwd: opts?.cwd });
         return Promise.resolve('');
       }
+      if (cmd === 'bun') {
+        bunStub.runs.push({ cmd, cwd: opts?.cwd });
+        return bunStub.fails ? Promise.reject(new Error('bun install --frozen-lockfile failed (code 3)')) : Promise.resolve('');
+      }
       return actual.run(cmd, args, opts);
     },
   };
+});
+
+vi.mock('./deps.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./deps.ts')>();
+  return { ...actual, findBun: () => Promise.resolve(bunStub.found) };
 });
 
 const savedEnv = { SWARM_HOME: process.env.SWARM_HOME, GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL };
@@ -86,6 +97,9 @@ const originMain = (cwd: string) => git(['rev-parse', 'origin/main'], { cwd });
 
 beforeEach(() => {
   npmRuns.length = 0;
+  bunStub.runs.length = 0;
+  bunStub.fails = false;
+  bunStub.found = 'bun';
 });
 
 afterAll(async () => {
@@ -257,6 +271,65 @@ describe('syncMain', { timeout: 60_000 }, () => {
     expect(await syncMain(r.fullName, 'main', { touch: true })).toMatch(/^updated to \w+$/);
     expect(await head(r.dir)).toBe(await head(r.upstream));
     expect(await fs.readFile(path.join(r.dir, 'lines.txt'), 'utf8')).toBe('one\r\ntwo\r\n');
+  });
+});
+
+describe('syncMain on a Bun checkout', { timeout: 60_000 }, () => {
+  /** A repo whose floor's checkout has a bun lockfile, with a stale package-lock.json beside it. */
+  async function bunRepos() {
+    const r = await makeRepos();
+    await commitFile(r.upstream, 'bun.lock', '{"bunVersion":"1.2.0"}\n');
+    await commitFile(r.upstream, 'package-lock.json', '{"lockfileVersion":3}\n');
+    await git(['push', '-q', 'origin', 'main'], { cwd: r.upstream });
+    await syncMain(r.fullName, 'main', { touch: true }); // bring the bun lockfile into the floor's checkout first
+    npmRuns.length = 0;
+    bunStub.runs.length = 0;
+    return r;
+  }
+
+  it('installs with bun, never npm, when package.json changed', async () => {
+    const r = await bunRepos();
+    await commitFile(r.upstream, 'package.json', '{ "name": "sync-test", "version": "2.0.0" }\n');
+    await git(['push', '-q', 'origin', 'main'], { cwd: r.upstream });
+    expect(await syncMain(r.fullName, 'main', { touch: true })).toMatch(/^updated to \w+ · dependencies installed$/);
+    expect(bunStub.runs).toEqual([{ cmd: 'bun', cwd: r.dir }]);
+    expect(npmRuns).toEqual([]);
+  });
+
+  it('installs when the bun lockfile changed, and not when only the stale package-lock.json did', async () => {
+    const r = await bunRepos();
+    await commitFile(r.upstream, 'bun.lock', '{"bunVersion":"1.3.0"}\n');
+    await git(['push', '-q', 'origin', 'main'], { cwd: r.upstream });
+    expect(await syncMain(r.fullName, 'main', { touch: true })).toMatch(/· dependencies installed$/);
+    expect(bunStub.runs).toHaveLength(1);
+    expect(npmRuns).toEqual([]);
+
+    const r2 = await bunRepos();
+    await commitFile(r2.upstream, 'package-lock.json', '{"lockfileVersion":3,"stale":2}\n');
+    await git(['push', '-q', 'origin', 'main'], { cwd: r2.upstream });
+    expect(await syncMain(r2.fullName, 'main', { touch: true })).toMatch(/^updated to \w+$/);
+    expect(bunStub.runs).toEqual([]);
+    expect(npmRuns).toEqual([]);
+  });
+
+  it('reports when bun is not on the machine, and never runs npm instead', async () => {
+    const r = await bunRepos();
+    bunStub.found = null;
+    await commitFile(r.upstream, 'package.json', '{ "name": "sync-test", "version": "2.0.0" }\n');
+    await git(['push', '-q', 'origin', 'main'], { cwd: r.upstream });
+    expect(await syncMain(r.fullName, 'main', { touch: true })).toMatch(/^updated to \w+ · bun not found$/);
+    expect(bunStub.runs).toEqual([]);
+    expect(npmRuns).toEqual([]);
+  });
+
+  it('reports a failed bun install, and never runs npm instead', async () => {
+    const r = await bunRepos();
+    bunStub.fails = true;
+    await commitFile(r.upstream, 'package.json', '{ "name": "sync-test", "version": "2.0.0" }\n');
+    await git(['push', '-q', 'origin', 'main'], { cwd: r.upstream });
+    expect(await syncMain(r.fullName, 'main', { touch: true })).toMatch(/^updated to \w+ · bun install failed$/);
+    expect(bunStub.runs).toHaveLength(1);
+    expect(npmRuns).toEqual([]);
   });
 });
 
