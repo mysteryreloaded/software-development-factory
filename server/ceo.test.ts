@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { EAST_DESKS, MAX_DESKS } from '../client/src/world/layout.ts';
 import { FLOOR_SEATS, type QaStatus } from '../shared/types.ts';
 import type { HttpError } from './httpError.ts';
+import { createDemoBackend } from './demo.ts';
+import { Swarm } from './swarm.ts';
 import { ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, checkReviewTarget, createOfficeTools, floorCapacity, IssueCap, jobLabel, planDependencies, plannedSize, scalePlan, type CeoJob, type CodeReviewPr, type DependsRequest, type TeamNow } from './ceo.ts';
 
 describe('seats', () => {
@@ -462,5 +464,67 @@ describe('IssueCap', () => {
     cap.record('a/b');
     expect(cap.total).toBe(3);
     expect([...cap.repos]).toEqual(['a/b', 'c/d']);
+  });
+});
+
+describe('the CEO chat session', () => {
+  type CeoInternals = {
+    state: { agents: Array<Record<string, unknown>> };
+    agentRt: Map<string, { log: unknown[]; session: unknown; terminal: unknown }>;
+    sessionRuntime(a: Record<string, unknown>, resume?: unknown): { terminal?: unknown; cli?: unknown; label?: unknown; resumeSessionId?: unknown; dropped: boolean };
+  };
+
+  // A CEO whose last session was made by Claude Code — the only CLI a CEO runs.
+  const ceo = {
+    id: 'ceo-1',
+    name: 'Ada',
+    repoId: '',
+    role: 'ceo',
+    look: 'feminine',
+    task: null,
+    desk: 0,
+    color: '#e63946',
+    hair: '#2b2118',
+    skin: '#f0c0a0',
+    style: null,
+    model: '',
+    effort: '',
+    cli: 'claude',
+    machine: null,
+    status: 'idle',
+    issueNumber: null,
+    issueTitle: null,
+    branch: null,
+    prNumber: null,
+    prUrl: null,
+    startedAt: null,
+    endedAt: null,
+    costUsd: 0,
+    turns: 0,
+    sessionId: 'X',
+    sessionCli: 'claude',
+    lastError: null,
+    logTail: [],
+  };
+
+  const internalsFor = (a: Record<string, unknown>) => {
+    const internals = new Swarm(createDemoBackend()) as unknown as CeoInternals;
+    internals.state.agents.push(a);
+    internals.agentRt.set(a.id as string, { log: [], session: null, terminal: null });
+    return internals;
+  };
+
+  it('carries a chat on from the CEO\'s last session, which the CEO\'s own CLI resumes', () => {
+    const how = internalsFor(ceo).sessionRuntime(ceo, ceo.sessionId ?? undefined); // as runCeoJob calls it for a chat
+    expect(how.cli).toBe('claude');
+    expect(how.resumeSessionId).toBe('X');
+    expect(how.dropped).toBe(false);
+  });
+
+  it('starts other CEO jobs fresh, even when the CEO has a session', () => {
+    const how = internalsFor(ceo).sessionRuntime(ceo, undefined);
+    expect(how.cli).toBe('claude');
+    expect(how.resumeSessionId).toBeUndefined();
+    expect(how.dropped).toBe(false);
   });
 });

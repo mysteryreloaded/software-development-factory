@@ -130,6 +130,27 @@ export async function detectClis(): Promise<CliView[]> {
 
 // ---------- starting one on a task ----------
 
+/**
+ * Which CLI runs a session that resumes an earlier one, and whether that session survives. A session can only be
+ * resumed by the CLI that made it: live follow-ups (typed at the terminal, or reattached after a restart) stay with
+ * that CLI, every other start (a new task, a QA round, a fix) runs on the agent's own CLI and drops the session when
+ * its CLI is different — or unknown (null, a record from before CLIs were named). The SDK runtime only runs Claude
+ * Code, so a session made by another CLI can't run there at all.
+ */
+export function resumeChoice(input: {
+  agentCli: AgentCli;
+  inTerminal: boolean;
+  resumeId?: string;
+  resumeCli?: AgentCli | null;
+  live?: boolean;
+}): { cli: AgentCli; resumeId?: string; dropped: boolean } {
+  const { agentCli, inTerminal, resumeId, resumeCli, live } = input;
+  if (!resumeId) return { cli: agentCli, dropped: false };
+  if (!inTerminal) return resumeCli && resumeCli !== 'claude' ? { cli: agentCli, dropped: true } : { cli: agentCli, resumeId, dropped: false };
+  if (live) return { cli: resumeCli ?? agentCli, resumeId, dropped: false };
+  return resumeCli === agentCli ? { cli: agentCli, resumeId, dropped: false } : { cli: agentCli, dropped: true };
+}
+
 export interface LaunchContext {
   prompt: string;
   systemAppend: string;
