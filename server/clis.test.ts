@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { CODEX_HOOK_EVENTS, codexHookCommand, CROSS_TURN_TOOLS, hookReviewKey, interruptions, launchArgs, oneAtATime, OPENCODE_PLUGIN_FILES, trustKey, unwrapCmdShim, type LaunchContext } from './clis.ts';
+import { CODEX_HOOK_EVENTS, codexHookCommand, CROSS_TURN_TOOLS, hookReviewKey, interruptions, launchArgs, oneAtATime, OPENCODE_PLUGIN_FILES, resumeChoice, trustKey, unwrapCmdShim, type LaunchContext } from './clis.ts';
 import { describeOfficeTool, describeTool, newScreenshots, screenshotFile, summariseResult } from './agentRunner.ts';
 
 const dir = path.join(os.tmpdir(), 'npm-global');
@@ -150,6 +150,38 @@ describe('launchArgs', () => {
       expect(args).not.toContain('--server');
       expect(args.slice(args.indexOf('--prompt'))).toEqual(['--prompt', '--looks like a flag']);
     }
+  });
+});
+
+describe('resumeChoice', () => {
+  const base = { agentCli: 'opencode' as const, inTerminal: true, live: false };
+
+  it('starts on the agent\'s own CLI when there is no session to resume', () => {
+    expect(resumeChoice(base)).toEqual({ cli: 'opencode', dropped: false });
+  });
+
+  it('drops a session made by another CLI when the start is not a live follow-up', () => {
+    expect(resumeChoice({ ...base, resumeId: 's1', resumeCli: 'claude' })).toEqual({ cli: 'opencode', dropped: true });
+  });
+
+  it('resumes a session made by the agent\'s own CLI', () => {
+    expect(resumeChoice({ ...base, resumeId: 's1', resumeCli: 'opencode' })).toEqual({ cli: 'opencode', resumeId: 's1', dropped: false });
+  });
+
+  it('drops a session whose CLI is unknown (a record from before CLIs were named)', () => {
+    expect(resumeChoice({ ...base, resumeId: 's1', resumeCli: null })).toEqual({ cli: 'opencode', dropped: true });
+  });
+
+  it('a live follow-up stays with the CLI that made the session, or with the agent when it is unknown', () => {
+    expect(resumeChoice({ ...base, resumeId: 's1', resumeCli: 'claude', live: true })).toEqual({ cli: 'claude', resumeId: 's1', dropped: false });
+    expect(resumeChoice({ ...base, resumeId: 's1', resumeCli: null, live: true })).toEqual({ cli: 'opencode', resumeId: 's1', dropped: false });
+  });
+
+  it('the SDK runtime only runs Claude Code, so it resumes only Claude Code sessions', () => {
+    expect(resumeChoice({ ...base, inTerminal: false, resumeId: 's1', resumeCli: 'opencode' })).toEqual({ cli: 'opencode', dropped: true });
+    expect(resumeChoice({ ...base, inTerminal: false, resumeId: 's1', resumeCli: 'codex' })).toEqual({ cli: 'opencode', dropped: true });
+    expect(resumeChoice({ ...base, inTerminal: false, resumeId: 's1', resumeCli: 'claude' })).toEqual({ cli: 'opencode', resumeId: 's1', dropped: false });
+    expect(resumeChoice({ ...base, inTerminal: false, resumeId: 's1', resumeCli: null })).toEqual({ cli: 'opencode', resumeId: 's1', dropped: false });
   });
 });
 

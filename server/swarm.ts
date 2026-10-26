@@ -35,7 +35,7 @@ import { drainDecision, lastUpdateMessage, POSTPONE_MS, type DrainInput, type La
 import { clampPacingSessions, DEFAULT_PACING_SESSIONS, limitExempt, mayStart, PACING_MS, pacingMessage, resumeRefusal, usageLabel, usageView, usesClaude, waived, warningView, type UsageWarning, type Waiver, type WorkKind } from './pacing.ts';
 import { emptyHistory, loadHistory, opsView, recordChecks, recordCost, recordMerges, recordQa, type OpsFloorState, type OpsHistory } from './metrics.ts';
 import { clampTrimIdleMin, DEFAULT_TRIM_IDLE_MIN, desksToTrim, formatBytes, freedMessage, idleSince, TRIM_SWEEP_MS } from './deskTrim.ts';
-import { cliLabel, isCli } from './clis.ts';
+import { cliLabel, isCli, resumeChoice } from './clis.ts';
 import { machineName } from './machines.ts';
 import { MACHINES_DIR, machineTmp, type DeskTrim } from './workspace.ts';
 import { envSecrets, Journal } from './journal.ts';
@@ -163,7 +163,8 @@ interface PersistedAgent {
 /** A pull request's trip through QA. */
 interface QaRecord extends Omit<QaView, 'ceoLooking' | 'ceoReview'> {
   issueNumber: number | null;
-  devSessionId: string | null; // the dev's Claude Code session, resumed to fix QA findings
+  devSessionId: string | null; // the dev's session, resumed to fix QA findings
+  devSessionCli: AgentCli | null; // the CLI that made it: only that CLI can resume it
   fixInstructions: string | null;
   sessionFailures: number;
   testedSha: string | null; // the head commit QA is testing
@@ -666,6 +667,7 @@ export class Swarm {
         })),
         qa: (loaded.qa ?? []).map((q) => ({
           ...q,
+          devSessionCli: q.devSessionCli ?? null,
           testedSha: q.testedSha ?? null,
           passedSha: q.passedSha ?? null,
           ceoApprovedSha: q.ceoApprovedSha ?? null,
@@ -1289,7 +1291,7 @@ export class Swarm {
     a.machine = machineName(a.id);
     a.sessionId = null;
     a.sessionCli = null;
-    for (const q of this.state.qa) if (q.devAgentId === a.id) q.devSessionId = null;
+    for (const q of this.state.qa) if (q.devAgentId === a.id) q.devSessionId = q.devSessionCli = null;
     this.appendLog(a, [{ kind: 'system', text: '🖥️ Moving to a machine of their own: their own clone of the repository, worktree and temp folder.' }]);
     this.save(); // a restart from here on must know the machine is theirs, or its sweep takes it
     return a.machine;
@@ -2366,18 +2368,15 @@ export class Swarm {
 
   /**
    * How an agent's next session runs: the CLI in their terminal (the terminal runtime), or Claude Code through the
-   * SDK. A session can only be resumed by the CLI that made it, so a follow-up stays with that CLI.
+   * SDK. A session can only be resumed by the CLI that made it (resumeChoice): a live follow-up stays with that
+   * CLI, every other start runs on the agent's own CLI and drops a session made by another one.
    */
-  private sessionRuntime(a: PersistedAgent, resume?: string): { terminal?: AgentTerminal; cli?: AgentCli; label?: string; resumeSessionId?: string } {
+  private sessionRuntime(a: PersistedAgent, resume?: string, resumeCli?: AgentCli | null, live = false): { terminal?: AgentTerminal; cli?: AgentCli; label?: string; resumeSessionId?: string; dropped: boolean } {
     const inTerminal = this.state.settings.runtime === 'terminal' && this.backend.terminals;
-    let cli: AgentCli = a.role === 'ceo' ? 'claude' : a.cli || this.state.settings.defaultCli;
-    if (resume && a.sessionCli && a.sessionCli !== cli) {
-      if (inTerminal) cli = a.sessionCli;
-      else if (a.sessionCli !== 'claude') resume = undefined;
-    }
-    if (!inTerminal) return { resumeSessionId: resume };
+    const choice = resumeChoice({ agentCli: a.role === 'ceo' ? 'claude' : a.cli || this.state.settings.defaultCli, inTerminal, resumeId: resume, resumeCli, live });
+    if (!inTerminal) return { resumeSessionId: choice.resumeId, dropped: choice.dropped };
     const what = a.role === 'ceo' ? a.issueTitle : a.task === 'qa' ? `QA · PR #${a.prNumber}` : a.task === 'fix' ? `fixing PR #${a.prNumber}` : a.issueNumber ? `#${a.issueNumber} ${a.issueTitle ?? ''}` : null;
-    return { terminal: this.terminalFor(a), cli, label: `${a.name}${what ? ` · ${what}` : ''}`.slice(0, 80).trim(), resumeSessionId: resume };
+    return { terminal: this.terminalFor(a), cli: choice.cli, label: `${a.name}${what ? ` · ${what}` : ''}`.slice(0, 80).trim(), resumeSessionId: choice.resumeId, dropped: choice.dropped };
   }
 
   /** The model to ask for (the Agent SDK runs Claude Code). '' lets another coding agent use its own default. */
@@ -2604,6 +2603,8 @@ export class Swarm {
     outputSchema?: Record<string, unknown>,
     /** typed: the manager typed the prompt at the CLI; reattach: follow the CLI that kept working through a restart. */
     mode: 'typed' | 'reattach' | null = null,
+    /** The CLI whose session resumeSessionId is (null: unknown, a record from before CLIs were named); the session is only resumed in it. */
+    resumeCli?: AgentCli | null,
   ) {
     const rt = this.agentRt.get(a.id);
     if (!rt || !this.state.agents.includes(a)) return; // let go meanwhile
@@ -2611,13 +2612,15 @@ export class Swarm {
     if (sessionStart(this.backend.deskExists(cwd), mode) === 'prepare') {
       const machine = a.machine;
       // An agent who moved to their machine meanwhile can't resume a session from their old desk (machineOf).
-      void this.restoreDesk(a, repo).then((dir) => dir && this.startAgentSession(a, repo, dir, prompt, systemAppend, a.machine === machine ? resumeSessionId : undefined, outputSchema, mode));
+      void this.restoreDesk(a, repo).then((dir) => dir && this.startAgentSession(a, repo, dir, prompt, systemAppend, a.machine === machine ? resumeSessionId : undefined, outputSchema, mode, resumeCli));
       return;
     }
     a.status = 'working';
     this.activity.set(a.id, Date.now());
-    const how = this.sessionRuntime(a, resumeSessionId);
+    const how = this.sessionRuntime(a, resumeSessionId, resumeCli ?? a.sessionCli, mode === 'typed' || mode === 'reattach');
     rt.cli = how.cli ?? 'claude';
+    if (how.dropped)
+      this.appendLog(a, [{ kind: 'system', text: `↻ Their last session was ${cliLabel((resumeCli ?? a.sessionCli) ?? 'claude')}'s; starting a fresh ${cliLabel(how.cli ?? 'claude')} session.` }]);
     this.emitAgent(a);
     const active = (entries: LogEntry[]) => {
       if (entries.some((e) => e.kind !== 'manager')) this.activity.set(a.id, Date.now());
@@ -2746,7 +2749,7 @@ export class Swarm {
     const failedEarly = a.prNumber ? this.state.qa.find((q) => q.repoId === repo.id && q.prNumber === a.prNumber && q.status === 'failed') : undefined;
     if (failedEarly) {
       // QA failed the PR while this session was still going (#199): the fix was kept for them, and resumes this session.
-      this.setQa(failedEarly, { devAgentId: a.id, devSessionId: a.sessionId ?? failedEarly.devSessionId });
+      this.setQa(failedEarly, { devAgentId: a.id, devSessionId: a.sessionId ?? failedEarly.devSessionId, devSessionCli: a.sessionCli ?? failedEarly.devSessionCli });
       this.appendLog(a, [{ kind: 'system', text: `📨 QA already failed PR #${a.prNumber}; fixing it is next.` }]);
     } else if (a.prNumber) {
       this.queueQa(repo, a.prNumber, a, a.issueNumber);
@@ -2786,7 +2789,7 @@ export class Swarm {
     let rec = this.state.qa.find((q) => q.repoId === repo.id && q.prNumber === prNumber);
     if (rec) {
       if (rec.status === 'testing') return;
-      this.setQa(rec, { status: 'queued', devAgentId: dev?.id ?? rec.devAgentId, devSessionId: dev?.sessionId ?? rec.devSessionId });
+      this.setQa(rec, { status: 'queued', devAgentId: dev?.id ?? rec.devAgentId, devSessionId: dev?.sessionId ?? rec.devSessionId, devSessionCli: dev?.sessionCli ?? rec.devSessionCli });
     } else {
       rec = {
         repoId: repo.id,
@@ -2801,6 +2804,7 @@ export class Swarm {
         updatedAt: Date.now(),
         issueNumber,
         devSessionId: dev && dev.prNumber === prNumber ? dev.sessionId : null,
+        devSessionCli: dev && dev.prNumber === prNumber ? dev.sessionCli : null,
         fixInstructions: null,
         sessionFailures: 0,
         mergeNote: null,
@@ -3211,7 +3215,7 @@ export class Swarm {
     const mergeEnd = 'Then reply with a short summary of what you did. Do not open a new pull request; the office merges it once the checks pass, after another QA round if the code changed.';
     const prompt = (mergeFix ? [...mergeFix, ownPrLine(repo.defaultBranch), mergeEnd] : qaFix).filter((l) => l !== '').join('\n');
     const resume = original && rec.devSessionId ? rec.devSessionId : undefined;
-    this.startAgentSession(dev, repo, cwd, prompt, this.buildSystemAppend(dev, repo, cwd, headRef, { pr: rec.prNumber, headRef }, desk.deps), resume);
+    this.startAgentSession(dev, repo, cwd, prompt, this.buildSystemAppend(dev, repo, cwd, headRef, { pr: rec.prNumber, headRef }, desk.deps), resume, undefined, null, rec.devSessionCli);
   }
 
   private async onFixFinished(a: PersistedAgent, repo: PersistedRepo, result: SessionResult) {
@@ -3246,7 +3250,7 @@ export class Swarm {
         this.fixNudged.delete(key);
         a.status = 'done';
         this.appendLog(a, [{ kind: 'done', text: `✔ No change needed for PR #${rec.prNumber}: ${noChange?.replace(/[.!\s]+$/, '')}. Back to QA for a re-test.` }]);
-        this.setQa(rec, { ...next.set, devSessionId: a.sessionId ?? rec.devSessionId });
+        this.setQa(rec, { ...next.set, devSessionId: a.sessionId ?? rec.devSessionId, devSessionCli: a.sessionCli ?? rec.devSessionCli });
         this.toast('info', `${a.name} says PR #${rec.prNumber} needs no change; QA re-tests it`);
         return;
       }
@@ -3267,7 +3271,7 @@ export class Swarm {
     if (!step.pushed) return this.unpushed(a, repo, rec, step);
     a.status = 'done';
     this.appendLog(a, [step.log]);
-    this.setQa(rec, { ...step.set, devSessionId: a.sessionId ?? rec.devSessionId });
+    this.setQa(rec, { ...step.set, devSessionId: a.sessionId ?? rec.devSessionId, devSessionCli: a.sessionCli ?? rec.devSessionCli });
     this.toast(
       'info',
       step.set.status === 'passed'
