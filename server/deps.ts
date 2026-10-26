@@ -73,9 +73,21 @@ export type DepsOutcome = 'none' | 'agent' | 'skipped' | 'installed' | 'failed';
 /** The line for the agent's instructions ('' when the office left the dependencies alone), for the checkout's installer. */
 export function depsPromptLine(outcome: DepsOutcome | null | undefined, installer: Installer = 'npm'): string {
   const install = installer === 'bun' ? 'bun install' : 'npm install';
-  if (outcome === 'installed' || outcome === 'skipped') return `Dependencies are already installed for this checkout; run ${install} only if you change package.json.`;
-  if (outcome === 'failed') return `The office couldn't install this checkout's dependencies: run ${install} yourself first.`;
+  // A Bun desk is warned about npm on every line: npm would write a package-lock.json that doesn't belong in the PR.
+  const note = installer === 'bun' ? ' This checkout uses Bun: never run npm install or npm ci here (it would add a package-lock.json).' : '';
+  if (installer === 'bun' && outcome === 'agent')
+    return 'This checkout uses Bun: install its dependencies with bun install, never npm install or npm ci (it would add a package-lock.json).';
+  if (outcome === 'installed' || outcome === 'skipped') return `Dependencies are already installed for this checkout; run ${install} only if you change package.json.${note}`;
+  if (outcome === 'failed') return `The office couldn't install this checkout's dependencies: run ${install} yourself first.${note}`;
   return '';
+}
+
+/** A desk's dependencies as the office knows them: what the install did and the installer the checkout uses. */
+export type DeskDeps = { outcome: DepsOutcome; installer: Installer };
+
+/** The installer a desk's checkout uses, from its lockfiles (npm for a demo desk with no files on disk). */
+export async function deskInstaller(dir: string): Promise<Installer> {
+  return installerOf(await readDeps(dir));
 }
 
 /** Where the office finds bun: on PATH, else where its installer puts it, which the office's PATH doesn't carry. */
