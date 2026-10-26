@@ -8,7 +8,7 @@ import { MAX_PR_DIFF, type PrDetails } from './github.ts';
 import { defaultProjectsDir, DESK_SWEEP_INTERVAL_MS, HOME_DIR, LOG_BUFFER, SCHEDULER_INTERVAL_MS, STATE_FILE, SYNC_INTERVAL_MS, VERSION } from './config.ts';
 import { askedFor, ceoJobPrompt, ceoSystemPrompt, checkCloseIssue, checkReviewTarget, createOfficeTools, floorCapacity, IssueCap, jobLabel, NOT_ASKED, planDependencies, plannedSize, scalePlan, type CeoJob, type CodeReviewPr, type OfficeTools, type TeamNow } from './ceo.ts';
 import { afterClose, ASK_AGAIN_MS, closedWhy, closuresHeld, forgettable, issueOpen, nameList, pullNow, settledPulls, stillOpen, stoppedMessage, toAsk, toHold, type Closure, type FloorState, type KnownPull, type LearnedPull } from './closeCleanup.ts';
-import { depsPromptLine, type DepsOutcome } from './deps.ts';
+import { deskInstaller, depsPromptLine, type DepsOutcome, type DeskDeps } from './deps.ts';
 import { setUpDesk } from './deskSetup.ts';
 import { fixOutcome, MAX_FIX_FAILURES } from './fixOutcome.ts';
 import { fixGoesTo, pickTester, PREP_HOLD_MS, prepFailure, prepHeld, type PrepStrikes } from './handOut.ts';
@@ -2424,8 +2424,8 @@ export class Swarm {
     t.attach(ws);
   }
 
-  private buildSystemAppend(a: PersistedAgent, repo: PersistedRepo, cwd: string, branch: string, fixing?: { pr: number; headRef: string }, deps?: DepsOutcome) {
-    return devSystemPrompt({ agent: a, repo, port: this.port(a), cwd, branch, linked: this.linkedDirs(repo), fixing, depsLine: depsPromptLine(deps) });
+  private buildSystemAppend(a: PersistedAgent, repo: PersistedRepo, cwd: string, branch: string, fixing?: { pr: number; headRef: string }, deps?: DeskDeps) {
+    return devSystemPrompt({ agent: a, repo, port: this.port(a), cwd, branch, linked: this.linkedDirs(repo), fixing, depsLine: depsPromptLine(deps?.outcome, deps?.installer) });
   }
 
   private linkedDirs(repo: PersistedRepo) {
@@ -2466,7 +2466,7 @@ export class Swarm {
   }
 
   /** job: the PR fix or QA run this desk is for; if the desk can't be set up, the PR pays for it, not the agent. */
-  private async prepare(a: PersistedAgent, repo: PersistedRepo, base: { pr?: number }, branch: string, job?: PrepJob): Promise<{ cwd: string; deps: DepsOutcome } | null> {
+  private async prepare(a: PersistedAgent, repo: PersistedRepo, base: { pr?: number }, branch: string, job?: PrepJob): Promise<{ cwd: string; deps: DeskDeps } | null> {
     try {
       if (this.repoRt.get(repo.id)?.cloneStatus !== 'ready') await this.cloneRepo(repo.id);
       const note = (text: string) => this.appendLog(a, [{ kind: 'system', text }]);
@@ -2478,8 +2478,9 @@ export class Swarm {
       if (job) this.prepStrikes.delete(prepKey(repo.id, job.rec.prNumber, job.task));
       if (a.status !== 'preparing') return this.abandoned(a); // stopped or fired while preparing, or its issue or PR closed
       // Outside the repo's git lock, so other desks keep checking out meanwhile. A failed install never fails the task.
-      const deps = await this.installDeps(a, cwd);
-      return a.status === 'preparing' ? { cwd, deps } : this.abandoned(a);
+      const outcome = await this.installDeps(a, cwd);
+      const installer = await deskInstaller(cwd);
+      return a.status === 'preparing' ? { cwd, deps: { outcome, installer } } : this.abandoned(a);
     } catch (err) {
       if (a.status !== 'preparing') return this.abandoned(a);
       if (job) {
@@ -2877,8 +2878,8 @@ export class Swarm {
     this.toast('info', `PR #${prNumber} goes back to a developer${patch.fixReason === 'conflict' ? ' to resolve its conflicts' : ''}`);
   }
 
-  private buildQaSystemAppend(a: PersistedAgent, repo: PersistedRepo, cwd: string, branch: string, pr: PrDetails, testStep: string, deps?: DepsOutcome) {
-    return qaSystemPrompt({ agent: a, repo, port: this.port(a), cwd, branch, pr, testStep, depsLine: depsPromptLine(deps) });
+  private buildQaSystemAppend(a: PersistedAgent, repo: PersistedRepo, cwd: string, branch: string, pr: PrDetails, testStep: string, deps?: DeskDeps) {
+    return qaSystemPrompt({ agent: a, repo, port: this.port(a), cwd, branch, pr, testStep, depsLine: depsPromptLine(deps?.outcome, deps?.installer) });
   }
 
   private async runQa(a: PersistedAgent, repo: PersistedRepo, rec: QaRecord) {
