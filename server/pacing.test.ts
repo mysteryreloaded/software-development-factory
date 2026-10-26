@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { clampPacingSessions, clock, mayStart, pacingMessage, resumeRefusal, usageLabel, usageView, waived, warningView, type WorkKind } from './pacing.ts';
+import type { AgentCli, AgentRole } from '../shared/types.ts';
+import { clampPacingSessions, clock, limitExempt, mayStart, pacingMessage, resumeRefusal, usageLabel, usageView, usesClaude, waived, warningView, type WorkKind } from './pacing.ts';
 
 const NOW = new Date(2026, 8, 28, 12, 0).getTime();
 const HOUR = 60 * 60_000;
@@ -69,15 +70,15 @@ describe('usageView and usageLabel', () => {
 });
 
 describe('pacingMessage', () => {
-  it('says which limit, how full, until when and how many sessions', () => {
+  it('says which limit, how full, until when and how many Claude sessions', () => {
     expect(pacingMessage({ resetsAt: null, rateLimitType: 'five_hour', utilization: 0.82 }, NOW + 150 * 60_000, 3, NOW)).toBe(
-      "🐢 Claude's usage is getting high (5-hour limit, 82%). Until 14:30 the office finishes open work first and starts at most 3 sessions at a time.",
+      "🐢 Claude's usage is getting high (5-hour limit, 82%). Until 14:30 the office finishes open work first and starts at most 3 Claude sessions at a time; agents on other coding agents carry on.",
     );
   });
 
   it('copes with a percentage and with missing details', () => {
     expect(pacingMessage({ resetsAt: null, rateLimitType: 'seven_day', utilization: 91 }, NOW + HOUR, 1, NOW)).toContain('(weekly limit, 91%)');
-    expect(pacingMessage({ resetsAt: null, rateLimitType: 'seven_day', utilization: 91 }, NOW + HOUR, 1, NOW)).toContain('at most 1 session at a time');
+    expect(pacingMessage({ resetsAt: null, rateLimitType: 'seven_day', utilization: 91 }, NOW + HOUR, 1, NOW)).toContain('at most 1 Claude session at a time');
     expect(pacingMessage({ resetsAt: null, rateLimitType: null, utilization: null }, NOW + HOUR, 3, NOW)).toMatch(/^🐢 Claude's usage is getting high\. Until 13:00/);
   });
 });
@@ -113,5 +114,39 @@ describe('resume full speed', () => {
     expect(waived(warn('five_hour', NOW + 7 * HOUR), waiver, NOW)).toBe(false); // the usage was reset: a new window
     expect(waived(warn('five_hour', NOW + 2 * HOUR), waiver, NOW + 2 * HOUR)).toBe(false); // the waived window is over
     expect(waived(warn('five_hour', NOW + 2 * HOUR), null, NOW)).toBe(false);
+  });
+});
+
+describe('the brake is Claude’s only (#97)', () => {
+  it('pauses Claude starts; a non-Claude QA, fix or issue carries on', () => {
+    expect(mayStart('issue', at({ pausedUntil: NOW + HOUR, claude: true }))).toBe(false);
+    expect(mayStart('ceo', at({ pausedUntil: NOW + HOUR, claude: true }))).toBe(false);
+    for (const kind of ['qa', 'fix', 'issue'] as const) {
+      expect(mayStart(kind, at({ pausedUntil: NOW + HOUR, claude: false }))).toBe(true);
+    }
+  });
+
+  it('caps a Claude agent’s new issue by running Claude sessions only; a non-Claude agent’s is not held', () => {
+    const capFull = { pacingUntil: NOW + HOUR, pacingSessions: 3, running: 9, runningClaude: 3 };
+    expect(mayStart('issue', at({ ...capFull, claude: true }))).toBe(false); // the cap is full of Claude sessions
+    expect(mayStart('issue', at({ ...capFull, runningClaude: 2, claude: true }))).toBe(true); // room left in the cap
+    expect(mayStart('issue', at({ ...capFull, claude: false }))).toBe(true); // even when the cap is full of Claude sessions
+  });
+
+  it('uses Claude: the CEO always, an agent its own CLI or the office default', () => {
+    const a = (role: AgentRole, cli: AgentCli | '') => ({ role, cli });
+    expect(usesClaude(a('ceo', 'opencode'), 'opencode')).toBe(true); // the CEO always runs Claude
+    expect(usesClaude(a('agent', 'claude'), 'opencode')).toBe(true); // the agent's own CLI
+    expect(usesClaude(a('agent', ''), 'claude')).toBe(true); // the office default
+    expect(usesClaude(a('agent', 'opencode'), 'claude')).toBe(false);
+    expect(usesClaude(a('agent', 'codex'), 'claude')).toBe(false);
+    expect(usesClaude(a('agent', ''), 'opencode')).toBe(false);
+  });
+
+  it('exempts a failure from the strikes only while paused and only for a Claude session', () => {
+    expect(limitExempt(true, true)).toBe(true); // a Claude session turned away at the limit: not the PR's or issue's fault
+    expect(limitExempt(true, false)).toBe(false); // a non-Claude session that fails during a pause counts as usual
+    expect(limitExempt(false, true)).toBe(false); // not paused: counts
+    expect(limitExempt(false, false)).toBe(false);
   });
 });

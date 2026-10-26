@@ -1,11 +1,13 @@
-import type { UsageLimitView, UsageView, UsageWarningView } from '../shared/types.ts';
+import type { AgentCli, AgentRole, UsageLimitView, UsageView, UsageWarningView } from '../shared/types.ts';
 import { clock, limitName, usedPercent } from '../shared/usage.ts';
 
 export { clock };
 
 // Pacing new work on Claude's usage warnings (#40). Every agent shares one subscription. When Claude warns that
 // usage is getting high, the office slows down instead of running into the hard limit: finishing beats starting.
-// QA, QA fixes and CEO jobs start as normal; new issues only while fewer than settings.pacingSessions sessions run.
+// The brake is Claude's: it holds Claude sessions (and the CEO, who always runs Claude), while agents on other
+// coding agents carry on. QA, QA fixes and CEO jobs start as normal; new issues from Claude agents only while fewer
+// than settings.pacingSessions Claude sessions run; new issues from other agents always.
 
 /** How long pacing lasts when Claude doesn't say when the window resets. */
 export const PACING_MS = 60 * 60_000;
@@ -20,11 +22,35 @@ export interface UsageClock {
   pacingUntil: number; // Claude warned about usage: new issues are paced until this
 }
 
-/** May work of this kind start now? A rejection pauses everything; pacing caps new issues at `pacingSessions` running. */
-export function mayStart(kind: WorkKind, c: UsageClock & { running: number; pacingSessions: number }): boolean {
-  if (c.now < c.pausedUntil) return false;
-  if (kind === 'issue' && c.now < c.pacingUntil) return c.running < c.pacingSessions;
+/**
+ * Whether a session uses Claude: the CEO always runs Claude, an agent their own CLI, or the office's default CLI
+ * (the same rule as the swarm's sessionRuntime). Only these sessions draw on Claude's shared subscription.
+ */
+export function usesClaude(facts: { role: AgentRole; cli: AgentCli | '' }, defaultCli: AgentCli): boolean {
+  return (facts.role === 'ceo' ? 'claude' : facts.cli || defaultCli) === 'claude';
+}
+
+/**
+ * May work of this kind start now, as far as Claude's usage goes? A rejection pauses Claude sessions (the others
+ * carry on); pacing caps new issues from Claude agents at `pacingSessions` running Claude sessions. A session is
+ * taken as Claude's when `claude` isn't given (an all-Claude office behaves exactly as before).
+ */
+export function mayStart(
+  kind: WorkKind,
+  c: UsageClock & { running: number; runningClaude?: number; pacingSessions: number; claude?: boolean },
+): boolean {
+  const isClaude = c.claude ?? true;
+  if (c.now < c.pausedUntil) return !isClaude;
+  if (kind === 'issue' && c.now < c.pacingUntil) return isClaude ? (c.runningClaude ?? c.running) < c.pacingSessions : true;
   return true;
+}
+
+/**
+ * A finished session's failure is the usage limit's fault, not the PR's or the issue's: only while the office is
+ * paused, and only for sessions that used Claude. A non-Claude session that fails during a pause counts as usual.
+ */
+export function limitExempt(limited: boolean, usedClaude: boolean): boolean {
+  return limited && usedClaude;
 }
 
 /** 5-hour first, then weekly: the usage meter's row order. */
@@ -56,11 +82,11 @@ export interface UsageWarning {
   utilization: number | null;
 }
 
-/** The phone message when pacing starts. */
+/** The phone message when pacing starts: the cap holds Claude sessions, agents on other coding agents carry on. */
 export function pacingMessage(w: UsageWarning, until: number, sessions: number, now: number): string {
   const v = warningView(w, now);
   const what = [v.limit, v.pct === null ? null : `${v.pct}%`].filter(Boolean).join(', ');
-  return `🐢 Claude's usage is getting high${what ? ` (${what})` : ''}. Until ${clock(until, now)} the office finishes open work first and starts at most ${sessions} session${sessions === 1 ? '' : 's'} at a time.`;
+  return `🐢 Claude's usage is getting high${what ? ` (${what})` : ''}. Until ${clock(until, now)} the office finishes open work first and starts at most ${sessions} Claude session${sessions === 1 ? '' : 's'} at a time; agents on other coding agents carry on.`;
 }
 
 /** A warning as the usage meter shows it: which limit, how full (0-100) and when it resets. */
