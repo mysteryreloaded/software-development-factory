@@ -3222,6 +3222,15 @@ export class Swarm {
 
   private async onFixFinished(a: PersistedAgent, repo: PersistedRepo, result: SessionResult) {
     const rec = this.state.qa.find((q) => q.repoId === repo.id && q.prNumber === a.prNumber);
+    // A manager's chat with a finished fix resumes the same session, so its end lands here too. It is the fix only
+    // while the record still waits on this developer; otherwise it was a chat (no second QA round, no strike).
+    if (rec && (rec.status !== 'fixing' || rec.devAgentId !== a.id)) {
+      if (a.status === 'stopped') return;
+      if (!result.ok) return this.fail(a, result, `the chat about PR #${a.prNumber}`);
+      a.status = 'done';
+      this.appendLog(a, [{ kind: 'done', text: `Chat about PR #${a.prNumber} finished.` }]);
+      return;
+    }
     // Did it push anything? A checks fix may only re-run a flaky check, so only QA and conflict fixes are asked.
     const current = rec && result.ok && a.status !== 'stopped' && rec.fixReason !== 'checks' ? await this.prHead(a, repo, rec.prNumber) : null;
     if (a.status === 'stopped') {
