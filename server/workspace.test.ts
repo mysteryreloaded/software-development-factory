@@ -470,7 +470,10 @@ describe('prepareDesk', { timeout: 60_000 }, () => {
     await expect(prepareDesk(r.fullName, { defaultBranch: 'main' }, 'ada-01df', 'swarm/issue-109-ada', (t) => notes.push(t))).rejects.toThrow(
       /^Could not clear the desk folder .*EBUSY.*A program started by the previous task is probably still running there\. Close it and try again\.$/,
     );
-    expect(notes).toEqual([expect.stringMatching(/^Couldn't reuse the desk in place, so it's rebuilt: /)]);
+    expect(notes).toEqual([
+      expect.stringMatching(/^Saving the desk's unfinished work failed: /),
+      expect.stringMatching(/^Couldn't reuse the desk in place, so it's rebuilt: /),
+    ]);
     expect(await fs.readFile(path.join(desk, 'README.md'), 'utf8')).toMatch(/^# Test/);
   });
 
@@ -515,6 +518,86 @@ describe('prepareDesk', { timeout: 60_000 }, () => {
     expect(notes).toEqual([]);
     expect(await branchOf(barbara)).toBe(branch);
     expect(await fs.readFile(path.join(barbara, 'fix-2.txt'), 'utf8')).toMatch(/^fixed\r?\n$/); // checked out by git: CRLF where autocrlf is on
+  });
+
+  it('saves a desk\'s new files, edits and unpushed commits before reusing it, in a patch named after its branch', async () => {
+    const r = await makeRepos();
+    await git(['push', '-q', 'origin', 'HEAD:refs/pull/7/head'], { cwd: r.upstream }); // PR #7, the desk's next job
+    const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'margaret-5f3a', 'swarm/issue-172-margaret');
+    await commitFile(desk, 'work.txt', 'not on GitHub yet\n'); // an unpushed commit
+    await fs.writeFile(path.join(desk, 'README.md'), '# Test\nunfinished docs\n'); // an edit to a tracked file
+    await fs.writeFile(path.join(desk, 'notes.txt'), 'a new, untracked file\n');
+    const notes: string[] = [];
+    expect(await prepareDesk(r.fullName, { defaultBranch: 'main', pr: 7 }, 'margaret-5f3a', 'qa/pr-7-margaret', (t) => notes.push(t))).toBe(desk);
+    expect(await branchOf(desk)).toBe('qa/pr-7-margaret');
+    const d = new Date();
+    const day = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const patch = path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__'), `swarm-issue-172-margaret-${day}.patch`);
+    expect(notes).toEqual([`Saved unfinished work from swarm/issue-172-margaret to ${patch}.`]);
+    // The whole of what she left: the commit, the edit and the new file, and it applies cleanly where she started.
+    const text = await fs.readFile(patch, 'utf8');
+    expect(text).toContain('work.txt');
+    expect(text).toContain('notes.txt');
+    expect(text).toContain('unfinished docs');
+    await git(['apply', '--check', patch], { cwd: r.upstream });
+    await git(['apply', patch], { cwd: r.upstream });
+    const read = async (...p: string[]) => (await fs.readFile(path.join(r.upstream, ...p), 'utf8')).replaceAll('\r\n', '\n'); // a system autocrlf may apply
+    expect(await read('work.txt')).toBe('not on GitHub yet\n');
+    expect(await read('README.md')).toBe('# Test\nunfinished docs\n');
+    expect(await read('notes.txt')).toBe('a new, untracked file\n');
+  });
+
+  it('keeps ignored files out of a saved patch, and lets them survive the reuse', async () => {
+    const r = await makeRepos();
+    await commitFile(r.upstream, '.gitignore', 'node_modules/\n');
+    await git(['push', '-q', 'origin', 'main'], { cwd: r.upstream });
+    const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'hank-88ab', 'swarm/issue-3-hank');
+    await fs.mkdir(path.join(desk, 'node_modules', 'left-pad'), { recursive: true });
+    await fs.writeFile(path.join(desk, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1;\n'); // ignored: not saved
+    await fs.writeFile(path.join(desk, 'README.md'), '# Test\nunfinished docs\n'); // the reason to save
+    const notes: string[] = [];
+    expect(await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'hank-88ab', 'swarm/issue-4-hank', (t) => notes.push(t))).toBe(desk);
+    expect(notes).toHaveLength(1);
+    const d = new Date();
+    const day = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const patch = path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__'), `swarm-issue-3-hank-${day}.patch`);
+    const text = await fs.readFile(patch, 'utf8');
+    expect(text).toContain('unfinished docs');
+    expect(text).not.toContain('node_modules');
+    // The ignored install is still in the desk, warm for the next job.
+    expect(await fs.readFile(path.join(desk, 'node_modules', 'left-pad', 'index.js'), 'utf8')).toBe('module.exports = 1;\n');
+  });
+
+  it('writes no patch for a clean desk, or for a desk on a qa/pr-* branch', async () => {
+    const r = await makeRepos();
+    await git(['push', '-q', 'origin', 'HEAD:refs/pull/7/head'], { cwd: r.upstream });
+    // A clean desk has nothing to save on its second job.
+    const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'ivan-0c21', 'swarm/issue-1-ivan');
+    const notes: string[] = [];
+    expect(await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'ivan-0c21', 'swarm/issue-2-ivan', (t) => notes.push(t))).toBe(desk);
+    // A QA desk's branch is the PR's head: its edits belong to the PR, not to a saved patch.
+    const qa = await prepareDesk(r.fullName, { defaultBranch: 'main', pr: 7 }, 'judith-9d4f', 'qa/pr-7-judith');
+    await fs.writeFile(path.join(qa, 'README.md'), '# Test\nQA notes\n');
+    expect(await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'judith-9d4f', 'swarm/issue-3-judith', (t) => notes.push(t))).toBe(qa);
+    expect(notes).toEqual([]);
+    expect(await fs.readdir(path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__')), { withFileTypes: true }).catch(() => [])).toEqual([]);
+  });
+
+  it('still reuses a desk when saving its work fails, and names the error', async () => {
+    const r = await makeRepos();
+    const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'ola-77f0', 'swarm/issue-1-ola');
+    await fs.writeFile(path.join(desk, 'README.md'), '# Test\nunfinished docs\n');
+    const exec = await import('./exec.ts');
+    const original = exec.git;
+    // The save's first read of the index fails; the reuse itself never asks the index for that.
+    vi.spyOn(exec, 'git').mockImplementation((args, opts) =>
+      args[0] === 'status' ? Promise.reject(new Error('boom: the index is sticky')) : original(args, opts),
+    );
+    const notes: string[] = [];
+    expect(await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'ola-77f0', 'swarm/issue-2-ola', (t) => notes.push(t))).toBe(desk);
+    expect(notes).toEqual(["Saving the desk's unfinished work failed: boom: the index is sticky"]);
+    expect(await branchOf(desk)).toBe('swarm/issue-2-ola');
+    expect(await head(desk)).toBe(await originMain(r.dir));
   });
 });
 
@@ -672,11 +755,11 @@ describe('sweepDesks', { timeout: 120_000 }, () => {
     const r = await makeRepos([], true);
     const base = { defaultBranch: 'main' };
     const ada = await prepareDesk(r.fullName, base, 'ada-1234', 'swarm/issue-9-ada'); // a current agent
-    const bob = await prepareDesk(r.fullName, base, 'bob-5678', 'swarm/issue-5-bob'); // left long ago
-    await fs.writeFile(path.join(bob, 'scratch.txt'), 'untracked notes\n'); // untracked only: nothing to save
+    const bob = await prepareDesk(r.fullName, base, 'bob-5678', 'swarm/issue-5-bob'); // left long ago, clean
     const dan = await prepareDesk(r.fullName, base, 'dan-9999', 'swarm/issue-7-dan'); // left with work on no remote branch
     await commitFile(dan, path.join('src', 'feature.ts'), 'export const x = 1;\n\n');
     await fs.writeFile(path.join(dan, 'README.md'), '# Test\n\nUnfinished docs\n');
+    await fs.writeFile(path.join(dan, 'scratch.txt'), 'untracked notes\n'); // a new file, too
     // A desk from before the rename, under the old home.
     const oldDesk = path.join(ROOT, 'old home', '.office-swarm', 'workspaces', r.fullName.replace('/', '__'), 'desks', 'cara-0001');
     await git(['worktree', 'add', '-q', '-b', 'swarm/issue-6-cara', oldDesk, 'origin/main'], { cwd: r.dir });
@@ -700,15 +783,17 @@ describe('sweepDesks', { timeout: 120_000 }, () => {
     for (const kept of [ada, mine, path.join(desks, 'eve-0000')]) expect(await isDir(kept)).toBe(true);
     expect(await branchesOf(r.dir)).toEqual(['feature/mine', 'fix/my-work', 'main', 'swarm/issue-4-open', 'swarm/issue-9-ada']);
 
-    // Dan's commit and uncommitted change are in one patch that applies cleanly where Dan started from.
+    // Dan's commit, uncommitted change and new file are in one patch that applies cleanly where Dan started from.
     const d = new Date();
     const day = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
     expect(result.patches).toEqual([path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__'), `dan-9999-${day}.patch`)]);
+    expect(await fs.readFile(result.patches[0], 'utf8')).toContain('scratch.txt');
     await git(['apply', '--check', result.patches[0]], { cwd: r.upstream });
     await git(['apply', result.patches[0]], { cwd: r.upstream });
     const text = async (...p: string[]) => (await fs.readFile(path.join(r.upstream, ...p), 'utf8')).replaceAll('\r\n', '\n'); // a system autocrlf may apply
     expect(await text('src', 'feature.ts')).toBe('export const x = 1;\n\n');
     expect(await text('README.md')).toBe('# Test\n\nUnfinished docs\n');
+    expect(await text('scratch.txt')).toBe('untracked notes\n');
 
     // Nothing left to do the second time.
     expect(await sweepDesks(r.fullName, keep)).toEqual(nothing);
@@ -781,6 +866,24 @@ describe("agents' machines", { timeout: 60_000 }, () => {
     expect(await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: desk })).toBe('swarm/issue-2-ada');
     expect(await head(desk)).toBe(await git(['rev-parse', 'main'], { cwd: r.upstream }));
     expect(await fs.readFile(path.join(desk, 'node_modules', 'kept.js'), 'utf8')).toBe('warm');
+  });
+
+  it('saves unfinished work before a new job, in a patch named after the branch it was on', async () => {
+    const r = await makeRepos();
+    await git(['push', '-q', 'origin', 'HEAD:refs/pull/7/head'], { cwd: r.upstream });
+    const desk = await prepareMachineDesk('margaret00007', r.fullName, { defaultBranch: 'main' }, 'swarm/issue-172-margaret');
+    await commitFile(desk, 'work.txt', 'not on GitHub yet\n');
+    await fs.writeFile(path.join(desk, 'notes.txt'), 'a new, untracked file\n');
+    const notes: string[] = [];
+    expect(await prepareMachineDesk('margaret00007', r.fullName, { defaultBranch: 'main', pr: 7 }, 'qa/pr-7-margaret', (t) => notes.push(t))).toBe(desk);
+    expect(await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: desk })).toBe('qa/pr-7-margaret');
+    const d = new Date();
+    const day = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const patch = path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__'), `swarm-issue-172-margaret-${day}.patch`);
+    expect(notes).toEqual([`Saved unfinished work from swarm/issue-172-margaret to ${patch}.`]);
+    const text = await fs.readFile(patch, 'utf8');
+    expect(text).toContain('work.txt');
+    expect(text).toContain('notes.txt');
   });
 
   it("checks out a branch another agent has out too: each has its own clone", async () => {
