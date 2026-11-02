@@ -592,8 +592,9 @@ async function saveLeftovers(fullName: string, desk: string, label = path.basena
   await fs.mkdir(dir, { recursive: true });
   const tmp = await fs.mkdtemp(path.join(dir, '.tmp-'));
   try {
-    // New files are intent-to-added (index entry, no content) so `git diff HEAD` lists them as new files.
-    if (untracked.length) await g(['add', '-N', '--', ...untracked]);
+    // New files are intent-to-added (index entry, no content) so `git diff HEAD` lists them as new files. Chunked,
+    // like the branch sweeps: a few hundred new files would exceed Windows' 32,767-character command line.
+    for (let i = 0; i < untracked.length; i += 100) await g(['add', '-N', '--', ...untracked.slice(i, i + 100)]);
     // Written to files, not read from stdout: exec trims it, and a patch's trailing whitespace matters.
     if (commits) await g(['format-patch', '-q', '-o', tmp, 'HEAD', '--not', '--remotes']);
     if (dirty || untracked.length) await g(['diff', 'HEAD', '--binary', `--output=${path.join(tmp, 'zz-uncommitted.patch')}`]);

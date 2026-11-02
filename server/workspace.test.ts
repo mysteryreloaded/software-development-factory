@@ -583,6 +583,27 @@ describe('prepareDesk', { timeout: 60_000 }, () => {
     expect(await fs.readdir(path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__')), { withFileTypes: true }).catch(() => [])).toEqual([]);
   });
 
+  it('saves a desk with a few hundred new files, in a patch that holds them all and applies cleanly', async () => {
+    const r = await makeRepos();
+    const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'pete-2c9d', 'swarm/issue-5-pete');
+    await fs.mkdir(path.join(desk, 'batch'), { recursive: true });
+    for (let i = 0; i < 250; i++) await fs.writeFile(path.join(desk, 'batch', `f-${String(i).padStart(3, '0')}.txt`), `file ${i}\n`);
+    const notes: string[] = [];
+    expect(await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'pete-2c9d', 'swarm/issue-6-pete', (t) => notes.push(t))).toBe(desk);
+    expect(notes).toHaveLength(1);
+    const d = new Date();
+    const day = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const patch = path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__'), `swarm-issue-5-pete-${day}.patch`);
+    const text = await fs.readFile(patch, 'utf8');
+    expect((text.match(/new file mode/g) ?? []).length).toBe(250);
+    expect(text).toContain('f-000.txt');
+    expect(text).toContain('f-249.txt');
+    // All 250 of them apply cleanly where the desk started from.
+    await git(['apply', '--check', patch], { cwd: r.upstream });
+    await git(['apply', patch], { cwd: r.upstream });
+    expect((await fs.readdir(path.join(r.upstream, 'batch')))).toHaveLength(250);
+  });
+
   it('still reuses a desk when saving its work fails, and names the error', async () => {
     const r = await makeRepos();
     const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'ola-77f0', 'swarm/issue-1-ola');
