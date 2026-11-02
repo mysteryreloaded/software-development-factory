@@ -365,6 +365,33 @@ export function prepareDesk(fullName: string, base: DeskBase, agentSlug: string,
 }
 
 /**
+ * Save what a desk's last job left before it is reset for the next one, as a patch named after the branch the desk is
+ * on (or its short commit, when detached). A `qa/pr-*` desk is checked out at the PR's head and holds no work of its
+ * own. Commits the default branch `baseRef` already has (a squash-merged branch, deleted from the remote) are not
+ * saved: they are not unfinished. A stale index.lock is cleared first, or it would make the save fail and the work
+ * would be lost. A failed save only leaves a note: the desk still gets reused.
+ */
+async function saveBeforeReuse(wt: string, fullName: string, baseRef: string, note?: (text: string) => void) {
+  const g = (args: string[]) => git(args, { cwd: wt, timeoutMs: 60_000 });
+  try {
+    // A git that died mid-command leaves index.lock behind: it would make the save's `add -N` fail and the whole
+    // save would be lost.
+    const lock = await staleIndexLock(wt);
+    if (lock) {
+      await fs.rm(lock, { force: true, maxRetries: 3 });
+      note?.(`Removed a stale git lock (${lock}) left in the desk.`);
+    }
+    const branch = (await g(['symbolic-ref', '--short', '-q', 'HEAD']).catch(() => '')).trim();
+    if (/^qa\/pr-/.test(branch)) return;
+    const from = branch || (await g(['rev-parse', '--short', 'HEAD'])).trim();
+    const patch = await saveLeftovers(fullName, wt, from.replace(/[^\w.-]+/g, '-'), baseRef);
+    if (patch) note?.(`Saved unfinished work from ${from} to ${patch}.`);
+  } catch (err) {
+    note?.(`Saving the desk's unfinished work failed: ${(err as Error).message.split(/\r?\n/)[0]}`);
+  }
+}
+
+/**
  * Put the worktree `wt` of the clone `main` on `branch` at the default branch or a PR's head (fetched first), reusing
  * it in place when it's there. Callers hold the clone's lock.
  */
@@ -401,6 +428,8 @@ async function setUpWorktree(main: string, wt: string, fullName: string, base: D
   // the agent left running, a browser) still has its working directory inside, and reuse keeps
   // node_modules warm between tasks.
   if (await exists(path.join(wt, '.git'))) {
+    // Keep whatever the previous job left (unpushed commits, uncommitted and new files) before the desk is reset.
+    await saveBeforeReuse(wt, fullName, `origin/${base.defaultBranch}`, note);
     try {
       try {
         await reuseDesk(wt, local, ref);
@@ -556,22 +585,35 @@ async function inUse(dir: string) {
 const stamp = (d: Date) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
 
 /**
- * Save a desk's modified tracked files and the commits that are on no remote branch to
- * <HOME_DIR>/leftovers/<owner>__<repo>/<label>-<YYYYMMDD>.patch (format-patch, then `git diff HEAD`). Null: nothing to save.
+ * Save a desk's modified tracked files, its new (untracked, non-ignored) files and the commits that are on no remote
+ * branch to <HOME_DIR>/leftovers/<owner>__<repo>/<label>-<YYYYMMDD>.patch (format-patch, then `git diff HEAD`, which
+ * carries the new files once they're intent-to-added). When `baseRef` (the default branch in the desk's clone) is
+ * given, a commit a squash merge already put into it is not saved: the branch was deleted from the remote, so the
+ * commits would count as unpushed, but merging the desk into `baseRef` changes nothing; a failed merge (a conflict,
+ * an old git without `merge-tree --write-tree`) keeps them. Null: nothing to save.
  */
-async function saveLeftovers(fullName: string, desk: string, label = path.basename(desk)): Promise<string | null> {
+async function saveLeftovers(fullName: string, desk: string, label = path.basename(desk), baseRef?: string): Promise<string | null> {
   const g = (args: string[]) => git(args, { cwd: desk, timeoutMs: 60_000 });
   if (!(await g(['rev-parse', '--verify', '-q', 'HEAD']).catch(() => ''))) return null;
   const dirty = await g(['status', '--porcelain', '--untracked-files=no']);
-  const commits = Number(await g(['rev-list', '--count', 'HEAD', '--not', '--remotes']));
-  if (!dirty && !commits) return null;
+  // Untracked files that the project's .gitignore does not cover (ignored ones, like node_modules, stay out).
+  const untracked = (await g(['ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean);
+  let commits = Number(await g(['rev-list', '--count', 'HEAD', '--not', '--remotes']));
+  if (commits && baseRef) {
+    const merged = (await g(['merge-tree', '--write-tree', baseRef, 'HEAD']).catch(() => '')).trim();
+    if (merged && merged === (await g(['rev-parse', `${baseRef}^{tree}`]).catch(() => '')).trim()) commits = 0;
+  }
+  if (!dirty && !untracked.length && !commits) return null;
   const dir = path.join(HOME_DIR, 'leftovers', fullName.replace('/', '__'));
   await fs.mkdir(dir, { recursive: true });
   const tmp = await fs.mkdtemp(path.join(dir, '.tmp-'));
   try {
+    // New files are intent-to-added (index entry, no content) so `git diff HEAD` lists them as new files. Chunked,
+    // like the branch sweeps: a few hundred new files would exceed Windows' 32,767-character command line.
+    for (let i = 0; i < untracked.length; i += 100) await g(['add', '-N', '--', ...untracked.slice(i, i + 100)]);
     // Written to files, not read from stdout: exec trims it, and a patch's trailing whitespace matters.
     if (commits) await g(['format-patch', '-q', '-o', tmp, 'HEAD', '--not', '--remotes']);
-    if (dirty) await g(['diff', 'HEAD', '--binary', `--output=${path.join(tmp, 'zz-uncommitted.patch')}`]);
+    if (dirty || untracked.length) await g(['diff', 'HEAD', '--binary', `--output=${path.join(tmp, 'zz-uncommitted.patch')}`]);
     const parts = (await fs.readdir(tmp)).sort();
     const base = `${label}-${stamp(new Date())}`;
     let file = path.join(dir, `${base}.patch`);
