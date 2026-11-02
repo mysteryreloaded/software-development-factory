@@ -604,6 +604,65 @@ describe('prepareDesk', { timeout: 60_000 }, () => {
     expect((await fs.readdir(path.join(r.upstream, 'batch')))).toHaveLength(250);
   });
 
+  it("doesn't save a desk whose work is already in the default branch, after a squash merge", async () => {
+    const r = await makeRepos();
+    const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'ada-9f4c', 'swarm/issue-91-ada');
+    await commitFile(desk, 'feature.txt', 'the merged feature\n');
+    await git(['push', '-q', 'origin', 'swarm/issue-91-ada'], { cwd: desk }); // the PR's branch, on GitHub
+    // The office squash-merges the PR and deletes the branch: the default branch gets the same change, the branch is gone.
+    await commitFile(r.upstream, 'feature.txt', 'the merged feature\n');
+    await git(['push', '-q', 'origin', 'main'], { cwd: r.upstream });
+    await git(['push', '-q', 'origin', '--delete', 'swarm/issue-91-ada'], { cwd: r.upstream });
+    const notes: string[] = [];
+    expect(await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'ada-9f4c', 'swarm/issue-92-ada', (t) => notes.push(t))).toBe(desk);
+    expect(await branchOf(desk)).toBe('swarm/issue-92-ada');
+    expect(notes).toEqual([]);
+    expect(await fs.readdir(path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__')), { withFileTypes: true }).catch(() => [])).toEqual([]);
+  });
+
+  it('still saves a new file on a desk whose work is already merged, but not the merged commit', async () => {
+    const r = await makeRepos();
+    const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'babs-3e17', 'swarm/issue-44-babs');
+    await commitFile(desk, 'feature.txt', 'the merged feature\n');
+    await git(['push', '-q', 'origin', 'swarm/issue-44-babs'], { cwd: desk });
+    await fs.writeFile(path.join(desk, 'notes.txt'), 'a new, untracked file\n');
+    await commitFile(r.upstream, 'feature.txt', 'the merged feature\n');
+    await git(['push', '-q', 'origin', 'main'], { cwd: r.upstream });
+    await git(['push', '-q', 'origin', '--delete', 'swarm/issue-44-babs'], { cwd: r.upstream });
+    const notes: string[] = [];
+    expect(await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'babs-3e17', 'swarm/issue-45-babs', (t) => notes.push(t))).toBe(desk);
+    const d = new Date();
+    const day = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const patch = path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__'), `swarm-issue-44-babs-${day}.patch`);
+    expect(notes).toEqual([`Saved unfinished work from swarm/issue-44-babs to ${patch}.`]);
+    const text = await fs.readFile(patch, 'utf8');
+    expect(text).toContain('notes.txt');
+    expect(text).not.toContain('feature.txt');
+  });
+
+  it('clears a stale index.lock before saving, so the save succeeds and keeps the new file', async () => {
+    const r = await makeRepos();
+    const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'gina-77d0', 'swarm/issue-12-gina');
+    await fs.writeFile(path.join(desk, 'notes.txt'), 'a new, untracked file\n');
+    // A git that died mid-command left its lock in the worktree's gitdir, 20 minutes ago.
+    const gitdir = path.resolve(desk, (await fs.readFile(path.join(desk, '.git'), 'utf8')).replace('gitdir:', '').trim());
+    const lock = path.join(gitdir, 'index.lock');
+    await fs.writeFile(lock, '');
+    const old = new Date(Date.now() - 20 * 60_000);
+    await fs.utimes(lock, old, old);
+    const notes: string[] = [];
+    expect(await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'gina-77d0', 'swarm/issue-13-gina', (t) => notes.push(t))).toBe(desk);
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toMatch(/^Removed a stale git lock/);
+    expect(notes[1]).toMatch(/^Saved unfinished work from swarm\/issue-12-gina to /);
+    await expect(fs.access(lock)).rejects.toThrow();
+    const d = new Date();
+    const day = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const patch = path.join(HOME_DIR, 'leftovers', r.fullName.replace('/', '__'), `swarm-issue-12-gina-${day}.patch`);
+    const text = await fs.readFile(patch, 'utf8');
+    expect(text).toContain('notes.txt');
+  });
+
   it('still reuses a desk when saving its work fails, and names the error', async () => {
     const r = await makeRepos();
     const desk = await prepareDesk(r.fullName, { defaultBranch: 'main' }, 'ola-77f0', 'swarm/issue-1-ola');
