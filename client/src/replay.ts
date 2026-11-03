@@ -73,6 +73,7 @@ function frameSnapshot(f: JournalFrame): WorldSnapshot {
     officeUpdate: s.officeUpdate,
     usage: f.usage,
     clis: s.clis,
+    sessionsRunning: s.sessionsRunning,
     voiceKeySet: s.voiceKeySet,
     voiceKeyHint: s.voiceKeyHint,
     voiceCache: s.voiceCache,

@@ -69,3 +69,31 @@ test('at 390x844, the cards stack in one column, in the same order', async ({ pa
   expect(boxes).toHaveLength(8);
   for (let i = 1; i < boxes.length; i++) expect(boxes[i].top).toBeGreaterThanOrEqual(boxes[i - 1].top + boxes[i - 1].height - 1);
 });
+
+// Issue #112: one session-limit input per coding agent (server/clis.ts's CLIS), and a value set there survives a
+// reload (it's saved server-side, through PATCH /api/settings, not kept only in the page).
+test('Session limits has one input per coding agent, and a value persists after reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openSettings(page);
+
+  const rows = page.locator('.session-limit-row');
+  await expect(rows).toHaveCount(3); // claude, codex, opencode
+  await expect(rows.nth(0)).toContainText('Claude Code');
+  await expect(rows.nth(1)).toContainText('Codex');
+  await expect(rows.nth(2)).toContainText('OpenCode');
+
+  const claudeInput = rows.nth(0).locator('input');
+  await expect(claudeInput).toHaveValue(''); // no limit by default
+  await claudeInput.fill('3');
+  await claudeInput.blur();
+  await expect.poll(async () => (await (await page.request.get('/api/state')).json()).settings.sessionLimits).toEqual({ claude: 3 });
+
+  await page.reload();
+  await enterOffice(page, { loaded: true });
+  await page.keyboard.press('e');
+  await page.getByRole('tab', { name: /Settings/ }).click();
+  await expect(page.locator('.session-limit-row').nth(0).locator('input')).toHaveValue('3');
+
+  // Leave the shared demo office as this spec found it, for every other test that shares it.
+  await page.request.patch('/api/settings', { data: { sessionLimits: {} } });
+});

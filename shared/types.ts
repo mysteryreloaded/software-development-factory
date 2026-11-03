@@ -306,7 +306,7 @@ export interface QaShotView {
 }
 
 export interface SwarmSettings {
-  sessionLimit: number; // most agent sessions running at once; 0 = no limit
+  sessionLimits: Partial<Record<AgentCli, number>>; // most sessions running at once, per coding agent; missing or 0 = no limit
   defaultModel: string;
   defaultEffort: EffortLevel;
   runtime: AgentRuntime;
@@ -657,6 +657,7 @@ export interface WorldSnapshot {
   ops: OpsView;
   doctor?: DoctorFinding[]; // the office doctor's findings the manager hasn't ignored
   clis: CliView[];
+  sessionsRunning: Partial<Record<AgentCli, number>>; // busy sessions right now, per coding agent (the CLI each counts against: server/pacing.ts's sessionCli)
   voiceKeySet: boolean; // an ElevenLabs key is saved (the key itself never leaves the server)
   voiceKeyHint: string; // its last 4 characters, '' when none
   voiceCache: VoiceCacheView;
@@ -702,6 +703,7 @@ export type ServerEvent =
   | { type: 'ops'; ops: OpsView }
   | { type: 'doctor'; doctor: DoctorFinding[] }
   | { type: 'clis'; clis: CliView[] }
+  | { type: 'sessionsRunning'; sessionsRunning: Partial<Record<AgentCli, number>> }
   | { type: 'voiceKey'; voiceKeySet: boolean; voiceKeyHint: string }
   | { type: 'voiceCache'; voiceCache: VoiceCacheView }
   | { type: 'weather'; weather: WeatherView }

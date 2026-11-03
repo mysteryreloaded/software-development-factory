@@ -25,6 +25,23 @@ export const CLIS: CliDef[] = [
 export const isCli = (v: unknown): v is AgentCli => CLIS.some((c) => c.id === v);
 export const cliLabel = (id: AgentCli) => CLIS.find((c) => c.id === id)?.label ?? id;
 
+/** The old office-wide `sessionLimit` (#112) becomes the same cap for every coding agent; 0 (or absent) becomes none. */
+export function migrateSessionLimits(old: number | undefined): Partial<Record<AgentCli, number>> {
+  if (!(old && old > 0)) return {};
+  return Object.fromEntries(CLIS.map((c) => [c.id, old]));
+}
+
+/** `updateSettings`'s per-agent session limits: only keys from `CLIS`, whole numbers; 0 or missing drops the key. */
+export function clampSessionLimits(patch: Record<string, unknown>): Partial<Record<AgentCli, number>> {
+  const out: Partial<Record<AgentCli, number>> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (!isCli(k)) continue;
+    const n = Math.max(0, Math.round(Number(v)) || 0);
+    if (n > 0) out[k] = n;
+  }
+  return out;
+}
+
 // ---------- finding a CLI ----------
 
 const WIN = process.platform === 'win32';
