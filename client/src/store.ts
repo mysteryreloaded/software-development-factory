@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CEO_ID, DEFAULT_DOG_NAME, DEFAULT_MAX_AGENTS, type CliId, type AgentView, type CeoInfo, type CliView, type DoctorFinding, type HireRequestView, type LogLine, type NotifyChannelsView, type OfficeUpdateView, type OpsView, type PenaltyBoard, type PhoneMessage, type PongRow, type PrPreviewView, type QaView, type RepoView, type ServerEvent, type SwarmSettings, type TickerItem, type UsageView, type VisitorView, type VoiceCacheView, type WorldSnapshot } from '../../shared/types';
+import { CEO_ID, DEFAULT_DOG_NAME, DEFAULT_MAX_AGENTS, type CliId, type AgentView, type CeoInfo, type CliView, type DoctorFinding, type HireRequestView, type LogLine, type NotifyChannelsView, type OfficeUpdateView, type OpsView, type PenaltyBoard, type PhoneMessage, type PongRow, type PrPreviewView, type PullInfo, type QaView, type RepoView, type ServerEvent, type SwarmSettings, type TickerItem, type UsageView, type VisitorView, type VoiceCacheView, type WorldSnapshot } from '../../shared/types';
 import { blockers } from '../../shared/issues';
 import { latestListed } from '../../shared/watch';
 import { DEFAULT_WEATHER, DEFAULT_WORLD_EVENTS, EMPTY_WEATHER_VIEW, type WeatherView } from '../../shared/outside';
@@ -660,6 +660,8 @@ export interface KanbanCard {
   note?: string;
   tone?: CardTone;
   prNumber?: number;
+  /** Issues this PR closes, in order, for the title's issue link(s) before its PR link. */
+  issues?: { number: number; url: string }[];
   qa?: QaView;
   /** The 3D board draws it as an outline: its sticky is off the board, with the agent testing it (StickyNotes.tsx). */
   ghost?: boolean;
@@ -702,13 +704,17 @@ export function kanbanFor(repo: RepoView, agents: Agent[], qaRecords: Record<str
     });
   }
 
+  const issueById = new Map(repo.issues.map((i) => [i.number, i]));
+  const issueLinks = (p: PullInfo) =>
+    p.closesIssues.map((n) => ({ number: n, url: issueById.get(n)?.url ?? `${repo.url}/issues/${n}` }));
+
   const qa: KanbanCard[] = [];
   const ready: KanbanCard[] = [];
   for (const p of openPulls) {
     const rec = qaRecords[qaKey(repo.id, p.number)];
     const dev = (rec?.devAgentId ? byId.get(rec.devAgentId) : undefined) ?? authorOf(p.number, p.headRefName);
     const tester = rec?.qaAgentId ? byId.get(rec.qaAgentId) : undefined;
-    const base = { key: `pr-${p.number}`, number: p.number, prNumber: p.number, title: p.title, url: p.url, qa: rec };
+    const base = { key: `pr-${p.number}`, number: p.number, prNumber: p.number, title: p.title, url: p.url, issues: issueLinks(p), qa: rec };
     const card = { ...base, ...qaCardNote(rec, p, repo.autoMerge) };
     if (rec?.status === 'passed') ready.push({ ...card, agent: dev });
     else qa.push({ ...card, agent: rec?.status === 'testing' ? tester : dev });
@@ -732,7 +738,7 @@ export function kanbanFor(repo: RepoView, agents: Agent[], qaRecords: Record<str
   const merged: KanbanCard[] = repo.pulls
     .filter((p) => p.state === 'MERGED')
     .sort((a, b) => (b.mergedAt ?? '').localeCompare(a.mergedAt ?? ''))
-    .map((p) => ({ key: `m-${p.number}`, number: p.number, prNumber: p.number, title: p.title, url: p.url, agent: authorOf(p.number, p.headRefName) }));
+    .map((p) => ({ key: `m-${p.number}`, number: p.number, prNumber: p.number, title: p.title, url: p.url, issues: issueLinks(p), agent: authorOf(p.number, p.headRefName) }));
 
   return { backlog, progress, qa, ready, merged };
 }

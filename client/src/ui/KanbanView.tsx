@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { agentsOnRepo, kanbanFor, useStore, type Agent, type KanbanCard } from '../store';
 import { confirmDialog, isConfirmOpen } from './Confirm';
@@ -212,6 +212,14 @@ export function KanbanView({ repoId, embedded }: { repoId: string; embedded?: bo
         {cards.map((c) => (
           <div key={c.key} className={`kcard ${c.tone ? `kcard-${c.tone}` : ''}`}>
             <div className="kcard-title">
+              {c.issues?.map((i) => (
+                <Fragment key={i.number}>
+                  <a href={i.url} target="_blank" rel="noreferrer">
+                    #{i.number}
+                  </a>{' '}
+                </Fragment>
+              ))}
+              {c.issues?.length ? '· ' : ''}
               {c.url ? (
                 <a href={c.url} target="_blank" rel="noreferrer">
                   {c.prNumber ? 'PR ' : ''}#{c.number}
