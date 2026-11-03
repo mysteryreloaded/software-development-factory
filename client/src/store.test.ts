@@ -11,7 +11,7 @@ const { EMPTY_OPS } = await import('./ops');
 const { gongForMerge } = await import('./world/gongRunner');
 const { onMerge } = await import('./world/confetti');
 
-const pr = (number: number, state: PullInfo['state'], headRefName = `feature/${number}`) => ({ number, state, headRefName }) as PullInfo;
+const pr = (number: number, state: PullInfo['state'], headRefName = `feature/${number}`) => ({ number, state, headRefName, closesIssues: [] }) as unknown as PullInfo;
 const repo = (floor: number, ...pulls: PullInfo[]) => ({ id: `acme/floor${floor}`, floor, pulls }) as RepoView;
 const snapshot = (repos: RepoView[], agents: Partial<AgentView>[] = []) =>
   ({ type: 'snapshot', data: { repos, agents, qa: [], requests: [], messages: [], phoneReadAt: 0, settings: {}, ceo: {}, usage: {}, clis: [] } as unknown as WorldSnapshot }) as const;
@@ -184,6 +184,43 @@ describe('kanbanFor: In progress', () => {
     const held = { ...r(), held: [{ issue: 192, pr: 198 }] } as RepoView;
     expect(kanbanFor(held, [], {}).backlog).toMatchObject([{ number: 192, note: '⏸ PR #198 closed · assign by hand', tone: 'warn' }]);
     expect(kanbanFor(r(), [], {}).backlog[0].tone).toBeUndefined();
+  });
+});
+
+describe('kanbanFor: issue links on PR cards (#115)', () => {
+  const closing = (number: number, state: PullInfo['state'], closesIssues: number[]) => ({ ...pr(number, state), closesIssues }) as PullInfo;
+  const issue = (number: number, url: string) => ({ number, title: `#${number}`, body: '', url, labels: [], createdAt: '' }) as IssueInfo;
+  const floor = (pulls: PullInfo[], issues: IssueInfo[] = []) => ({ ...repo(1, ...pulls), issues, url: 'https://github.com/acme/floor1', autoMerge: false }) as RepoView;
+
+  it('gives a QA/Ready card one issue link, taken from the open issue', () => {
+    const r = floor([closing(198, 'OPEN', [192])], [issue(192, 'https://github.com/acme/floor1/issues/192')]);
+    const qa = { [qaKey('acme/floor1', 198)]: { repoId: 'acme/floor1', prNumber: 198, status: 'passed', round: 1 } as QaView };
+    expect(kanbanFor(r, [], qa).ready).toMatchObject([{ issues: [{ number: 192, url: 'https://github.com/acme/floor1/issues/192' }] }]);
+  });
+
+  it('gives a card no issues when its PR closes none', () => {
+    const r = floor([pr(198, 'OPEN')]);
+    expect(kanbanFor(r, [], {}).qa).toMatchObject([{ issues: [] }]);
+  });
+
+  it('gives a card a link per issue it closes, in order', () => {
+    const r = floor(
+      [closing(198, 'OPEN', [192, 193])],
+      [issue(192, 'https://github.com/acme/floor1/issues/192'), issue(193, 'https://github.com/acme/floor1/issues/193')],
+    );
+    expect(kanbanFor(r, [], {}).qa).toMatchObject([
+      {
+        issues: [
+          { number: 192, url: 'https://github.com/acme/floor1/issues/192' },
+          { number: 193, url: 'https://github.com/acme/floor1/issues/193' },
+        ],
+      },
+    ]);
+  });
+
+  it('builds the issue URL from the repo URL for a merged PR whose issue is already closed', () => {
+    const r = floor([closing(198, 'MERGED', [192])]); // #192 is closed: gone from repo.issues
+    expect(kanbanFor(r, [], {}).merged).toMatchObject([{ issues: [{ number: 192, url: 'https://github.com/acme/floor1/issues/192' }] }]);
   });
 });
 
