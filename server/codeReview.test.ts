@@ -149,3 +149,117 @@ describe('a fix for a PR whose dev changed CLI', () => {
     expect(await fixIn('opencode')).toEqual([{ cli: 'opencode', resumeSessionId: 'demo-old-session' }]);
   });
 });
+
+// A custom provider (#113) is treated exactly like opencode: same fix behaviour, by id rather than by the literal 'opencode'.
+describe('a fix for a PR whose dev runs a custom provider', () => {
+  type FixInternals = {
+    state: {
+      repos: Array<{ id: string }>;
+      agents: Array<Record<string, unknown>>;
+      qa: Array<Record<string, unknown>>;
+      customProviders: Array<Record<string, unknown>>;
+    };
+    agentRt: Map<string, { log: unknown[]; session: unknown; currentTool: unknown; browserUrl: unknown; screenshot: unknown; shots: unknown; terminal: unknown }>;
+    backend: { startSession(opts: { cli?: unknown; resumeSessionId?: unknown; agentId?: unknown }, cb: unknown): unknown };
+    runFix(dev: Record<string, unknown>, repo: Record<string, unknown>, rec: Record<string, unknown>): Promise<void>;
+  };
+
+  const devAgent = (repoId: string) => ({
+    id: 'dev-2222',
+    name: 'Mo',
+    repoId,
+    role: 'agent',
+    look: 'masculine',
+    task: null,
+    desk: 4,
+    color: '#3a5a40',
+    hair: '#111111',
+    skin: '#f0c0a0',
+    style: null,
+    model: '',
+    effort: '',
+    cli: 'local-qwen',
+    machine: 'machine-0001',
+    status: 'idle',
+    issueNumber: null,
+    issueTitle: null,
+    branch: null,
+    prNumber: null,
+    prUrl: null,
+    startedAt: null,
+    endedAt: null,
+    costUsd: 0,
+    turns: 0,
+    sessionId: null,
+    sessionCli: null,
+    lastError: null,
+    logTail: [],
+  });
+
+  const qaRecord = (repoId: string, devSessionCli: string | null) => ({
+    repoId,
+    prNumber: 7,
+    status: 'failed',
+    round: 1,
+    devAgentId: 'dev-2222',
+    qaAgentId: null,
+    summary: 'The toolbar overflows on a 375px screen.',
+    checks: [{ name: 'Mobile layout (375px)', result: 'fail', details: 'Toolbar overflows horizontally' }],
+    commentUrl: null,
+    updatedAt: Date.now(),
+    issueNumber: 3,
+    devSessionId: 'demo-old-session',
+    devSessionCli,
+    fixInstructions: 'Make the toolbar wrap below 480px.',
+    sessionFailures: 0,
+    mergeNote: null,
+    testedSha: 'a1b2c3d',
+    passedSha: null,
+    ceoApprovedSha: null,
+    fixReason: 'qa',
+    mergeFixes: 0,
+    retests: 0,
+    pendingSince: null,
+    mergeRetryAt: null,
+    alerted: false,
+    preQa: null,
+    noChangeSha: null,
+    rerunSha: null,
+    rerunAt: null,
+    blockedRerunAt: null,
+    qaChecks: null,
+    stuckWhy: null,
+    triages: 0,
+    escalated: false,
+  });
+
+  async function fixIn(devSessionCli: string | null) {
+    const swarm = new Swarm(createDemoBackend());
+    const internals = swarm as unknown as FixInternals;
+    await swarm.connectRepo('demo-co/pixel-todo');
+    const repoId = internals.state.repos[0].id;
+    internals.state.customProviders.push({ id: 'local-qwen', name: 'Local Qwen', baseURL: 'http://127.0.0.1:4100/v1', model: 'qwen-27b' });
+    internals.state.agents.push(devAgent(repoId));
+    internals.agentRt.set('dev-2222', { log: [], session: null, currentTool: null, browserUrl: null, screenshot: null, shots: [], terminal: null });
+    const rec = qaRecord(repoId, devSessionCli);
+    internals.state.qa.push(rec);
+    const started: Array<{ cli?: unknown; resumeSessionId?: unknown }> = [];
+    internals.backend.startSession = (opts) => {
+      if (opts.agentId === 'dev-2222') started.push({ cli: opts.cli, resumeSessionId: opts.resumeSessionId });
+      return { send: () => undefined, stop: () => undefined };
+    };
+    // The fake GitHub's PR numbers are shared across this file's tests; a made-up #7 could, by then, look "forgotten"
+    // (closed before a restart). runFix only reads prDetails to catch a merged/closed PR, which isn't this test's point.
+    (internals.backend as unknown as { prDetails(): Promise<never> }).prDetails = () => Promise.reject(new Error('not stubbed'));
+    await internals.runFix(internals.state.agents.find((a) => a.id === 'dev-2222')!, internals.state.repos[0], rec);
+    return started;
+  }
+
+  it("starts a fresh session on the dev's own provider when their session was Claude's", async () => {
+    expect(await fixIn('claude')).toEqual([{ cli: 'local-qwen', resumeSessionId: undefined }]);
+  });
+
+  it('resumes the session when the dev\'s custom provider is the one that made it', async () => {
+    expect(await fixIn('local-qwen')).toEqual([{ cli: 'local-qwen', resumeSessionId: 'demo-old-session' }]);
+  });
+});

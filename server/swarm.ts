@@ -35,7 +35,9 @@ import { drainDecision, lastUpdateMessage, POSTPONE_MS, type DrainInput, type La
 import { cliAtLimit, clampPacingSessions, DEFAULT_PACING_SESSIONS, limitExempt, mayStart, PACING_MS, pacingMessage, resumeRefusal, sessionCli, usageLabel, usageView, usesClaude, waived, warningView, type UsageWarning, type Waiver, type WorkKind } from './pacing.ts';
 import { emptyHistory, loadHistory, opsView, recordChecks, recordCost, recordMerges, recordQa, type OpsFloorState, type OpsHistory } from './metrics.ts';
 import { clampTrimIdleMin, DEFAULT_TRIM_IDLE_MIN, desksToTrim, formatBytes, freedMessage, idleSince, TRIM_SWEEP_MS } from './deskTrim.ts';
-import { CLIS, clampSessionLimits, cliLabel, isCli, migrateSessionLimits, resumeChoice } from './clis.ts';
+import { CLIS, clampSessionLimits, cliLabel, cliRuns, isCli, isKnownCli, migrateSessionLimits, resumeChoice } from './clis.ts';
+import { mergeSecrets, readSecrets } from './secrets.ts';
+import { slugifyProviderId, uniqueProviderId, validateCreate as validateProviderCreate, validateUpdate as validateProviderUpdate, validBaseUrl, type ProviderInput } from './providers.ts';
 import { machineName } from './machines.ts';
 import { MACHINES_DIR, machineTmp, type DeskTrim } from './workspace.ts';
 import { envSecrets, Journal } from './journal.ts';
@@ -66,7 +68,6 @@ import { DEFAULT_THEME_SETTINGS, dueGreeting, themeSettings } from '../shared/th
 import { CEO_ID, DEFAULT_DOG_NAME, DEFAULT_MAX_AGENTS, FLOOR_SEATS, INSTALL_STEP } from '../shared/types.ts';
 import type {
   AgentActivity,
-  AgentCli,
   AgentLook,
   AgentPromptView,
   AgentRole,
@@ -75,8 +76,10 @@ import type {
   AgentView,
   AttachmentView,
   CeoInfo,
+  CliId,
   CliView,
   ClientEvent,
+  CustomProvider,
   DoctorFinding,
   DoctorFix,
   EffortLevel,
@@ -92,6 +95,7 @@ import type {
   PreviewView,
   PrPreviewView,
   ProjectFolderView,
+  ProviderCheckResult,
   PullInfo,
   QaCheck,
   QaView,
@@ -142,7 +146,7 @@ interface PersistedAgent {
   style: AgentStyle | null; // the look editor's picks (null: seeded from the id)
   model: string;
   effort: EffortLevel | '';
-  cli: AgentCli | ''; // '' = the office's default CLI
+  cli: CliId | ''; // '' = the office's default CLI
   machine: string | null; // their machine (machines.ts); null for an agent from before machines, until their next task
   status: AgentStatus;
   issueNumber: number | null;
@@ -155,7 +159,7 @@ interface PersistedAgent {
   costUsd: number;
   turns: number;
   sessionId: string | null;
-  sessionCli: AgentCli | null; // the CLI whose session sessionId is: only it can resume it
+  sessionCli: CliId | null; // the CLI whose session sessionId is: only it can resume it
   lastError: string | null;
   logTail: LogLine[];
 }
@@ -164,7 +168,7 @@ interface PersistedAgent {
 interface QaRecord extends Omit<QaView, 'ceoLooking' | 'ceoReview'> {
   issueNumber: number | null;
   devSessionId: string | null; // the dev's session, resumed to fix QA findings
-  devSessionCli: AgentCli | null; // the CLI that made it: only that CLI can resume it
+  devSessionCli: CliId | null; // the CLI that made it: only that CLI can resume it
   fixInstructions: string | null;
   sessionFailures: number;
   testedSha: string | null; // the head commit QA is testing
@@ -226,6 +230,7 @@ interface Persisted {
   progress: LedgerState; // coins, decorations, achievements and careers (ledger.ts)
   pong: Record<string, PongRow[]>; // each floor's ping-pong leaderboard, by repo id
   penalty: PenaltyBoard; // the park's penalty shoot-out board (#46), office-wide
+  customProviders: CustomProvider[]; // coding-agent providers added from an OpenAI-compatible endpoint (#113); their API keys live in secrets.ts, never here
 }
 
 interface Shot {
@@ -239,7 +244,7 @@ interface AgentRuntime {
   log: LogLine[];
   session: SessionHandle | null;
   currentTool: string | null;
-  cli?: AgentCli; // the CLI of the session running now; a.sessionCli is the CLI that made the resumable session, which can be older
+  cli?: CliId; // the CLI of the session running now; a.sessionCli is the CLI that made the resumable session, which can be older
   browserUrl: string | null;
   screenshot: { data: Buffer; mime: string; at: number } | null;
   shots: Shot[]; // every screenshot of the current session (QA evidence)
@@ -513,7 +518,11 @@ export class Swarm {
     progress: emptyLedger(),
     pong: {},
     penalty: { rows: [], hardest: null },
+    customProviders: [],
   };
+  /** Custom providers' API keys (#113), by provider id: loaded from secrets.ts, never kept in state.json or sent out. */
+  private providerKeys = new Map<string, string>();
+  private readonly providerSecretsFile: string;
   /**
    * The CEO's office tools. Every session gets its own server: one can only be connected to one session at a time, so
    * a shared one left the next session connected but without any tools while an earlier session still held it.
@@ -590,6 +599,7 @@ export class Swarm {
   private toldStuck = new Set<string>(); // `${agentId}:${endedAt}`: agents in an error the manager was notified about
 
   constructor(private backend: Backend) {
+    this.providerSecretsFile = path.join(HOME_DIR, backend.demo ? 'demo-secrets.json' : 'secrets.json');
     this.weather = new WeatherService({
       api: backend.weather,
       file: path.join(HOME_DIR, backend.demo ? 'demo-weather.json' : 'weather.json'),
@@ -662,7 +672,7 @@ export class Swarm {
           look: a.look ?? lookFor(a.name),
           style: cleanStyle(a.style),
           task: a.task ?? (a.issueNumber ? 'issue' : null),
-          cli: isCli(a.cli) ? a.cli : '',
+          cli: isKnownCli(a.cli, this.state.customProviders) ? a.cli : '',
           sessionCli: a.sessionCli ?? (a.sessionId ? 'claude' : null),
         })),
         qa: (loaded.qa ?? []).map((q) => ({
@@ -698,11 +708,12 @@ export class Swarm {
         progress: loadLedger(loaded.progress),
         pong: loaded.pong && typeof loaded.pong === 'object' ? loaded.pong : {},
         penalty: loaded.penalty && Array.isArray(loaded.penalty.rows) ? loaded.penalty : { rows: [], hardest: null },
+        customProviders: Array.isArray(loaded.customProviders) ? loaded.customProviders : [],
       };
       for (const m of this.state.messages) this.messageSeq = Math.max(this.messageSeq, m.id + 1);
       if (!EFFORTS.includes(this.state.settings.defaultEffort)) this.state.settings.defaultEffort = 'medium';
       if (this.state.settings.runtime !== 'sdk') this.state.settings.runtime = 'terminal';
-      if (!isCli(this.state.settings.defaultCli)) this.state.settings.defaultCli = 'claude';
+      if (!isKnownCli(this.state.settings.defaultCli, this.state.customProviders)) this.state.settings.defaultCli = 'claude';
       this.state.settings.trimIdleDesksMin = clampTrimIdleMin(this.state.settings.trimIdleDesksMin);
       if (!this.state.settings.defaultModel && this.state.settings.defaultCli === 'claude') this.state.settings.defaultModel = DEFAULT_MODEL;
       // "Max concurrent sessions" (default 4) became an optional session limit. The old default goes; a limit the manager chose stays.
@@ -746,6 +757,14 @@ export class Swarm {
     await this.voice.init();
     await this.weather.init();
     await this.notifier.init();
+    const providerSecrets = await readSecrets(this.providerSecretsFile);
+    const providerKeys = providerSecrets.providerKeys;
+    if (providerKeys && typeof providerKeys === 'object') for (const [id, key] of Object.entries(providerKeys)) if (typeof key === 'string') this.providerKeys.set(id, key);
+    // A provider deleted (or never saved) while the office was off: drop agents and the default pointing at it.
+    this.state.customProviders = this.state.customProviders.filter((p) => this.providerKeys.has(p.id));
+    const knownProviderIds = new Set(this.state.customProviders.map((p) => p.id));
+    for (const a of this.state.agents) if (a.cli && !isCli(a.cli) && !knownProviderIds.has(a.cli)) a.cli = '';
+    if (!isCli(this.state.settings.defaultCli) && !knownProviderIds.has(this.state.settings.defaultCli)) this.state.settings.defaultCli = 'claude';
     for (const r of this.state.repos) if (r.localPath) this.backend.setLocalPath(r.fullName, r.localPath);
     const interrupted: PersistedAgent[] = [];
     for (const a of this.state.agents) {
@@ -842,7 +861,7 @@ export class Swarm {
       .detectClis()
       .then((clis) => {
         this.clis = clis;
-        this.broadcast({ type: 'clis', clis });
+        this.broadcast({ type: 'clis', clis: this.clisView() });
       })
       .catch((err) => console.warn('could not look for agent CLIs', err));
     await this.journal.start();
@@ -1084,7 +1103,7 @@ export class Swarm {
       usage: this.usageNow(),
       ops: this.opsNow(),
       doctor: this.doctorView(),
-      clis: this.clis,
+      clis: this.clisView(),
       sessionsRunning: this.sessionsRunningView(),
       ...this.voice.keyView(),
       voiceCache: this.voice.cacheInfo(),
@@ -1149,10 +1168,10 @@ export class Swarm {
     this.journal.record(ev);
   }
 
-  /** Values the journal must never write: the ElevenLabs key and secret-looking environment variables. */
+  /** Values the journal must never write: the ElevenLabs key, custom providers' API keys, and secret-looking environment variables. */
   private secrets(): string[] {
     const key = this.voice.secret();
-    return key ? [...this.envSecrets, key] : this.envSecrets;
+    return [...this.envSecrets, ...(key ? [key] : []), ...this.providerKeys.values()];
   }
 
   /** POST /api/journal/sample (demo only): writes a made-up working day as yesterday's journal, to replay. */
@@ -1265,7 +1284,7 @@ export class Swarm {
   }
 
   /** The CLI a brand-new session for this agent would run on (server/pacing.ts's sessionCli). */
-  private agentCli(a: { role: AgentRole; cli: AgentCli | '' }): AgentCli {
+  private agentCli(a: { role: AgentRole; cli: CliId | '' }): CliId {
     return sessionCli(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals);
   }
 
@@ -1273,13 +1292,13 @@ export class Swarm {
    * Which CLI resuming this agent (`resumeId`, or their own `sessionCli` for a typed/live follow-up) actually runs
    * on: resumeChoice's own rule, the same one startAgentSession's sessionRuntime applies.
    */
-  private nextCli(a: PersistedAgent, resumeId?: string, resumeCli?: AgentCli | null, live = false): AgentCli {
+  private nextCli(a: PersistedAgent, resumeId?: string, resumeCli?: CliId | null, live = false): CliId {
     const inTerminal = this.state.settings.runtime === 'terminal' && this.backend.terminals;
     return resumeChoice({ agentCli: this.agentCli(a), inTerminal, resumeId, resumeCli: resumeCli ?? a.sessionCli, live }).cli;
   }
 
   /** The CLI a busy agent's session counts against right now: its running session's own CLI, or (not started yet) the one it will get. */
-  private busyCli(a: PersistedAgent): AgentCli {
+  private busyCli(a: PersistedAgent): CliId {
     const rt = this.agentRt.get(a.id);
     return (rt?.session && rt.cli) || this.agentCli(a);
   }
@@ -1289,20 +1308,21 @@ export class Swarm {
     return this.runningByCli('claude');
   }
 
-  /** Busy sessions counting against one coding agent's limit. */
-  private runningByCli(cli: AgentCli) {
+  /** Busy sessions counting against one coding agent's (or custom provider's) limit. */
+  private runningByCli(cli: CliId) {
     return this.state.agents.filter((a) => BUSY.includes(a.status) && this.busyCli(a) === cli).length;
   }
 
-  /** Every coding agent's busy sessions right now, for the snapshot and company_status. */
-  private sessionsRunningView(): Partial<Record<AgentCli, number>> {
-    const out: Partial<Record<AgentCli, number>> = {};
+  /** Every coding agent's and custom provider's busy sessions right now, for the snapshot and company_status. */
+  private sessionsRunningView(): Partial<Record<CliId, number>> {
+    const out: Partial<Record<CliId, number>> = {};
     for (const c of CLIS) out[c.id] = this.runningByCli(c.id);
+    for (const p of this.state.customProviders) out[p.id] = this.runningByCli(p.id);
     return out;
   }
 
-  /** True when this coding agent has a limit set and every one of its slots is taken. */
-  private cliFull(cli: AgentCli) {
+  /** True when this coding agent (or custom provider) has a limit set and every one of its slots is taken. */
+  private cliFull(cli: CliId) {
     return cliAtLimit(this.state.settings.sessionLimits[cli], this.runningByCli(cli));
   }
 
@@ -2196,8 +2216,8 @@ export class Swarm {
     while (used.has(desk)) desk++;
     if (desk >= FLOOR_SEATS) throw new HttpError(409, `Floor ${repo.floor} has no free desk (${FLOOR_SEATS} desks)`);
     const name = opts.name?.trim().slice(0, 24) || this.freeName();
-    const cli = isCli(opts.cli) ? opts.cli : '';
-    if (cli && !this.cliReady(cli)) throw new HttpError(400, `${cliLabel(cli)} isn't installed on this computer.`);
+    const cli = isKnownCli(opts.cli, this.state.customProviders) ? opts.cli : '';
+    if (cli && !this.cliReady(cli)) throw new HttpError(400, `${cliLabel(cli, this.state.customProviders)} isn't installed on this computer.`);
     const id = opts.id && !this.state.agents.some((a) => a.id === opts.id) ? opts.id : crypto.randomUUID();
     const agent: PersistedAgent = {
       id,
@@ -2252,16 +2272,21 @@ export class Swarm {
     return NAMES.find((n) => !taken.has(n)) || `Agent ${this.state.agents.length + 1}`;
   }
 
-  /** The coding agent is installed here (or the office hasn't looked yet: then the session says so if it isn't). */
-  private cliReady(cli: AgentCli) {
-    return !this.clis.length || this.clis.some((c) => c.id === cli && c.installed);
+  /** The coding agent (or custom provider) is ready to run: a built-in installed here (or the office hasn't looked yet), or any custom provider. */
+  private cliReady(cli: CliId) {
+    return isCli(cli) ? !this.clis.length || this.clis.some((c) => c.id === cli && c.installed) : this.state.customProviders.some((p) => p.id === cli);
+  }
+
+  /** CLI ids and custom provider ids the office knows: for the Team tab, hiring and defaultCli validation. */
+  private clisView(): CliView[] {
+    return [...this.clis, ...this.state.customProviders.map((p) => ({ id: p.id, label: p.name, installed: true, version: null, integrated: false, custom: true, runs: cliRuns(p.id) }))];
   }
 
   updateAgent(id: string, patch: { name?: string; model?: string; effort?: string; cli?: string; look?: string; color?: string; hair?: string; style?: unknown }) {
     const a = this.agent(id);
     if (patch.cli !== undefined && a.role !== 'ceo') {
-      const cli = isCli(patch.cli) ? patch.cli : '';
-      if (cli && !this.cliReady(cli)) throw new HttpError(400, `${cliLabel(cli)} isn't installed on this computer.`);
+      const cli = isKnownCli(patch.cli, this.state.customProviders) ? patch.cli : '';
+      if (cli && !this.cliReady(cli)) throw new HttpError(400, `${cliLabel(cli, this.state.customProviders)} isn't installed on this computer.`);
       a.cli = cli;
     }
     if (patch.name?.trim() && patch.name.trim() !== a.name) {
@@ -2367,10 +2392,10 @@ export class Swarm {
     );
   }
 
-  private ensureSlot(a: PersistedAgent, cli: AgentCli = this.agentCli(a)) {
+  private ensureSlot(a: PersistedAgent, cli: CliId = this.agentCli(a)) {
     const limit = this.state.settings.sessionLimits[cli];
     if (this.cliFull(cli)) {
-      throw new HttpError(429, `All ${limit} ${cliLabel(cli)} session slots are busy. Raise or clear its session limit in the manager's console, or wait.`);
+      throw new HttpError(429, `All ${limit} ${cliLabel(cli, this.state.customProviders)} session slots are busy. Raise or clear its session limit in the manager's console, or wait.`);
     }
   }
 
@@ -2411,7 +2436,7 @@ export class Swarm {
    * CLI, every other start runs on the agent's own CLI and drops a session made by another one; no resumeCli means
    * the agent's own last session's CLI, so a same-CLI resume keeps running (a chat carries on).
    */
-  private sessionRuntime(a: PersistedAgent, resume?: string, resumeCli?: AgentCli | null, live = false): { terminal?: AgentTerminal; cli?: AgentCli; label?: string; resumeSessionId?: string; dropped: boolean } {
+  private sessionRuntime(a: PersistedAgent, resume?: string, resumeCli?: CliId | null, live = false): { terminal?: AgentTerminal; cli?: CliId; label?: string; resumeSessionId?: string; dropped: boolean } {
     const inTerminal = this.state.settings.runtime === 'terminal' && this.backend.terminals;
     const choice = resumeChoice({ agentCli: a.role === 'ceo' ? 'claude' : a.cli || this.state.settings.defaultCli, inTerminal, resumeId: resume, resumeCli: resumeCli ?? a.sessionCli, live });
     if (!inTerminal) return { resumeSessionId: choice.resumeId, dropped: choice.dropped };
@@ -2420,8 +2445,16 @@ export class Swarm {
   }
 
   /** The model to ask for (the Agent SDK runs Claude Code). '' lets another coding agent use its own default. */
-  private modelFor(a: PersistedAgent, cli: AgentCli | undefined) {
-    return effectiveModel(a.model, cli ?? 'claude', this.state.settings, DEFAULT_MODEL);
+  private modelFor(a: PersistedAgent, cli: CliId | undefined) {
+    return effectiveModel(a.model, cli ?? 'claude', this.state.settings, DEFAULT_MODEL, this.state.customProviders);
+  }
+
+  /** A custom provider's fields plus its API key (#113), for launchArgs' config; null for a built-in CLI. */
+  private providerFor(cli: CliId | undefined): { id: string; name: string; baseURL: string; apiKey: string; model: string; contextLimit?: number; outputLimit?: number } | null {
+    const p = cli ? this.state.customProviders.find((x) => x.id === cli) : undefined;
+    if (!p) return null;
+    const apiKey = this.providerKeys.get(p.id);
+    return apiKey ? { ...p, apiKey } : null;
   }
 
   // ---------- terminals ----------
@@ -2645,7 +2678,7 @@ export class Swarm {
     /** typed: the manager typed the prompt at the CLI; reattach: follow the CLI that kept working through a restart. */
     mode: 'typed' | 'reattach' | null = null,
     /** The CLI whose session resumeSessionId is (null: unknown, a record from before CLIs were named); the session is only resumed in it. */
-    resumeCli?: AgentCli | null,
+    resumeCli?: CliId | null,
   ) {
     const rt = this.agentRt.get(a.id);
     if (!rt || !this.state.agents.includes(a)) return; // let go meanwhile
@@ -2679,6 +2712,7 @@ export class Swarm {
         task: a.task,
         env: this.machineEnv(a),
         outputSchema,
+        provider: this.providerFor(how.cli),
         // An agent's CLI stays at its prompt after building or fixing, for the manager and for follow-ups; after QA it
         // closes, so the next QA run of that PR is a fresh session.
         keepAlive: a.task !== 'qa',
@@ -3406,11 +3440,16 @@ export class Swarm {
     this.startAgentSession(a, repo, cwd, forAgent, this.buildSystemAppend(a, repo, cwd, a.branch, fixing), a.sessionId, undefined, typed ? 'typed' : null);
   }
 
+  /** Known CliId's: the built-in CLIs plus the office's custom providers (#113), for sessionLimits and defaultCli. */
+  private knownCliIds(): string[] {
+    return [...CLIS.map((c) => c.id), ...this.state.customProviders.map((p) => p.id)];
+  }
+
   updateSettings(patch: Partial<SwarmSettings>) {
     const s = this.state.settings;
-    if (patch.sessionLimits !== undefined && typeof patch.sessionLimits === 'object') s.sessionLimits = clampSessionLimits(patch.sessionLimits as Record<string, unknown>);
+    if (patch.sessionLimits !== undefined && typeof patch.sessionLimits === 'object') s.sessionLimits = clampSessionLimits(patch.sessionLimits as Record<string, unknown>, this.knownCliIds());
     // The default model belongs to the default coding agent: a new agent starts on its own default.
-    if (isCli(patch.defaultCli) && patch.defaultCli !== s.defaultCli) {
+    if (isKnownCli(patch.defaultCli, this.state.customProviders) && patch.defaultCli !== s.defaultCli) {
       s.defaultCli = patch.defaultCli;
       if (patch.defaultModel === undefined) s.defaultModel = s.defaultCli === 'claude' ? DEFAULT_MODEL : '';
     }
@@ -3462,6 +3501,99 @@ export class Swarm {
     this.emitCeo();
     setTimeout(() => this.schedule(), 200);
     return s;
+  }
+
+  // ---------- custom providers (#113): an OpenAI-compatible endpoint, run through OpenCode ----------
+
+  /** GET /api/providers: the three built-ins (read-only) plus the office's custom providers. */
+  listProviders(): { builtIn: { id: string; label: string; command: string; installed: boolean; version: string | null }[]; custom: (CustomProvider & { hasKey: true })[] } {
+    const builtIn = CLIS.map((c) => {
+      const d = this.clis.find((x) => x.id === c.id);
+      return { id: c.id, label: c.label, command: c.command, installed: d?.installed ?? false, version: d?.version ?? null };
+    });
+    return { builtIn, custom: this.state.customProviders.map((p) => ({ ...p, hasKey: true as const })) };
+  }
+
+  private saveProviderKeys() {
+    return mergeSecrets(this.providerSecretsFile, { providerKeys: Object.fromEntries(this.providerKeys) });
+  }
+
+  private emitProviders() {
+    this.save();
+    this.broadcast({ type: 'clis', clis: this.clisView() });
+  }
+
+  createProvider(input: ProviderInput): CustomProvider {
+    const v = validateProviderCreate(input);
+    if (!v.ok) throw new HttpError(400, v.error);
+    const id = uniqueProviderId(
+      slugifyProviderId(v.value.name),
+      this.state.customProviders.map((p) => p.id),
+    );
+    const provider: CustomProvider = {
+      id,
+      name: v.value.name,
+      baseURL: v.value.baseURL,
+      model: v.value.model,
+      ...(v.value.contextLimit ? { contextLimit: v.value.contextLimit } : {}),
+      ...(v.value.outputLimit ? { outputLimit: v.value.outputLimit } : {}),
+    };
+    this.state.customProviders.push(provider);
+    this.providerKeys.set(id, v.value.apiKey);
+    void this.saveProviderKeys();
+    this.emitProviders();
+    return provider;
+  }
+
+  updateProvider(id: string, input: ProviderInput): CustomProvider {
+    if (isCli(id)) throw new HttpError(403, `${cliLabel(id)} is a built-in coding agent and can't be edited here.`);
+    const p = this.state.customProviders.find((x) => x.id === id);
+    if (!p) throw new HttpError(404, `No custom provider "${id}".`);
+    const v = validateProviderUpdate(input);
+    if (!v.ok) throw new HttpError(400, v.error);
+    if (v.value.name !== undefined) p.name = v.value.name;
+    if (v.value.baseURL !== undefined) p.baseURL = v.value.baseURL;
+    if (v.value.model !== undefined) p.model = v.value.model;
+    if (v.value.contextLimit !== undefined) {
+      if (v.value.contextLimit === null) delete p.contextLimit;
+      else p.contextLimit = v.value.contextLimit;
+    }
+    if (v.value.outputLimit !== undefined) {
+      if (v.value.outputLimit === null) delete p.outputLimit;
+      else p.outputLimit = v.value.outputLimit;
+    }
+    if (v.value.apiKey !== undefined) {
+      this.providerKeys.set(id, v.value.apiKey);
+      void this.saveProviderKeys();
+    }
+    this.emitProviders();
+    return p;
+  }
+
+  deleteProvider(id: string) {
+    if (isCli(id)) throw new HttpError(403, `${cliLabel(id)} is a built-in coding agent and can't be deleted.`);
+    const idx = this.state.customProviders.findIndex((p) => p.id === id);
+    if (idx === -1) throw new HttpError(404, `No custom provider "${id}".`);
+    const users = this.state.agents.filter((a) => a.cli === id).map((a) => a.name);
+    const usesDefault = this.state.settings.defaultCli === id;
+    if (users.length || usesDefault) {
+      throw new HttpError(409, `${nameList([...users, ...(usesDefault ? ['the office default'] : [])])} still use this provider.`);
+    }
+    const [removed] = this.state.customProviders.splice(idx, 1);
+    this.providerKeys.delete(id);
+    void this.saveProviderKeys();
+    this.emitProviders();
+    return removed;
+  }
+
+  /** POST /api/providers/check: from the server, never the client, with a 5 s timeout (server/providers.ts). */
+  async checkProviderNow(input: ProviderInput): Promise<ProviderCheckResult> {
+    const baseURL = validBaseUrl(input.baseURL);
+    if (!baseURL) throw new HttpError(400, 'Base URL must be a valid http(s) URL.');
+    const apiKey = String(input.apiKey ?? '').trim();
+    const model = String(input.model ?? '').trim();
+    if (!apiKey || !model) throw new HttpError(400, 'An API key and a model are both required.');
+    return this.backend.checkProvider({ baseURL, apiKey, model });
   }
 
   /** The setup wizard: who you are, the company, and your CEO. */
@@ -5030,8 +5162,8 @@ export class Swarm {
   }
 
   /** "Codex · gpt-6 · high": what an agent runs, where it isn't the office default ('' when it all is). */
-  private setupLabel(x: { cli: AgentCli | ''; model: string; effort: EffortLevel | '' }) {
-    return [x.cli ? cliLabel(x.cli) : '', x.model, x.effort ? `${x.effort} effort` : ''].filter(Boolean).join(' · ');
+  private setupLabel(x: { cli: CliId | ''; model: string; effort: EffortLevel | '' }) {
+    return [x.cli ? cliLabel(x.cli, this.state.customProviders) : '', x.model, x.effort ? `${x.effort} effort` : ''].filter(Boolean).join(' · ');
   }
 
   /** A team change goes through: the new agent joins as set up here (the manager's changes win), or an agent leaves. */
@@ -5174,8 +5306,8 @@ export class Swarm {
     const repo = this.floorRepo(x.floor);
     const reason = String(x.reason ?? '').trim().slice(0, 600);
     if (!reason) throw new Error('Say why: the manager reads the reason.');
-    const cli: AgentCli | '' = isCli(x.cli) ? x.cli : '';
-    if (cli && !this.cliReady(cli)) throw new Error(`${cliLabel(cli)} isn't installed here. Installed: ${this.clis.filter((c) => c.installed).map((c) => c.id).join(', ') || 'none'}.`);
+    const cli: CliId | '' = isKnownCli(x.cli, this.state.customProviders) ? x.cli : '';
+    if (cli && !this.cliReady(cli)) throw new Error(`${cliLabel(cli, this.state.customProviders)} isn't installed here. Installed: ${this.clis.filter((c) => c.installed).map((c) => c.id).join(', ') || 'none'}.`);
     const max = this.state.settings.maxAgents;
     const team = this.teamNow(repo);
     const before = plannedSize(team);
@@ -5260,7 +5392,7 @@ export class Swarm {
     const ceo = a.role === 'ceo';
     const cli = ceo ? 'claude' : a.cli || this.state.settings.defaultCli;
     return {
-      codingAgent: cli,
+      codingAgent: cliLabel(cli, this.state.customProviders),
       model: ceo ? a.model || CEO_MODEL : this.modelFor(a, cli) || 'the coding agent default',
       effort: a.effort || (ceo ? CEO_EFFORT : this.state.settings.defaultEffort),
     };

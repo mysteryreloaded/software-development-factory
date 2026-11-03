@@ -15,7 +15,8 @@ import { openMeteo, type WeatherApi } from './weather.ts';
 import type { AgentTerminal } from './terminal.ts';
 import type { OpsHistory } from './metrics.ts';
 import type { UsageWarning } from './pacing.ts';
-import type { CliView, GhRepoSummary, IssueInfo, PullInfo } from '../shared/types.ts';
+import { checkProviderReal } from './providers.ts';
+import type { CliView, GhRepoSummary, IssueInfo, PullInfo, ProviderCheckResult } from '../shared/types.ts';
 
 /** Everything the swarm needs from the outside world. The demo backend fakes all of it. */
 export interface Backend {
@@ -88,6 +89,8 @@ export interface Backend {
   releaseClis(restart: boolean): Promise<void>;
   /** The coding-agent CLIs installed on this machine. */
   detectClis(): Promise<CliView[]>;
+  /** A custom provider's OpenAI-compatible endpoint (#113): is it reachable, and is the model listed. */
+  checkProvider(input: { baseURL: string; apiKey: string; model: string }): Promise<ProviderCheckResult>;
   /** Run a floor's app for the preview monitor (its own worktree, its own port). */
   previews: PreviewBackend;
   /** The running office's own folder and its launcher, for the office's self-update. */
@@ -166,6 +169,7 @@ export const realBackend: Backend = {
   hooksReady,
   releaseClis,
   detectClis,
+  checkProvider: (input) => checkProviderReal(input.baseURL, input.apiKey, input.model),
   previews: realPreviews,
   office: realOffice,
   voice: elevenLabs,

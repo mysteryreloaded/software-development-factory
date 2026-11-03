@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { run } from './exec.ts';
-import type { AgentCli, CliView, EffortLevel } from '../shared/types.ts';
+import type { AgentCli, CliId, CliView, CustomProvider, EffortLevel } from '../shared/types.ts';
 
 // The coding-agent CLIs an agent can run in its terminal, how to find them on this machine, and how to start one on
 // a task. Claude Code is fully wired in: its hooks report every tool call to the office.
@@ -23,7 +23,14 @@ export const CLIS: CliDef[] = [
 ];
 
 export const isCli = (v: unknown): v is AgentCli => CLIS.some((c) => c.id === v);
-export const cliLabel = (id: AgentCli) => CLIS.find((c) => c.id === id)?.label ?? id;
+
+/** `v` is a built-in CLI or one of `customProviders`' ids: the only `CliId`s the office actually knows how to run. */
+export const isKnownCli = (v: unknown, customProviders: readonly CustomProvider[] = []): v is CliId => isCli(v) || customProviders.some((p) => p.id === v);
+
+/** Which CLI a provider id actually runs: built-ins map to themselves, a custom provider (#113) always maps to OpenCode. */
+export const cliRuns = (id: CliId): AgentCli => (isCli(id) ? id : 'opencode');
+
+export const cliLabel = (id: CliId, customProviders: readonly CustomProvider[] = []) => CLIS.find((c) => c.id === id)?.label ?? customProviders.find((p) => p.id === id)?.name ?? id;
 
 /** The old office-wide `sessionLimit` (#112) becomes the same cap for every coding agent; 0 (or absent) becomes none. */
 export function migrateSessionLimits(old: number | undefined): Partial<Record<AgentCli, number>> {
@@ -31,11 +38,11 @@ export function migrateSessionLimits(old: number | undefined): Partial<Record<Ag
   return Object.fromEntries(CLIS.map((c) => [c.id, old]));
 }
 
-/** `updateSettings`'s per-agent session limits: only keys from `CLIS`, whole numbers; 0 or missing drops the key. */
-export function clampSessionLimits(patch: Record<string, unknown>): Partial<Record<AgentCli, number>> {
-  const out: Partial<Record<AgentCli, number>> = {};
+/** `updateSettings`'s per-agent session limits: only known ids (`knownIds`: built-ins and custom providers), whole numbers; 0 or missing drops the key. */
+export function clampSessionLimits(patch: Record<string, unknown>, knownIds: readonly string[] = CLIS.map((c) => c.id)): Partial<Record<CliId, number>> {
+  const out: Partial<Record<CliId, number>> = {};
   for (const [k, v] of Object.entries(patch)) {
-    if (!isCli(k)) continue;
+    if (!knownIds.includes(k)) continue;
     const n = Math.max(0, Math.round(Number(v)) || 0);
     if (n > 0) out[k] = n;
   }
@@ -117,11 +124,12 @@ function bundledClaude(): string | null {
   return null;
 }
 
-/** How to start a CLI: the program and the arguments that come before the office's own. */
-export function commandFor(id: AgentCli): { file: string; args: string[] } | null {
-  const bundled = id === 'claude' ? bundledClaude() : null;
+/** How to start a CLI: the program and the arguments that come before the office's own. A custom provider id runs OpenCode. */
+export function commandFor(id: CliId): { file: string; args: string[] } | null {
+  const runs = cliRuns(id);
+  const bundled = runs === 'claude' ? bundledClaude() : null;
   if (bundled) return { file: bundled, args: [] };
-  const def = CLIS.find((c) => c.id === id);
+  const def = CLIS.find((c) => c.id === runs);
   const found = def && resolveCommand(def.command);
   if (!found) return null;
   if (WIN && /\.(cmd|bat)$/i.test(found)) {
@@ -155,12 +163,12 @@ export async function detectClis(): Promise<CliView[]> {
  * Code, so a session made by another CLI can't run there at all.
  */
 export function resumeChoice(input: {
-  agentCli: AgentCli;
+  agentCli: CliId;
   inTerminal: boolean;
   resumeId?: string;
-  resumeCli?: AgentCli | null;
+  resumeCli?: CliId | null;
   live?: boolean;
-}): { cli: AgentCli; resumeId?: string; dropped: boolean } {
+}): { cli: CliId; resumeId?: string; dropped: boolean } {
   const { agentCli, inTerminal, resumeId, resumeCli, live } = input;
   if (!resumeId) return { cli: agentCli, dropped: false };
   if (!inTerminal) return resumeCli && resumeCli !== 'claude' ? { cli: agentCli, dropped: true } : { cli: agentCli, resumeId, dropped: false };
@@ -187,6 +195,8 @@ export interface LaunchContext {
   plugin: string; // file URL of the folder the office wrote the OpenCode 2 plugin to (OpenCode 2 loads a local plugin from a directory, not a file)
   /** The Playwright MCP server, when the floor tests in a browser. Claude Code gets it through its MCP config file. */
   browser: { command: string; args: string[] } | null;
+  /** A custom provider (#113): wired into OpenCode's config on top of everything else an OpenCode agent gets. null/absent for a built-in CLI. */
+  provider?: { id: string; name: string; baseURL: string; apiKey: string; model: string; contextLimit?: number; outputLimit?: number } | null;
 }
 
 export interface Launch {
@@ -215,8 +225,19 @@ export function codexHookCommand(node: string, script: string, win = WIN): strin
  */
 export const CROSS_TURN_TOOLS = ['Monitor', 'ScheduleWakeup', 'CronCreate', 'CronDelete', 'CronList', 'RemoteTrigger'];
 
-export function launchArgs(id: AgentCli, ctx: LaunchContext): Launch {
-  switch (id) {
+/** The OpenCode config block for a custom provider (#113): the shape the installed OpenCode accepts for an openai-compatible endpoint. */
+export function customProviderOpencodeConfig(p: { id: string; name: string; baseURL: string; apiKey: string; model: string; contextLimit?: number; outputLimit?: number }) {
+  const limit = p.contextLimit || p.outputLimit ? { limit: { ...(p.contextLimit ? { context: p.contextLimit } : {}), ...(p.outputLimit ? { output: p.outputLimit } : {}) } } : {};
+  return {
+    name: p.name,
+    package: '@opencode/ai/providers/openai-compatible',
+    settings: { baseURL: p.baseURL, apiKey: p.apiKey },
+    models: { [p.model]: { name: p.model, modelID: p.model, ...limit, capabilities: { tools: true } } },
+  };
+}
+
+export function launchArgs(id: CliId, ctx: LaunchContext): Launch {
+  switch (cliRuns(id)) {
     case 'claude': {
       const disallowed = ['AskUserQuestion', 'EnterPlanMode', 'ExitPlanMode', ...CROSS_TURN_TOOLS, ...(ctx.role === 'ceo' ? ['Bash', 'PowerShell', 'NotebookEdit'] : [])];
       const args = [
@@ -267,6 +288,7 @@ export function launchArgs(id: AgentCli, ctx: LaunchContext): Launch {
         autoupdate: false, // several agents starting at once must not each reinstall it
         permission: { edit: 'allow', bash: 'allow', webfetch: 'allow' }, // it can't stop to ask either
         ...(ctx.browser ? { mcp: { playwright: { type: 'local', command: [ctx.browser.command, ...ctx.browser.args], enabled: true } } } : {}),
+        ...(ctx.provider ? { providers: { [ctx.provider.id]: customProviderOpencodeConfig(ctx.provider) } } : {}),
       };
       // No project argument: it starts in its terminal's folder, and a desk path in its command line would make the
       // desk clean-up take it for a leftover.

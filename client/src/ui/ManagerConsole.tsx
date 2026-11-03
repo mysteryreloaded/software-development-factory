@@ -3,7 +3,7 @@ import { TeamStats } from './CareerCard';
 import { api } from '../api';
 import { PreviewPill, PreviewSettings } from './AppViewer';
 import { agentsOnRepo, pendingRequests, useStore, type ManagerTab } from '../store';
-import { CEO_ID, DEFAULT_MAX_AGENTS, FLOOR_SEATS, type AgentCli, type EffortLevel, type OfficeUpdateView, type RepoView } from '../../../shared/types';
+import { CEO_ID, DEFAULT_MAX_AGENTS, FLOOR_SEATS, type CliId, type EffortLevel, type OfficeUpdateView, type RepoView } from '../../../shared/types';
 import { MESSAGE_MAX } from '../../../shared/message';
 import { MAX_FILES } from '../../../shared/attachments';
 import { CLAUDE_MODELS, modelSuggestions } from '../../../shared/models';
@@ -391,7 +391,7 @@ function CeoTab() {
 
 interface NewAgent {
   name: string;
-  cli: AgentCli | '';
+  cli: CliId | '';
   model: string;
   effort: EffortLevel | '';
 }
@@ -419,7 +419,7 @@ function AddAgent({ repo, size }: { repo: RepoView; size: number }) {
     <div className="row wrap">
       <input value={draft.name} onChange={(e) => edit({ name: e.target.value })} placeholder="Name (optional)" maxLength={24} aria-label={`New agent's name on floor ${repo.floor}`} style={{ maxWidth: 150 }} />
       {terminal && (
-        <select value={draft.cli} onChange={(e) => edit({ cli: e.target.value as AgentCli | '' })} aria-label="New agent's coding agent" style={{ width: 'auto' }}>
+        <select value={draft.cli} onChange={(e) => edit({ cli: e.target.value as CliId | '' })} aria-label="New agent's coding agent" style={{ width: 'auto' }}>
           <option value="">{cliName(clis, settings.defaultCli)} (default)</option>
           <CliOptions clis={clis} />
         </select>
@@ -656,7 +656,7 @@ function SettingsTab() {
         {terminal && (
           <label className="field">
             <span>Default coding agent</span>
-            <select value={settings.defaultCli} onChange={(e) => set({ defaultCli: e.target.value as AgentCli })}>
+            <select value={settings.defaultCli} onChange={(e) => set({ defaultCli: e.target.value as CliId })}>
               <CliOptions clis={clis} />
             </select>
           </label>

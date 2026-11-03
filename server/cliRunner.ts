@@ -25,7 +25,7 @@ import {
 } from './agentRunner.ts';
 import type { OfficeTools } from './ceo.ts';
 import type { AgentTerminal } from './terminal.ts';
-import type { AgentCli } from '../shared/types.ts';
+import type { CliId } from '../shared/types.ts';
 import { parseRateLimits } from '../shared/usage.ts';
 
 // One agent session as the real CLI in a pseudo-terminal: the same contract as the Agent SDK runner (log lines, the
@@ -158,7 +158,7 @@ function quietly(fn: () => void) {
  */
 interface LiveCli {
   agentId: string;
-  cli: AgentCli;
+  cli: CliId;
   term: AgentTerminal;
   proc: Pty | null;
   token: string;
@@ -209,7 +209,7 @@ function endLive(live: LiveCli): Promise<void> {
 /** What the keeper holds with a CLI's terminal, so the office can pick it up again after a restart. */
 interface CliMeta {
   agentId: string;
-  cli: AgentCli;
+  cli: CliId;
   token: string;
   dir: string;
   resumeId: string | null;
@@ -247,7 +247,7 @@ function waitAtPrompt(l: LiveCli) {
 
 export interface ReconnectedCli {
   agentId: string;
-  cli: AgentCli;
+  cli: CliId;
   resumeId: string | null;
   /** It was working on a task: the office should follow its session again. */
   busy: boolean;
@@ -675,6 +675,7 @@ export function startCliSession(opts: SessionOptions, callbacks: SessionCallback
     codexHook: path.join(BIN_DIR, 'codex-hook.cjs'),
     plugin: pathToFileURL(path.join(BIN_DIR, 'opencode-plugin')).href,
     browser,
+    provider: opts.provider,
   });
 
   // Each agent must be a clean instance on the account its CLI is logged into: no API keys (they would switch Claude

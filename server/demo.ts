@@ -848,6 +848,7 @@ export function createDemoBackend(scale: DemoScale | null = null): Backend {
     releaseClis: async () => undefined,
     detectClis: async () =>
       CLIS.map((c) => ({ id: c.id, label: c.label, installed: true, version: 'demo', integrated: c.integrated })),
+    checkProvider: demoCheckProvider,
     previews: demoPreviews,
     office: demoOffice,
     voice: demoVoice,
@@ -1453,6 +1454,18 @@ const demoNotify: NotifyTransport = {
     console.log(`🔔 demo ${channel}${ok ? '' : ' (fails: "bad" address)'} would get: ${text.replace(/\n/g, ' ⏎ ')}`);
     return ok ? 200 : 404;
   },
+};
+
+// ---------- custom providers (#113) ----------
+
+/**
+ * No network: a base URL containing "bad" is unreachable, a key containing "wrong" is rejected (401), a model
+ * containing "missing" isn't listed; everything else is reachable with its model listed.
+ */
+const demoCheckProvider: Backend['checkProvider'] = async ({ baseURL, apiKey, model }) => {
+  if (/bad/i.test(baseURL)) return { reachable: false, status: null, modelListed: null, error: 'Not reachable (demo)' };
+  if (/wrong/i.test(apiKey)) return { reachable: true, status: 401, modelListed: null, error: 'Unexpected response (401) (demo)' };
+  return { reachable: true, status: 200, modelListed: !/missing/i.test(model), error: null };
 };
 
 // ---------- weather ----------

@@ -2,7 +2,7 @@ import { useStore } from './store';
 import type { PongResult } from '../../shared/pong';
 import type { ParsedPenaltyResult } from '../../shared/penalty';
 import type { AgentStyle } from '../../shared/looks';
-import type { AgentCli, AgentPromptView, AgentView, AttachmentView, DoctorFinding, DoctorFix, EffortLevel, GhRepoSummary, NotifyChannel, NotifyChannelsView, NotifyWebhook, OfficeUpdateView, PreviewView, ProjectFolderView, PrPreviewView, RepoView, SwarmSettings, UsageView, VoiceCacheView, VoiceOption } from '../../shared/types';
+import type { CliId, AgentPromptView, AgentView, AttachmentView, DoctorFinding, DoctorFix, EffortLevel, GhRepoSummary, NotifyChannel, NotifyChannelsView, NotifyWebhook, OfficeUpdateView, PreviewView, ProjectFolderView, PrPreviewView, RepoView, SwarmSettings, UsageView, VoiceCacheView, VoiceOption } from '../../shared/types';
 import type { JournalChunk, JournalDayView } from '../../shared/journal';
 import type { DecorItem, ProgressView } from '../../shared/progress';
 
@@ -42,7 +42,7 @@ const r = (repoId: string) => `/api/repos/${encodeURIComponent(repoId)}`;
 
 /** An agent's coding agent, model and effort ('' = the office default). */
 export interface AgentSetupPatch {
-  cli?: AgentCli | '';
+  cli?: CliId | '';
   model?: string;
   effort?: EffortLevel | '';
 }

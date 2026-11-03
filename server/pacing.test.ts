@@ -161,6 +161,13 @@ describe('the brake is Claude’s only (#97)', () => {
     expect(sessionCli(a('agent', 'opencode'), 'claude', false)).toBe('claude'); // the SDK runtime always runs Claude Code
   });
 
+  it('a custom provider (#113) is treated like opencode: not Claude, and counted against its own id', () => {
+    const a = (cli: string) => ({ role: 'agent' as const, cli });
+    expect(usesClaude(a('local-qwen'), 'claude', true)).toBe(false);
+    expect(sessionCli(a('local-qwen'), 'claude', true)).toBe('local-qwen');
+    expect(sessionCli(a(''), 'local-qwen', true)).toBe('local-qwen'); // the office default is a custom provider
+  });
+
   it('cliAtLimit: full only with a limit set and reached, never with none', () => {
     expect(cliAtLimit(3, 3)).toBe(true);
     expect(cliAtLimit(3, 2)).toBe(false);
