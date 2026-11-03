@@ -1264,9 +1264,24 @@ export class Swarm {
     return this.state.agents.filter((a) => BUSY.includes(a.status)).length;
   }
 
-  /** The CLI a session for this agent counts against (server/pacing.ts's sessionCli). */
+  /** The CLI a brand-new session for this agent would run on (server/pacing.ts's sessionCli). */
   private agentCli(a: { role: AgentRole; cli: AgentCli | '' }): AgentCli {
     return sessionCli(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals);
+  }
+
+  /**
+   * Which CLI resuming this agent (`resumeId`, or their own `sessionCli` for a typed/live follow-up) actually runs
+   * on: resumeChoice's own rule, the same one startAgentSession's sessionRuntime applies.
+   */
+  private nextCli(a: PersistedAgent, resumeId?: string, resumeCli?: AgentCli | null, live = false): AgentCli {
+    const inTerminal = this.state.settings.runtime === 'terminal' && this.backend.terminals;
+    return resumeChoice({ agentCli: this.agentCli(a), inTerminal, resumeId, resumeCli: resumeCli ?? a.sessionCli, live }).cli;
+  }
+
+  /** The CLI a busy agent's session counts against right now: its running session's own CLI, or (not started yet) the one it will get. */
+  private busyCli(a: PersistedAgent): AgentCli {
+    const rt = this.agentRt.get(a.id);
+    return (rt?.session && rt.cli) || this.agentCli(a);
   }
 
   /** The pacing cap's count: the busy sessions that draw on Claude's shared subscription. */
@@ -1276,7 +1291,7 @@ export class Swarm {
 
   /** Busy sessions counting against one coding agent's limit. */
   private runningByCli(cli: AgentCli) {
-    return this.state.agents.filter((a) => BUSY.includes(a.status) && this.agentCli(a) === cli).length;
+    return this.state.agents.filter((a) => BUSY.includes(a.status) && this.busyCli(a) === cli).length;
   }
 
   /** Every coding agent's busy sessions right now, for the snapshot and company_status. */
@@ -2352,8 +2367,7 @@ export class Swarm {
     );
   }
 
-  private ensureSlot(a: PersistedAgent) {
-    const cli = this.agentCli(a);
+  private ensureSlot(a: PersistedAgent, cli: AgentCli = this.agentCli(a)) {
     const limit = this.state.settings.sessionLimits[cli];
     if (this.cliFull(cli)) {
       throw new HttpError(429, `All ${limit} ${cliLabel(cli)} session slots are busy. Raise or clear its session limit in the manager's console, or wait.`);
@@ -3382,7 +3396,7 @@ export class Swarm {
     }
     if (a.status === 'preparing') throw new HttpError(409, `${a.name} is still setting up; try again in a moment`);
     if (!a.sessionId || !a.branch || a.task === 'qa') throw new HttpError(409, `${a.name} has no session to continue. Give them an issue or a PR to test instead.`);
-    this.ensureSlot(a);
+    this.ensureSlot(a, this.nextCli(a, a.sessionId, undefined, typed));
     this.appendLog(a, [{ kind: 'manager', text: `▶ Manager: ${forAgent}` }, ...chips]);
     const cwd = this.deskOf(a, repo);
     a.lastError = null;
