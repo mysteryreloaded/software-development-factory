@@ -4,6 +4,7 @@ import { floorPrCounts, repoOnFloor, usePhoneBadge, useStore } from '../store';
 import { CEO_ID } from '../../../shared/types';
 import { HeldHint } from './HeldHint';
 import { CareerPeek } from './CareerCard';
+import { sessionsLabel } from './sessionCounts';
 import { CoinChip } from './CoinChip';
 import './progressProbe';
 import './doctorProbe';
@@ -119,6 +120,8 @@ export function HUD() {
   const repos = useStore((s) => s.repos);
   const agents = useStore((s) => s.agents);
   const settings = useStore((s) => s.settings);
+  const clis = useStore((s) => s.clis);
+  const sessionsRunning = useStore((s) => s.sessionsRunning);
   const connected = useStore((s) => s.connected);
   const restarting = useStore((s) => s.restarting);
   const replaying = useStore((s) => s.replaying);
@@ -147,7 +150,6 @@ export function HUD() {
   const roof = floor === ROOF;
   const scope = useRoof((s) => s.telescope); // the telescope's eyepiece has its own crosshair
   const repo = floor === 0 || roof ? null : repoOnFloor(repos, floor);
-  const running = useMemo(() => Object.values(agents).filter((a) => a.status === 'working' || a.status === 'preparing').length, [agents]);
   const floorAgents = repo ? Object.values(agents).filter((a) => a.repoId === repo.id) : [];
   const qa = useStore((s) => s.qa);
   const prs = useMemo(() => (repo ? floorPrCounts(repo, qa) : null), [repo, qa]);
@@ -190,7 +192,7 @@ export function HUD() {
             {demo && <span className="pill pill-demo">DEMO</span>}
             <span className={`pill ${replaying ? 'pill-replay' : connected ? 'pill-ok' : restarting ? 'pill-demo' : 'pill-bad'}`}>{replaying ? '▶ replay' : connected ? '● live' : restarting ? '○ restarting' : '○ reconnecting'}</span>
             <span className="pill">
-              ⚙️ {settings.sessionLimit ? `${running}/${settings.sessionLimit}` : running} sessions
+              ⚙️ {sessionsLabel(clis, sessionsRunning, settings.sessionLimits)} sessions
             </span>
             <CoinChip />
             {user && <span className="pill">🐙 {user}</span>}

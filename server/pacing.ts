@@ -25,14 +25,23 @@ export interface UsageClock {
 }
 
 /**
- * Whether a session uses Claude. In the terminal runtime, the CEO always runs Claude, an agent their own CLI or the
- * office's default (the same rule as the swarm's sessionRuntime). In the SDK runtime the Agent SDK runs Claude Code,
- * so every session is Claude's whatever CLI the agent has (`inTerminal` false). Only these sessions draw on Claude's
- * shared subscription.
+ * Which CLI a session counts against. In the terminal runtime, the CEO always runs Claude Code, an agent their own
+ * CLI or the office's default (the same rule as the swarm's sessionRuntime). In the SDK runtime the Agent SDK runs
+ * Claude Code, so every session is Claude's whatever CLI the agent has (`inTerminal` false).
  */
+export function sessionCli(facts: { role: AgentRole; cli: AgentCli | '' }, defaultCli: AgentCli, inTerminal: boolean): AgentCli {
+  if (!inTerminal) return 'claude';
+  return facts.role === 'ceo' ? 'claude' : facts.cli || defaultCli;
+}
+
+/** Whether a session uses Claude. Only these sessions draw on Claude's shared subscription. */
 export function usesClaude(facts: { role: AgentRole; cli: AgentCli | '' }, defaultCli: AgentCli, inTerminal: boolean): boolean {
-  if (!inTerminal) return true;
-  return (facts.role === 'ceo' ? 'claude' : facts.cli || defaultCli) === 'claude';
+  return sessionCli(facts, defaultCli, inTerminal) === 'claude';
+}
+
+/** True when a coding agent's limit is set (> 0) and its running sessions have reached it. */
+export function cliAtLimit(limit: number | undefined, running: number): boolean {
+  return !!limit && limit > 0 && running >= limit;
 }
 
 /**

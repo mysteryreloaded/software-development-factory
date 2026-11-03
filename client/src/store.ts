@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CEO_ID, DEFAULT_DOG_NAME, DEFAULT_MAX_AGENTS, type AgentView, type CeoInfo, type CliView, type DoctorFinding, type HireRequestView, type LogLine, type NotifyChannelsView, type OfficeUpdateView, type OpsView, type PenaltyBoard, type PhoneMessage, type PongRow, type PrPreviewView, type QaView, type RepoView, type ServerEvent, type SwarmSettings, type TickerItem, type UsageView, type VisitorView, type VoiceCacheView, type WorldSnapshot } from '../../shared/types';
+import { CEO_ID, DEFAULT_DOG_NAME, DEFAULT_MAX_AGENTS, type AgentCli, type AgentView, type CeoInfo, type CliView, type DoctorFinding, type HireRequestView, type LogLine, type NotifyChannelsView, type OfficeUpdateView, type OpsView, type PenaltyBoard, type PhoneMessage, type PongRow, type PrPreviewView, type QaView, type RepoView, type ServerEvent, type SwarmSettings, type TickerItem, type UsageView, type VisitorView, type VoiceCacheView, type WorldSnapshot } from '../../shared/types';
 import { blockers } from '../../shared/issues';
 import { latestListed } from '../../shared/watch';
 import { DEFAULT_WEATHER, DEFAULT_WORLD_EVENTS, EMPTY_WEATHER_VIEW, type WeatherView } from '../../shared/outside';
@@ -110,6 +110,7 @@ interface State {
   machinesRoot: string;
   settings: SwarmSettings;
   clis: CliView[]; // the coding-agent CLIs installed where the office runs
+  sessionsRunning: Partial<Record<AgentCli, number>>; // busy sessions right now, per coding agent (server/pacing.ts's sessionCli)
   repos: RepoView[];
   agents: Record<string, Agent>;
   logs: Record<string, LogLine[]>; // only for the agents this tab watches (shared/watch.ts): its floor and open panels
@@ -218,7 +219,7 @@ export const useStore = create<State>((set, get) => ({
   machinesRoot: '',
   // Until the server's snapshot arrives; setupDone stays true so the wizard doesn't flash while loading.
   settings: {
-    sessionLimit: 0,
+    sessionLimits: {},
     defaultModel: 'claude-opus-5-5',
     defaultEffort: 'medium',
     runtime: 'terminal',
@@ -243,6 +244,7 @@ export const useStore = create<State>((set, get) => ({
     previewAddress: '',
   },
   clis: [],
+  sessionsRunning: {},
   repos: [],
   agents: {},
   logs: {},
@@ -331,6 +333,7 @@ export const useStore = create<State>((set, get) => ({
           ops: d.ops ?? EMPTY_OPS,
           doctor: d.doctor ?? [],
           clis: d.clis ?? [],
+          sessionsRunning: d.sessionsRunning ?? {},
           voiceKeySet: d.voiceKeySet ?? false,
           voiceKeyHint: d.voiceKeyHint ?? '',
           voiceCache: d.voiceCache ?? { clips: 0, bytes: 0, saved: [] },
@@ -454,6 +457,9 @@ export const useStore = create<State>((set, get) => ({
         break;
       case 'clis':
         set({ clis: ev.clis });
+        break;
+      case 'sessionsRunning':
+        set({ sessionsRunning: ev.sessionsRunning });
         break;
       case 'request': {
         const prev = get().requests.find((r) => r.id === ev.request.id);

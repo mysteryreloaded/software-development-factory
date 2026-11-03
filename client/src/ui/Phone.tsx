@@ -18,6 +18,7 @@ import { HolidayStrip } from './HolidayStrip';
 import { replayKind } from './voiceQueue';
 import { CLAUDE_MODELS, effectiveModel, modelSuggestions } from '../../../shared/models';
 import { useTouch } from '../world/touch';
+import { sessionsLabel, sessionsTotal } from './sessionCounts';
 
 // The manager's phone: text the CEO, decide on team changes, see the whole company at a glance
 // without walking anywhere, and play a game while the team works. Press P anywhere in the office.
@@ -371,7 +372,8 @@ export function Chat({ autoFocus = true }: { autoFocus?: boolean }) {
   const ceo = useStore((s) => s.agents[CEO_ID]);
   const info = useStore((s) => s.ceo);
   const settings = useStore((s) => s.settings);
-  const running = useStore((s) => Object.values(s.agents).filter(isBusy).length);
+  const clis = useStore((s) => s.clis);
+  const claudeRunning = useStore((s) => s.sessionsRunning.claude ?? 0);
   const text = useStore((s) => s.ceoDraft);
   const setText = useStore((s) => s.setCeoDraft);
   const scroller = useRef<HTMLDivElement>(null);
@@ -406,8 +408,8 @@ export function Chat({ autoFocus = true }: { autoFocus?: boolean }) {
         ? 'typing…'
         : `busy: ${info.job?.label ?? 'working'}`
       : chatQueued
-        ? settings.sessionLimit && running >= settings.sessionLimit
-          ? `will reply when a session slot frees up (${running}/${settings.sessionLimit} busy)`
+        ? settings.sessionLimits.claude && claudeRunning >= settings.sessionLimits.claude
+          ? `will reply when a ${cliLabel(clis, 'claude')} session slot frees up (${claudeRunning}/${settings.sessionLimits.claude} busy)`
           : 'reading your message…'
         : info.queue.length
           ? `next up: ${info.queue[0].label}`
@@ -469,11 +471,13 @@ function useCompany() {
   const qa = useStore((s) => s.qa);
   const requests = useStore((s) => s.requests);
   const settings = useStore((s) => s.settings);
+  const clis = useStore((s) => s.clis);
+  const sessionsRunning = useStore((s) => s.sessionsRunning);
   const info = useStore((s) => s.ceo);
   return useMemo(() => {
     const staff = Object.values(agents).filter((a) => a.role !== 'ceo');
     const ceo = agents[CEO_ID];
-    const running = Object.values(agents).filter(isBusy).length;
+    const running = sessionsTotal(sessionsRunning);
     const floors = repos.map((r) => {
       const team = staff.filter((a) => a.repoId === r.id);
       const counts = floorPrCounts(r, qa);
@@ -506,13 +510,7 @@ function useCompany() {
     if (pending) report.push({ icon: '👥', text: `${pending} team change${pending === 1 ? ' is' : 's are'} waiting in Team.`, tone: 'warn' });
     report.push({
       icon: '⚙️',
-      text: settings.sessionLimit
-        ? running
-          ? `${running} of ${settings.sessionLimit} session slots are busy right now.`
-          : `Nobody is working at the moment (${settings.sessionLimit} session slots free).`
-        : running
-          ? `${running} session${running === 1 ? ' is' : 's are'} running right now.`
-          : 'Nobody is working at the moment.',
+      text: running ? `${sessionsLabel(clis, sessionsRunning, settings.sessionLimits)} sessions busy right now.` : 'Nobody is working at the moment.',
     });
     for (const f of floors) {
       if (f.issues > 0 && !f.repo.autoAssign && f.working === 0 && f.idle > 0) {
@@ -535,8 +533,8 @@ function useCompany() {
       });
     }
     if (floors.length === 0) report.splice(0, report.length, { icon: '👋', text: "No projects yet. Connect a repo in the manager's office (lobby, back left) and the CEO will staff it." });
-    return { floors, staff: staff.length, running, max: settings.sessionLimit, issues: sum('issues'), prs: sum('prs'), report };
-  }, [repos, agents, qa, requests, settings, info]);
+    return { floors, staff: staff.length, sessionsLabel: sessionsLabel(clis, sessionsRunning, settings.sessionLimits), issues: sum('issues'), prs: sum('prs'), report };
+  }, [repos, agents, qa, requests, settings, clis, sessionsRunning, info]);
 }
 
 /** Every panel, a key press away: the phone is where keyboard and screen reader users reach the rest of the office. */
@@ -574,7 +572,7 @@ function Company() {
     ['📋', c.issues, 'open issues'],
     ['🔀', c.prs, 'open PRs'],
     ['👥', c.staff, 'on staff'],
-    ['⚙️', c.max ? `${c.running}/${c.max}` : `${c.running}`, 'working now'],
+    ['⚙️', c.sessionsLabel, 'working now'],
   ];
   return (
     <div className="phone-scroll">

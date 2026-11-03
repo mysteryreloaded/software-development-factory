@@ -2739,6 +2739,19 @@ input.inline:focus {
   margin: 6px 0;
 }
 
+/* ManagerConsole.tsx's Settings → Session limits: one row per coding agent */
+.session-limit-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 400;
+}
+.session-limit-row input {
+  width: 90px;
+}
+
 /* ui/VoiceSettings.tsx: the ElevenLabs voice picker */
 .voice-clips,
 .listen-settings {

@@ -691,13 +691,24 @@ function SettingsTab() {
             ? 'Each agent can use their own coding agent, model and effort (Team tab); the CEO always runs Claude Code. Claude Code reports every step; Codex and OpenCode are experimental: the office sees their task rather than each step.'
             : 'The Agent SDK runs Claude Code. Each agent can use their own model and effort (Team tab).'}
         </p>
-        <label className="field">
-          <span>Session limit</span>
-          <input type="number" min={0} placeholder="No limit" defaultValue={settings.sessionLimit || ''} onBlur={(e) => set({ sessionLimit: Number(e.target.value) || 0 })} />
-        </label>
+        <div className="field session-limits">
+          <span>Session limits</span>
+          {clis.map((c) => (
+            <label key={c.id} className="session-limit-row">
+              <span>{c.label}</span>
+              <input
+                type="number"
+                min={0}
+                placeholder="No limit"
+                defaultValue={settings.sessionLimits[c.id] || ''}
+                onBlur={(e) => set({ sessionLimits: { ...settings.sessionLimits, [c.id]: Number(e.target.value) || 0 } })}
+              />
+            </label>
+          ))}
+        </div>
         <p className="muted small">
-          Leave empty so every agent with work runs at once. Agents on the same coding agent share its subscription's usage limits, and each one is its own process on this PC, so set a limit if
-          you hit either.
+          Leave a coding agent empty so every agent on it with work runs at once. Agents on the same coding agent share its subscription's usage limits, and each one is its own process on this PC,
+          so set a limit if you hit either.
         </p>
         <label className="field">
           <span>Sessions while pacing</span>
