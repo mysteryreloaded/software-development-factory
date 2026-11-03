@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentCli, AgentRole } from '../shared/types.ts';
-import { clampPacingSessions, clock, limitExempt, mayStart, pacingMessage, resumeRefusal, usageLabel, usageView, usesClaude, waived, warningView, type WorkKind } from './pacing.ts';
+import { cliAtLimit, clampPacingSessions, clock, limitExempt, mayStart, pacingMessage, resumeRefusal, sessionCli, usageLabel, usageView, usesClaude, waived, warningView, type WorkKind } from './pacing.ts';
 
 const NOW = new Date(2026, 8, 28, 12, 0).getTime();
 const HOUR = 60 * 60_000;
@@ -151,6 +151,21 @@ describe('the brake is Claude’s only (#97)', () => {
     expect(usesClaude(a('agent', 'opencode'), 'opencode', sdk)).toBe(true); // even when the office default is opencode
     expect(usesClaude(a('agent', 'codex'), 'claude', sdk)).toBe(true);
     expect(usesClaude(a('ceo', 'opencode'), 'claude', sdk)).toBe(true);
+  });
+
+  it('sessionCli is usesClaude’s rule, naming the CLI a session counts against (#112)', () => {
+    const a = (role: AgentRole, cli: AgentCli | '') => ({ role, cli });
+    expect(sessionCli(a('ceo', 'opencode'), 'opencode', true)).toBe('claude'); // the CEO always runs Claude Code
+    expect(sessionCli(a('agent', 'codex'), 'claude', true)).toBe('codex'); // the agent's own CLI
+    expect(sessionCli(a('agent', ''), 'opencode', true)).toBe('opencode'); // the office default
+    expect(sessionCli(a('agent', 'opencode'), 'claude', false)).toBe('claude'); // the SDK runtime always runs Claude Code
+  });
+
+  it('cliAtLimit: full only with a limit set and reached, never with none', () => {
+    expect(cliAtLimit(3, 3)).toBe(true);
+    expect(cliAtLimit(3, 2)).toBe(false);
+    expect(cliAtLimit(0, 5)).toBe(false); // 0 = no limit
+    expect(cliAtLimit(undefined, 5)).toBe(false); // missing = no limit
   });
 
   it('exempts a failure from the strikes only while paused and only for a Claude session', () => {

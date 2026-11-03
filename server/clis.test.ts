@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { CODEX_HOOK_EVENTS, codexHookCommand, CROSS_TURN_TOOLS, hookReviewKey, interruptions, launchArgs, oneAtATime, OPENCODE_PLUGIN_FILES, resumeChoice, trustKey, unwrapCmdShim, type LaunchContext } from './clis.ts';
+import { CLIS, clampSessionLimits, CODEX_HOOK_EVENTS, codexHookCommand, CROSS_TURN_TOOLS, hookReviewKey, interruptions, launchArgs, migrateSessionLimits, oneAtATime, OPENCODE_PLUGIN_FILES, resumeChoice, trustKey, unwrapCmdShim, type LaunchContext } from './clis.ts';
 import { describeOfficeTool, describeTool, newScreenshots, screenshotFile, summariseResult } from './agentRunner.ts';
 
 const dir = path.join(os.tmpdir(), 'npm-global');
@@ -27,6 +27,27 @@ describe('unwrapCmdShim', () => {
 
   it('gives up on shims it does not recognise', () => {
     expect(unwrapCmdShim(path.join(dir, 'x.cmd'), '@echo off\r\necho hi\r\n')).toBeNull();
+  });
+});
+
+describe('migrateSessionLimits (#112)', () => {
+  it('applies an old office-wide limit to every coding agent', () => {
+    expect(migrateSessionLimits(3)).toEqual(Object.fromEntries(CLIS.map((c) => [c.id, 3])));
+  });
+
+  it('becomes no limits for 0 or no old value', () => {
+    expect(migrateSessionLimits(0)).toEqual({});
+    expect(migrateSessionLimits(undefined)).toEqual({});
+  });
+});
+
+describe('clampSessionLimits', () => {
+  it('keeps only known CLI keys, clamped to whole numbers', () => {
+    expect(clampSessionLimits({ claude: 3.6, opencode: -1, bogus: 5 })).toEqual({ claude: 4 });
+  });
+
+  it('drops a zero or non-numeric entry (no limit)', () => {
+    expect(clampSessionLimits({ claude: 0, codex: 'nope' })).toEqual({});
   });
 });
 

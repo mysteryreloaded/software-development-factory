@@ -239,7 +239,7 @@ describe('planDependencies (set_dependencies)', () => {
 });
 
 describe('planning guidance', () => {
-  const system = ceoSystemPrompt({ name: 'Luna', company: 'Acme', manager: 'Sam', notesFile: 'notes.md', sessionLimit: 0, maxAgents: 10, scaling: 'approve' });
+  const system = ceoSystemPrompt({ name: 'Luna', company: 'Acme', manager: 'Sam', notesFile: 'notes.md', sessionLimits: {}, maxAgents: 10, scaling: 'approve' });
   const floor = { floor: 2, fullName: 'acme/app', clone: '/clones/app', mission: 'Add voice messages', backlog: 0 };
   const plan = ceoJobPrompt({ kind: 'plan', repoId: 'r1', at: 0 }, floor);
   const review = ceoJobPrompt({ kind: 'review', at: 0 }, null);
@@ -273,7 +273,7 @@ describe('planning guidance', () => {
 });
 
 describe('team guidance', () => {
-  const prompt = (scaling: 'approve' | 'auto') => ceoSystemPrompt({ name: 'Luna', company: 'Acme', manager: 'Sam', notesFile: 'notes.md', sessionLimit: 0, maxAgents: 8, scaling });
+  const prompt = (scaling: 'approve' | 'auto') => ceoSystemPrompt({ name: 'Luna', company: 'Acme', manager: 'Sam', notesFile: 'notes.md', sessionLimits: {}, maxAgents: 8, scaling });
 
   it('sizes teams from throughput, within the floor max, and keeps one agent', () => {
     expect(prompt('approve')).toContain("Size each floor's team from its throughput");
@@ -295,7 +295,7 @@ describe('team guidance', () => {
 });
 
 describe('triage', () => {
-  const system = ceoSystemPrompt({ name: 'Luna', company: 'Acme', manager: 'Sam', notesFile: 'notes.md', sessionLimit: 0, maxAgents: 10, scaling: 'approve' });
+  const system = ceoSystemPrompt({ name: 'Luna', company: 'Acme', manager: 'Sam', notesFile: 'notes.md', sessionLimits: {}, maxAgents: 10, scaling: 'approve' });
   const floor = { floor: 2, fullName: 'acme/app', clone: '/clones/app', mission: '', backlog: 3 };
   const job: CeoJob = { kind: 'triage', repoId: 'r1', prNumber: 108, at: 0 };
   const pr = {

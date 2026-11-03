@@ -493,3 +493,24 @@ test.describe('HUD backgrounds fade to 20% opacity, high contrast keeps them sol
     expect(alphaOf(await demoPill.evaluate((el) => getComputedStyle(el).backgroundColor))).toBe(1);
   });
 });
+
+// Issue #112: the HUD's sessions pill names the coding agent once a limit is set on it, instead of one plain count.
+test.describe('HUD sessions pill shows a per-coding-agent count once it is capped (issue #112)', () => {
+  test('shows "x/limit Claude Code" only after Claude Code gets a limit', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/?pocket=0');
+    await enterOffice(page, { loaded: true });
+    await skipTour(page);
+
+    const pill = page.locator('.hud-status .pill', { hasText: 'sessions' });
+    await expect(pill).toBeVisible();
+    await expect(pill).not.toContainText('/'); // no coding agent is capped yet: a plain count
+
+    try {
+      await page.request.patch('/api/settings', { data: { sessionLimits: { claude: 5 } } });
+      await expect(pill).toContainText('/5 Claude Code');
+    } finally {
+      await page.request.patch('/api/settings', { data: { sessionLimits: {} } }); // leave the shared office as found
+    }
+  });
+});

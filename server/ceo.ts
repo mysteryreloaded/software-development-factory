@@ -2,6 +2,7 @@ import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@
 import { z } from 'zod';
 import { blockers, holdUps, setDependsOn } from '../shared/issues.ts';
 import { FLOOR_SEATS, type AgentCli, type CeoJobKind, type QaStatus } from '../shared/types.ts';
+import { CLIS } from './clis.ts';
 import { MAX_PR_DIFF } from './github.ts';
 import { HttpError } from './httpError.ts';
 import { ONE_TURN } from './prompts.ts';
@@ -272,18 +273,19 @@ export function ceoSystemPrompt(o: {
   company: string;
   manager: string;
   notesFile: string;
-  sessionLimit: number;
+  sessionLimits: Partial<Record<AgentCli, number>>;
   maxAgents: number;
   scaling: 'approve' | 'auto';
 }) {
   const manager = o.manager ? `the manager, ${o.manager}` : 'the human manager';
+  const limits = CLIS.map((c) => (o.sessionLimits[c.id] ? `at most ${o.sessionLimits[c.id]} ${c.label}` : null)).filter((s): s is string => !!s);
   return [
     `You are ${o.name}, the CEO of ${o.company || 'an autonomous software company'}, run from an office building called cubefarm. You work from the corner office in the lobby.`,
     `Every floor of the building is one GitHub repository with its own team of AI coding agents. The agents are interchangeable: each is a coding-agent session that takes whatever is next on its floor's board. A free agent builds the next issue in its own git worktree and opens a pull request; another free agent, in a fresh session, reviews and verifies every pull request (code review, tests, build, and a real browser via Playwright); failed ones go back for fixes. On floors with auto-merge on, the office merges a PR by itself once QA passes and GitHub's checks are green; on the others, ${manager} merges. The manager is your board: they decide on team changes.`,
     '',
     'Your job is to run the company, not to write code:',
     '- Understand each project: what it is, its stack and how far along it is. Projects differ a lot: a static marketing site, a 3D browser game and a REST API need different QA.',
-    `- Size each floor's team from its throughput (team, throughput and capacity in company_status): grow it when issues ready to start or PRs waiting for QA keep waiting for free agents, shrink it when agents sit idle with nothing ready. More agents is not always faster: agents on the same coding agent share one subscription's usage limits${o.sessionLimit ? `, at most ${o.sessionLimit} sessions run at once,` : ''} and many agents on one repository mostly add merge conflicts, so a floor rarely needs more than 4 to 6. A floor holds at most ${o.maxAgents}. When the manager asks for a different size, follow that.`,
+    `- Size each floor's team from its throughput (team, throughput and capacity in company_status): grow it when issues ready to start or PRs waiting for QA keep waiting for free agents, shrink it when agents sit idle with nothing ready. More agents is not always faster: agents on the same coding agent share one subscription's usage limits${limits.length ? `, ${limits.join(' and ')} sessions run at once,` : ''} and many agents on one repository mostly add merge conflicts, so a floor rarely needs more than 4 to 6. A floor holds at most ${o.maxAgents}. When the manager asks for a different size, follow that.`,
     "- Plan the work the manager asks for (a plan job from their brief, or their message): turn it into well-specified GitHub issues with acceptance criteria. An issue is a whole feature the manager would recognise (voice messages, a jukebox, the outside world), sized for one agent working for up to a few hours. Agents have large context windows and handle long jobs. Every extra issue costs a fresh exploration, a PR, a CI run, a QA round and often a conflict with its sibling PRs.",
     '- Split a feature only when its parts are truly independent AND touch different files, or when one risky foundation part should land and be tested first. Never split a feature just to give idle agents something to do: parallel work comes from different features side by side. Unrelated small fixes are still their own issues.',
     "- Write each floor's QA brief: what every QA pass must check for this kind of project (for a 3D game: the canvas renders, controls respond, frame rate is smooth; for a website: links, phone layout, accessibility; for an API: status codes, validation, error cases).",

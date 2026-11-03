@@ -32,10 +32,10 @@ import { copyUpload, pruneUploads } from './uploads.ts';
 import { agentPromptPreview, ceoPromptPreview, devBranch, devSystemPrompt, failedLogLines, noPushNudge, ownPrLine, qaBranch, qaSystemPrompt } from './prompts.ts';
 import { QA_RESUME_PROMPT, qaRetry } from './qaRetry.ts';
 import { drainDecision, lastUpdateMessage, POSTPONE_MS, type DrainInput, type LastUpdate } from './officeUpdate.ts';
-import { clampPacingSessions, DEFAULT_PACING_SESSIONS, limitExempt, mayStart, PACING_MS, pacingMessage, resumeRefusal, usageLabel, usageView, usesClaude, waived, warningView, type UsageWarning, type Waiver, type WorkKind } from './pacing.ts';
+import { cliAtLimit, clampPacingSessions, DEFAULT_PACING_SESSIONS, limitExempt, mayStart, PACING_MS, pacingMessage, resumeRefusal, sessionCli, usageLabel, usageView, usesClaude, waived, warningView, type UsageWarning, type Waiver, type WorkKind } from './pacing.ts';
 import { emptyHistory, loadHistory, opsView, recordChecks, recordCost, recordMerges, recordQa, type OpsFloorState, type OpsHistory } from './metrics.ts';
 import { clampTrimIdleMin, DEFAULT_TRIM_IDLE_MIN, desksToTrim, formatBytes, freedMessage, idleSince, TRIM_SWEEP_MS } from './deskTrim.ts';
-import { cliLabel, isCli, resumeChoice } from './clis.ts';
+import { CLIS, clampSessionLimits, cliLabel, isCli, migrateSessionLimits, resumeChoice } from './clis.ts';
 import { machineName } from './machines.ts';
 import { MACHINES_DIR, machineTmp, type DeskTrim } from './workspace.ts';
 import { envSecrets, Journal } from './journal.ts';
@@ -475,7 +475,7 @@ export { HttpError };
 export class Swarm {
   private state: Persisted = {
     settings: {
-      sessionLimit: 0,
+      sessionLimits: {},
       defaultModel: DEFAULT_MODEL,
       defaultEffort: 'medium',
       runtime: 'terminal',
@@ -706,10 +706,16 @@ export class Swarm {
       this.state.settings.trimIdleDesksMin = clampTrimIdleMin(this.state.settings.trimIdleDesksMin);
       if (!this.state.settings.defaultModel && this.state.settings.defaultCli === 'claude') this.state.settings.defaultModel = DEFAULT_MODEL;
       // "Max concurrent sessions" (default 4) became an optional session limit. The old default goes; a limit the manager chose stays.
-      const old = this.state.settings as SwarmSettings & { maxConcurrent?: number; permissionMode?: string };
+      const loadedSettings = loaded.settings as (Partial<SwarmSettings> & { sessionLimit?: number }) | undefined;
+      const old = this.state.settings as SwarmSettings & { maxConcurrent?: number; permissionMode?: string; sessionLimit?: number };
       if (old.maxConcurrent !== undefined) {
-        if (loaded.settings?.sessionLimit === undefined) old.sessionLimit = old.maxConcurrent === 4 ? 0 : old.maxConcurrent;
+        if (loadedSettings?.sessionLimit === undefined) old.sessionLimit = old.maxConcurrent === 4 ? 0 : old.maxConcurrent;
         delete old.maxConcurrent;
+      }
+      // One office-wide session limit (#112) became a cap per coding agent: an old limit > 0 applies to every CLI.
+      if (old.sessionLimit !== undefined) {
+        if (loadedSettings?.sessionLimits === undefined) this.state.settings.sessionLimits = migrateSessionLimits(old.sessionLimit);
+        delete old.sessionLimit;
       }
       delete old.permissionMode; // the office's rules are instructions now, not a permission mode
       // Hiring titled roles became team changes: the approval choice carries over, the team cap (an auto-approve limit) doesn't.
@@ -935,7 +941,7 @@ export class Swarm {
         counts.requeued++;
         continue;
       }
-      if (this.slotsFull()) continue; // stays 'stopped'; the manager can resume it later
+      if (this.cliFull(this.agentCli(a))) continue; // stays 'stopped'; the manager can resume it later
       counts.resumed++;
       void this.message(a.id, resumeNote(a, fix)).catch((err) => console.warn(`could not resume ${a.name}`, err));
     }
@@ -1079,6 +1085,7 @@ export class Swarm {
       ops: this.opsNow(),
       doctor: this.doctorView(),
       clis: this.clis,
+      sessionsRunning: this.sessionsRunningView(),
       ...this.voice.keyView(),
       voiceCache: this.voice.cacheInfo(),
       weather: this.weather.current(),
@@ -1257,15 +1264,46 @@ export class Swarm {
     return this.state.agents.filter((a) => BUSY.includes(a.status)).length;
   }
 
-  /** The pacing cap's count: the busy sessions that draw on Claude's shared subscription. */
-  private runningClaude() {
-    return this.state.agents.filter((a) => BUSY.includes(a.status) && usesClaude(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals)).length;
+  /** The CLI a brand-new session for this agent would run on (server/pacing.ts's sessionCli). */
+  private agentCli(a: { role: AgentRole; cli: AgentCli | '' }): AgentCli {
+    return sessionCli(a, this.state.settings.defaultCli, this.state.settings.runtime === 'terminal' && this.backend.terminals);
   }
 
-  /** True when the manager has set a session limit and every slot is taken. */
-  private slotsFull() {
-    const limit = this.state.settings.sessionLimit;
-    return limit > 0 && this.running() >= limit;
+  /**
+   * Which CLI resuming this agent (`resumeId`, or their own `sessionCli` for a typed/live follow-up) actually runs
+   * on: resumeChoice's own rule, the same one startAgentSession's sessionRuntime applies.
+   */
+  private nextCli(a: PersistedAgent, resumeId?: string, resumeCli?: AgentCli | null, live = false): AgentCli {
+    const inTerminal = this.state.settings.runtime === 'terminal' && this.backend.terminals;
+    return resumeChoice({ agentCli: this.agentCli(a), inTerminal, resumeId, resumeCli: resumeCli ?? a.sessionCli, live }).cli;
+  }
+
+  /** The CLI a busy agent's session counts against right now: its running session's own CLI, or (not started yet) the one it will get. */
+  private busyCli(a: PersistedAgent): AgentCli {
+    const rt = this.agentRt.get(a.id);
+    return (rt?.session && rt.cli) || this.agentCli(a);
+  }
+
+  /** The pacing cap's count: the busy sessions that draw on Claude's shared subscription. */
+  private runningClaude() {
+    return this.runningByCli('claude');
+  }
+
+  /** Busy sessions counting against one coding agent's limit. */
+  private runningByCli(cli: AgentCli) {
+    return this.state.agents.filter((a) => BUSY.includes(a.status) && this.busyCli(a) === cli).length;
+  }
+
+  /** Every coding agent's busy sessions right now, for the snapshot and company_status. */
+  private sessionsRunningView(): Partial<Record<AgentCli, number>> {
+    const out: Partial<Record<AgentCli, number>> = {};
+    for (const c of CLIS) out[c.id] = this.runningByCli(c.id);
+    return out;
+  }
+
+  /** True when this coding agent has a limit set and every one of its slots is taken. */
+  private cliFull(cli: AgentCli) {
+    return cliAtLimit(this.state.settings.sessionLimits[cli], this.runningByCli(cli));
   }
 
   private agentSlug(a: PersistedAgent) {
@@ -2329,9 +2367,10 @@ export class Swarm {
     );
   }
 
-  private ensureSlot() {
-    if (this.slotsFull()) {
-      throw new HttpError(429, `All ${this.state.settings.sessionLimit} session slots are busy. Raise or clear the session limit in the manager's console, or wait.`);
+  private ensureSlot(a: PersistedAgent, cli: AgentCli = this.agentCli(a)) {
+    const limit = this.state.settings.sessionLimits[cli];
+    if (this.cliFull(cli)) {
+      throw new HttpError(429, `All ${limit} ${cliLabel(cli)} session slots are busy. Raise or clear its session limit in the manager's console, or wait.`);
     }
   }
 
@@ -2341,7 +2380,7 @@ export class Swarm {
     const repo = this.repo(a.repoId);
     if (a.role === 'ceo') throw new HttpError(400, `${a.name} runs the company; give issues to the agents on the floors.`);
     if (BUSY.includes(a.status)) throw new HttpError(409, `${a.name} is busy: ${this.agentDoing(a)}`);
-    this.ensureSlot();
+    this.ensureSlot(a);
     const issues = this.repoRt.get(repo.id)?.issues ?? [];
     const issue = issues.find((i) => i.number === issueNumber);
     if (!issue) throw new HttpError(404, `Issue #${issueNumber} is not open on ${repo.fullName}`);
@@ -2853,7 +2892,7 @@ export class Swarm {
     const tester = agentId ? this.agent(agentId) : null;
     if (tester && (tester.repoId !== repo.id || tester.role === 'ceo')) throw new HttpError(400, `${tester.name} doesn't work on ${repo.fullName}`);
     if (tester && BUSY.includes(tester.status)) throw new HttpError(409, `${tester.name} is busy: ${this.agentDoing(tester)}`);
-    if (tester) this.ensureSlot();
+    if (tester) this.ensureSlot(tester);
     this.clearPrepStrikes(repo.id, prNumber);
     this.queueQa(repo, prNumber, dev ?? null, pr.closesIssues[0] ?? null);
     const queued = this.state.qa.find((q) => q.repoId === repo.id && q.prNumber === prNumber && q.status === 'queued');
@@ -3357,7 +3396,7 @@ export class Swarm {
     }
     if (a.status === 'preparing') throw new HttpError(409, `${a.name} is still setting up; try again in a moment`);
     if (!a.sessionId || !a.branch || a.task === 'qa') throw new HttpError(409, `${a.name} has no session to continue. Give them an issue or a PR to test instead.`);
-    this.ensureSlot();
+    this.ensureSlot(a, this.nextCli(a, a.sessionId, undefined, typed));
     this.appendLog(a, [{ kind: 'manager', text: `▶ Manager: ${forAgent}` }, ...chips]);
     const cwd = this.deskOf(a, repo);
     a.lastError = null;
@@ -3369,7 +3408,7 @@ export class Swarm {
 
   updateSettings(patch: Partial<SwarmSettings>) {
     const s = this.state.settings;
-    if (patch.sessionLimit !== undefined) s.sessionLimit = Math.max(0, Math.round(Number(patch.sessionLimit)) || 0);
+    if (patch.sessionLimits !== undefined && typeof patch.sessionLimits === 'object') s.sessionLimits = clampSessionLimits(patch.sessionLimits as Record<string, unknown>);
     // The default model belongs to the default coding agent: a new agent starts on its own default.
     if (isCli(patch.defaultCli) && patch.defaultCli !== s.defaultCli) {
       s.defaultCli = patch.defaultCli;
@@ -3490,8 +3529,9 @@ export class Swarm {
    * failing to set up sits out.
    */
   private startPipelineWork(repo: PersistedRepo): boolean {
-    // The usage brake holds Claude agents only: a held one at a lower desk must not block the free agents behind it.
-    const free = this.available(repo).filter((a) => this.mayStart('qa', a));
+    // The usage brake holds Claude agents only, and a full coding agent holds only its own: either one at a lower
+    // desk must not block the free agents behind it.
+    const free = this.available(repo).filter((a) => this.mayStart('qa', a) && !this.cliFull(this.agentCli(a)));
     if (!free.length) return false;
     const now = Date.now();
     const floor = this.floorState(this.repoRt.get(repo.id)!);
@@ -3532,8 +3572,9 @@ export class Swarm {
    */
   private startIssueWork(repo: PersistedRepo): boolean {
     if (!repo.autoAssign) return false;
-    // The usage brake holds Claude sessions only: a held Claude agent at a lower desk must not block the free agents behind it.
-    const agent = this.available(repo).find((a) => this.mayStart('issue', a));
+    // The usage brake holds Claude sessions only, and a full coding agent holds only its own: either one at a lower
+    // desk must not block the free agents behind it.
+    const agent = this.available(repo).find((a) => this.mayStart('issue', a) && !this.cliFull(this.agentCli(a)));
     const next = agent ? this.readyIssues(repo)[0] : undefined;
     if (!agent || !next) return false;
     // assign() flips the agent to 'preparing' synchronously, so the next pass sees it as busy.
@@ -3652,6 +3693,7 @@ export class Swarm {
 
   private opsTimer: NodeJS.Timeout | null = null;
   private lastOps = '';
+  private lastSessionsRunning = '';
   private qaWaits = new Map<string, number>(); // `${repoId}#${pr}` -> how long its QA run in progress waited for a tester
 
   /** A sync's merges (stamped with their issues' ages) and finished check runs go into mission control's history. */
@@ -3691,9 +3733,16 @@ export class Swarm {
     this.opsTimer = null;
     const ops = this.opsNow();
     const key = JSON.stringify(ops);
-    if (key === this.lastOps) return;
-    this.lastOps = key;
-    this.broadcast({ type: 'ops', ops });
+    if (key !== this.lastOps) {
+      this.lastOps = key;
+      this.broadcast({ type: 'ops', ops });
+    }
+    const sessionsRunning = this.sessionsRunningView();
+    const sessionsKey = JSON.stringify(sessionsRunning);
+    if (sessionsKey !== this.lastSessionsRunning) {
+      this.lastSessionsRunning = sessionsKey;
+      this.broadcast({ type: 'sessionsRunning', sessionsRunning });
+    }
   }
 
   /** A failed session releases its issue for someone else; an issue that keeps failing waits for the manager. */
@@ -3735,7 +3784,6 @@ export class Swarm {
       while (progress) {
         progress = false;
         for (const repo of order) {
-          if (this.slotsFull()) return;
           if (start(repo)) progress = true;
         }
       }
@@ -3978,7 +4026,7 @@ export class Swarm {
       this.save();
     }
     if (!a || BUSY.includes(a.status) || c.job || c.queue.length === 0) return;
-    if (this.slotsFull()) return;
+    if (this.cliFull('claude')) return; // the CEO always runs Claude Code
     const rank: Record<CeoJob['kind'], number> = { chat: 0, triage: 0, onboard: 1, plan: 1, 'code-review': 1, review: 2 };
     // A floor's jobs wait for its clone and first sync, so the CEO has something to read.
     const ready = (j: CeoJob) => {
@@ -4001,7 +4049,7 @@ export class Swarm {
 
   private ceoPromptInput(a: PersistedAgent): Parameters<typeof ceoSystemPrompt>[0] {
     const s = this.state.settings;
-    return { name: a.name, company: s.companyName, manager: s.managerName, notesFile: path.join(CEO_DIR, 'NOTES.md'), sessionLimit: s.sessionLimit, maxAgents: s.maxAgents, scaling: s.scaling };
+    return { name: a.name, company: s.companyName, manager: s.managerName, notesFile: path.join(CEO_DIR, 'NOTES.md'), sessionLimits: s.sessionLimits, maxAgents: s.maxAgents, scaling: s.scaling };
   }
 
   private async runCeoJob(a: PersistedAgent, job: CeoJob) {
@@ -5292,8 +5340,8 @@ export class Swarm {
           ceo: this.ceo().name,
           scaling: s.scaling === 'auto' ? 'team changes apply straight away' : 'the manager approves every team change',
           maxAgentsPerFloor: s.maxAgents,
-          sessionLimit: s.sessionLimit || 'none',
-          sessionsRunning: this.running(),
+          sessionLimits: Object.keys(s.sessionLimits).length ? s.sessionLimits : 'none',
+          sessionsRunning: this.sessionsRunningView(),
           usage: usageLabel(this.usageNow(), Date.now()),
         },
         floors,

@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 import { floorPrCounts, pendingRequests, useStore } from '../store';
 import { useKeyName } from '../ui/controls';
+import { sessionsLabel } from '../ui/sessionCounts';
 import { CEO_ID } from '../../../shared/types';
 import { ActivityIcon } from './ActivityIcon';
 import { WaitingRoom } from './Candidates';
@@ -31,6 +32,8 @@ function useOfficeStats() {
   const repos = useStore((s) => s.repos);
   const agents = useStore((s) => s.agents);
   const settings = useStore((s) => s.settings);
+  const clis = useStore((s) => s.clis);
+  const sessionsRunning = useStore((s) => s.sessionsRunning);
   const qa = useStore((s) => s.qa);
   const requests = useStore((s) => s.requests);
   return useMemo(() => {
@@ -51,8 +54,8 @@ function useOfficeStats() {
     const inQa = prCounts.reduce((n, c) => n + c.inQa, 0);
     const readyToMerge = prCounts.reduce((n, c) => n + c.ready, 0);
     const pending = pendingRequests(requests).length;
-    return { repos: repos.length, agents: list.length, working, openPrs, inQa, readyToMerge, merged, issues, floors, max: settings.sessionLimit, pending };
-  }, [repos, agents, settings, qa, requests]);
+    return { repos: repos.length, agents: list.length, working, openPrs, inQa, readyToMerge, merged, issues, floors, sessionsLabel: sessionsLabel(clis, sessionsRunning, settings.sessionLimits), pending };
+  }, [repos, agents, settings, clis, sessionsRunning, qa, requests]);
 }
 
 function ManagerComputer() {
@@ -75,7 +78,7 @@ function ManagerComputer() {
       const rows: [string, string][] = [
         ['Floors (repos)', `${stats.repos}`],
         ['Agents on staff', `${stats.agents}`],
-        ['Sessions running', stats.max ? `${stats.working} / ${stats.max}` : `${stats.working}`],
+        ['Sessions running', stats.sessionsLabel],
         ['Open issues', `${stats.issues}`],
         ['PRs in QA / ready to merge', `${stats.inQa} / ${stats.readyToMerge}`],
         ['👥 Team changes waiting', `${stats.pending}`],
@@ -98,7 +101,7 @@ function ManagerComputer() {
       ctx.font = `600 32px ${SANS}`;
       ctx.fillText(`Press ${use} or click to manage floors, team & issues`, 50, 592);
     },
-    [stats.repos, stats.agents, stats.working, stats.max, stats.issues, stats.inQa, stats.readyToMerge, stats.pending, use],
+    [stats.repos, stats.agents, stats.working, stats.sessionsLabel, stats.issues, stats.inQa, stats.readyToMerge, stats.pending, use],
   );
   return (
     <group ref={ref} position={[MANAGER_DESK.x, 0, MANAGER_DESK.z]}>
