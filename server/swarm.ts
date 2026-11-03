@@ -672,7 +672,9 @@ export class Swarm {
           look: a.look ?? lookFor(a.name),
           style: cleanStyle(a.style),
           task: a.task ?? (a.issueNumber ? 'issue' : null),
-          cli: isKnownCli(a.cli, this.state.customProviders) ? a.cli : '',
+          // customProviders isn't loaded yet here (still this class's default, []): keep any string and let the
+          // sweep below (once the provider list and keys are both in) drop an id that turns out to be unknown.
+          cli: typeof a.cli === 'string' ? a.cli : '',
           sessionCli: a.sessionCli ?? (a.sessionId ? 'claude' : null),
         })),
         qa: (loaded.qa ?? []).map((q) => ({
@@ -2694,7 +2696,7 @@ export class Swarm {
     const { dropped, ...how } = this.sessionRuntime(a, resumeSessionId, resumeCli, mode === 'typed' || mode === 'reattach');
     rt.cli = how.cli ?? 'claude';
     if (dropped)
-      this.appendLog(a, [{ kind: 'system', text: `↻ Their last session was ${cliLabel((resumeCli ?? a.sessionCli) ?? 'claude')}'s; starting a fresh ${cliLabel(how.cli ?? 'claude')} session.` }]);
+      this.appendLog(a, [{ kind: 'system', text: `↻ Their last session was ${cliLabel((resumeCli ?? a.sessionCli) ?? 'claude', this.state.customProviders)}'s; starting a fresh ${cliLabel(how.cli ?? 'claude', this.state.customProviders)} session.` }]);
     this.emitAgent(a);
     const active = (entries: LogEntry[]) => {
       if (entries.some((e) => e.kind !== 'manager')) this.activity.set(a.id, Date.now());
