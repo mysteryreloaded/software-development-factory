@@ -62,14 +62,14 @@ export interface BuiltInProvider {
   version: string | null;
 }
 
-/** A custom provider's add/edit form fields; `apiKey` absent on an edit keeps the current key. */
+/** A custom provider's add/edit form fields; `apiKey` absent on an edit keeps the current key. A limit is `null` to clear it on edit. */
 export interface ProviderFields {
   name?: string;
   baseURL?: string;
   apiKey?: string;
   model?: string;
-  contextLimit?: number;
-  outputLimit?: number;
+  contextLimit?: number | null;
+  outputLimit?: number | null;
 }
 
 export const api = {

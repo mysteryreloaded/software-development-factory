@@ -147,6 +147,49 @@ test('add, edit (keeping the key), assign an agent, and delete a custom provider
   await page.request.delete(`/api/agents/${agent.id}`);
 });
 
+test('editing one provider then another shows the second one, and clearing a limit on edit removes it', async ({ page }) => {
+  await openProviders(page);
+
+  const add = async (model: string) => {
+    await page.getByRole('button', { name: /Add provider/ }).click();
+    await page.getByLabel('API endpoint').fill('http://localhost:9999/v1');
+    await page.getByLabel('API key').fill('a-key');
+    await page.getByLabel('Model name').fill(model);
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText(model, { exact: false }).first()).toBeVisible();
+  };
+  await add('model-a');
+  await add('model-b');
+
+  // Edit A, then edit B without saving: the form must show B's own fields, not A's (or A's still-typed edits).
+  await page.locator('.provider-row').filter({ hasText: 'model-a' }).getByRole('button', { name: 'Edit' }).click();
+  await expect(page.getByLabel('Model name')).toHaveValue('model-a');
+  await page.getByLabel('Model name').fill('model-a-EDITED');
+  await page.locator('.provider-row').filter({ hasText: 'model-b' }).getByRole('button', { name: 'Edit' }).click();
+  await expect(page.getByLabel('Model name')).toHaveValue('model-b');
+
+  // Set a context window, save, then clear it on a second edit: it must actually be removed, not kept.
+  await page.getByLabel('Context window').fill('4096');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('model-b', { exact: false }).first()).toBeVisible();
+  let { custom } = await (await page.request.get('/api/providers')).json();
+  let providerB = custom.find((p: { model: string }) => p.model === 'model-b');
+  expect(providerB.contextLimit).toBe(4096);
+
+  await page.locator('.provider-row').filter({ hasText: 'model-b' }).getByRole('button', { name: 'Edit' }).click();
+  await expect(page.getByLabel('Context window')).toHaveValue('4096');
+  await page.getByLabel('Context window').fill('');
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText('model-b', { exact: false }).first()).toBeVisible();
+  ({ custom } = await (await page.request.get('/api/providers')).json());
+  providerB = custom.find((p: { model: string }) => p.model === 'model-b');
+  expect(providerB.contextLimit).toBeUndefined();
+
+  // Leave the shared demo office as this spec found it: model-a was never actually renamed (edit was cancelled
+  // by switching to B without saving), so both providers are still named after their models.
+  for (const p of custom) if (p.model === 'model-a' || p.model === 'model-b') await page.request.delete(`/api/providers/${p.id}`);
+});
+
 test('at phone width, the Providers tab fits with no horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openProviders(page);

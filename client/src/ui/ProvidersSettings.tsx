@@ -50,8 +50,9 @@ function ProviderForm({ editing, onDone, onCancel }: { editing: CustomProviderVi
     baseURL: baseURL.trim(),
     model: model.trim(),
     ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-    contextLimit: contextLimit.trim() ? Number(contextLimit) : undefined,
-    outputLimit: outputLimit.trim() ? Number(outputLimit) : undefined,
+    // On edit, an emptied limit must clear it (null), not leave the current one (undefined, dropped by JSON).
+    contextLimit: contextLimit.trim() ? Number(contextLimit) : editing ? null : undefined,
+    outputLimit: outputLimit.trim() ? Number(outputLimit) : editing ? null : undefined,
   });
 
   const check = async () => {
@@ -242,7 +243,9 @@ export function ProvidersTab() {
           </>
         )}
       </div>
-      {open && <ProviderForm editing={open === 'add' ? null : open} onDone={onDone} onCancel={() => setOpen(null)} />}
+      {/* Keyed on what's being edited, so switching the target (Edit A then Edit B) remounts with fresh state
+          instead of keeping the previous form's typed values. */}
+      {open && <ProviderForm key={open === 'add' ? 'add' : open.id} editing={open === 'add' ? null : open} onDone={onDone} onCancel={() => setOpen(null)} />}
     </div>
   );
 }
