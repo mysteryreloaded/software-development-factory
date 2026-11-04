@@ -74,8 +74,23 @@ export function CliSelect({ agent, id, style }: FieldProps) {
 
 export function ModelInput({ agent, id, className = 'inline', style }: FieldProps) {
   const settings = useStore((s) => s.settings);
+  const clis = useStore((s) => s.clis);
   const listId = useId();
   const cli = workerCli(agent, settings);
+  const provider = clis.find((c) => c.id === cli && c.custom);
+  if (provider) {
+    return (
+      <input
+        id={id}
+        className={className}
+        style={style}
+        value={provider.model ?? ''}
+        readOnly
+        aria-label={id ? undefined : 'Model'}
+        title={`Fixed by the ${provider.label} provider (Providers tab)`}
+      />
+    );
+  }
   return (
     <>
       <input

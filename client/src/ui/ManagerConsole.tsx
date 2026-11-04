@@ -18,6 +18,7 @@ import { OpsTab } from './MissionConsole';
 import { NotifySettings } from './NotifySettings';
 import { ProfileSettings } from './ProfileSettings';
 import { Panel } from './Overlays';
+import { ProvidersTab } from './ProvidersSettings';
 import { Resume } from './Phone';
 import { ProjectPicker } from './ProjectPicker';
 import { StatusPill } from './TerminalView';
@@ -853,6 +854,7 @@ export function ManagerConsole({ initialTab, initialRepo, card }: { initialTab?:
     ['team', '👩‍💻 Team'],
     ['issues', '📝 Issues'],
     ['settings', '⚙️ Settings'],
+    ['providers', '🔌 Providers'],
     ['timelapse', '📼 Time-lapse'],
     ['access', '♿ Accessibility'],
   ];
@@ -872,6 +874,7 @@ export function ManagerConsole({ initialTab, initialRepo, card }: { initialTab?:
         {tab === 'team' && <TeamTab />}
         {tab === 'issues' && <IssuesTab initialRepo={initialRepo} />}
         {tab === 'settings' && <SettingsTab />}
+        {tab === 'providers' && <ProvidersTab />}
         {tab === 'timelapse' && <TimeLapseTab />}
         {tab === 'access' && (
           <div className="tab-grid a11y-grid">

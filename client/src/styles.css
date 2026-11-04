@@ -2752,6 +2752,18 @@ input.inline:focus {
   width: 90px;
 }
 
+/* ui/ProvidersSettings.tsx: the Providers tab's built-in and custom rows */
+.provider-row {
+  padding: 6px 0;
+  border-top: 1.5px solid rgba(31, 29, 43, 0.08);
+}
+.provider-row:first-child {
+  border-top: none;
+}
+.provider-row-builtin {
+  opacity: 0.6;
+}
+
 /* ui/VoiceSettings.tsx: the ElevenLabs voice picker */
 .voice-clips,
 .listen-settings {

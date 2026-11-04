@@ -2,7 +2,7 @@ import { useStore } from './store';
 import type { PongResult } from '../../shared/pong';
 import type { ParsedPenaltyResult } from '../../shared/penalty';
 import type { AgentStyle } from '../../shared/looks';
-import type { CliId, AgentPromptView, AgentView, AttachmentView, DoctorFinding, DoctorFix, EffortLevel, GhRepoSummary, NotifyChannel, NotifyChannelsView, NotifyWebhook, OfficeUpdateView, PreviewView, ProjectFolderView, PrPreviewView, RepoView, SwarmSettings, UsageView, VoiceCacheView, VoiceOption } from '../../shared/types';
+import type { CliId, AgentPromptView, AgentView, AttachmentView, CustomProvider, DoctorFinding, DoctorFix, EffortLevel, GhRepoSummary, NotifyChannel, NotifyChannelsView, NotifyWebhook, OfficeUpdateView, PreviewView, ProjectFolderView, ProviderCheckResult, PrPreviewView, RepoView, SwarmSettings, UsageView, VoiceCacheView, VoiceOption } from '../../shared/types';
 import type { JournalChunk, JournalDayView } from '../../shared/journal';
 import type { DecorItem, ProgressView } from '../../shared/progress';
 
@@ -51,6 +51,25 @@ export interface AgentSetupPatch {
 export interface FloorOptions {
   mission?: string;
   autoAssign?: boolean;
+}
+
+/** GET /api/providers' built-in half (server/swarm.ts's listProviders): the three built-in coding agents, read-only. */
+export interface BuiltInProvider {
+  id: string;
+  label: string;
+  command: string;
+  installed: boolean;
+  version: string | null;
+}
+
+/** A custom provider's add/edit form fields; `apiKey` absent on an edit keeps the current key. */
+export interface ProviderFields {
+  name?: string;
+  baseURL?: string;
+  apiKey?: string;
+  model?: string;
+  contextLimit?: number;
+  outputLimit?: number;
 }
 
 export const api = {
@@ -158,6 +177,14 @@ export const api = {
   pushKey: () => call<{ publicKey: string }>('GET', '/api/notify/push/key'),
   pushSubscribe: (subscription: PushSubscriptionJSON) => call<NotifyChannelsView>('POST', '/api/notify/push/devices', { subscription }),
   pushUnsubscribe: (endpoint: string) => call<NotifyChannelsView>('DELETE', '/api/notify/push/devices', { endpoint }),
+  // custom coding-agent providers (#113, #114)
+  providers: () => call<{ builtIn: BuiltInProvider[]; custom: (CustomProvider & { hasKey: true })[] }>('GET', '/api/providers'),
+  /** Server errors (validation, name taken) aren't toasted: the form shows them next to its fields. */
+  createProvider: (body: ProviderFields) => call<CustomProvider>('POST', '/api/providers', body, false),
+  updateProvider: (id: string, patch: ProviderFields) => call<CustomProvider>('PUT', `/api/providers/${id}`, patch, false),
+  /** A 409 (still used by some agents) isn't toasted either: the list shows it next to the Delete button. */
+  deleteProvider: (id: string) => call('DELETE', `/api/providers/${id}`, undefined, false),
+  checkProvider: (body: { baseURL: string; apiKey: string; model: string }) => call<ProviderCheckResult>('POST', '/api/providers/check', body, false),
   // office progression (#210)
   buyDecor: (repoId: string, item: DecorItem) => call<ProgressView>('POST', `${r(repoId)}/decor/buy`, { item }),
   placeDecor: (repoId: string, body: { item: DecorItem; slot: string | null; from: string | null }) => call<ProgressView>('POST', `${r(repoId)}/decor/place`, body),

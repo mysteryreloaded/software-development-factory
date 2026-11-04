@@ -2281,7 +2281,7 @@ export class Swarm {
 
   /** CLI ids and custom provider ids the office knows: for the Team tab, hiring and defaultCli validation. */
   private clisView(): CliView[] {
-    return [...this.clis, ...this.state.customProviders.map((p) => ({ id: p.id, label: p.name, installed: true, version: null, integrated: false, custom: true, runs: cliRuns(p.id) }))];
+    return [...this.clis, ...this.state.customProviders.map((p) => ({ id: p.id, label: p.name, installed: true, version: null, integrated: false, custom: true, runs: cliRuns(p.id), model: p.model }))];
   }
 
   updateAgent(id: string, patch: { name?: string; model?: string; effort?: string; cli?: string; look?: string; color?: string; hair?: string; style?: unknown }) {
