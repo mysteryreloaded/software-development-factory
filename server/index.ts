@@ -303,6 +303,13 @@ app.post('/api/doctor/fix', route((req) => swarm.doctorFix(req.body?.id, req.bod
 app.post('/api/doctor/ignore', route((req) => swarm.doctorIgnore(req.body?.id)));
 app.post('/api/doctor/demo', route((req) => swarm.demoDoctor(req.body?.action)));
 
+// Custom coding-agent providers (#113): an OpenAI-compatible endpoint, run through OpenCode
+app.get('/api/providers', route(() => swarm.listProviders()));
+app.post('/api/providers', route((req) => swarm.createProvider(req.body ?? {})));
+app.put('/api/providers/:id', route((req) => swarm.updateProvider(String(req.params.id), req.body ?? {})));
+app.delete('/api/providers/:id', route((req) => swarm.deleteProvider(String(req.params.id))));
+app.post('/api/providers/check', route((req) => swarm.checkProviderNow(req.body ?? {})));
+
 // The journal, for the time-lapse replay (read-only); the demo can write itself a sample day.
 app.get('/api/journal/days', route(() => swarm.journal.days()));
 app.get(

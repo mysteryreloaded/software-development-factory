@@ -97,6 +97,10 @@ describe('signOfLifeAt', () => {
     expect(signOfLifeAt(NOW - 30 * MIN, 'codex', newer)).toBe(newer);
   });
 
+  it('a custom provider (#113) is treated like OpenCode: its terminal output counts', () => {
+    expect(signOfLifeAt(NOW - 30 * MIN, 'local-qwen', NOW - MIN)).toBe(NOW - MIN);
+  });
+
   it('ignores the terminal output of a Claude Code session', () => {
     expect(signOfLifeAt(NOW - 30 * MIN, 'claude', NOW - MIN)).toBe(NOW - 30 * MIN);
   });

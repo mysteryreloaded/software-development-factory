@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { query, type CanUseTool, type Options, type SDKMessage, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentCli, AgentRole, AgentTask, EffortLevel, LogKind } from '../shared/types.ts';
+import type { AgentRole, AgentTask, CliId, EffortLevel, LogKind } from '../shared/types.ts';
 import type { OfficeTools } from './ceo.ts';
 import type { UsageWarning } from './pacing.ts';
 import type { AgentTerminal } from './terminal.ts';
@@ -33,7 +33,9 @@ export interface SessionOptions {
   office?: OfficeTools;
   /** The terminal runtime: the agent's terminal and the CLI to run in it. Without one: an Agent SDK session. */
   terminal?: AgentTerminal;
-  cli?: AgentCli;
+  cli?: CliId;
+  /** A custom provider (#113): this runs OpenCode with it wired into the config. Ignored for a built-in CLI. */
+  provider?: { id: string; name: string; baseURL: string; apiKey: string; model: string; contextLimit?: number; outputLimit?: number } | null;
   /** Who and on what, for the CLI's session name and status line, e.g. "Ada · #12 Add dark mode". */
   label?: string;
   /** Leave the CLI waiting at its prompt when the task is done, for the manager and for follow-ups. */

@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { CLIS, clampSessionLimits, CODEX_HOOK_EVENTS, codexHookCommand, CROSS_TURN_TOOLS, hookReviewKey, interruptions, launchArgs, migrateSessionLimits, oneAtATime, OPENCODE_PLUGIN_FILES, resumeChoice, trustKey, unwrapCmdShim, type LaunchContext } from './clis.ts';
+import { CLIS, clampSessionLimits, cliLabel, cliRuns, CODEX_HOOK_EVENTS, codexHookCommand, commandFor, CROSS_TURN_TOOLS, customProviderOpencodeConfig, hookReviewKey, interruptions, isKnownCli, launchArgs, migrateSessionLimits, oneAtATime, OPENCODE_PLUGIN_FILES, resumeChoice, trustKey, unwrapCmdShim, type LaunchContext } from './clis.ts';
 import { describeOfficeTool, describeTool, newScreenshots, screenshotFile, summariseResult } from './agentRunner.ts';
 
 const dir = path.join(os.tmpdir(), 'npm-global');
@@ -93,6 +93,69 @@ describe('interruptions', () => {
     expect(interruptions(['● Bash(sleep 4)', '  ⎿  Interrupted · What should Claude do instead?', '❯ '].join('\n'))).toBe(1);
     expect(interruptions('■ Conversation interrupted - tell the model what to do differently.\n› ')).toBe(1);
     expect(interruptions('● done\n❯ ')).toBe(0);
+  });
+});
+
+describe('custom providers (#113): one mapping, no copy', () => {
+  const provider = { id: 'local-qwen', name: 'Local Qwen', baseURL: 'http://127.0.0.1:4100/v1', apiKey: 'sk-test', model: 'qwen-27b', contextLimit: 110072, outputLimit: 16384 };
+
+  it('cliRuns maps built-ins to themselves and any other id to opencode', () => {
+    expect(cliRuns('claude')).toBe('claude');
+    expect(cliRuns('codex')).toBe('codex');
+    expect(cliRuns('opencode')).toBe('opencode');
+    expect(cliRuns('local-qwen')).toBe('opencode');
+  });
+
+  it('isKnownCli accepts built-ins and a listed custom provider, not an unlisted id', () => {
+    expect(isKnownCli('claude', [])).toBe(true);
+    expect(isKnownCli('local-qwen', [])).toBe(false);
+    expect(isKnownCli('local-qwen', [provider])).toBe(true);
+  });
+
+  it('cliLabel falls back to a custom provider\'s name', () => {
+    expect(cliLabel('local-qwen', [provider])).toBe('Local Qwen');
+    expect(cliLabel('local-qwen', [])).toBe('local-qwen');
+  });
+
+  it('commandFor a custom provider id resolves OpenCode\'s own command', () => {
+    expect(commandFor('local-qwen')).toEqual(commandFor('opencode'));
+  });
+
+  it("launchArgs for a custom provider equals OpenCode's except for the provider block and --model", () => {
+    const base: LaunchContext = {
+      prompt: 'build it',
+      systemAppend: 'You are Ada.',
+      model: '',
+      effort: 'medium',
+      sessionId: '11111111-1111-1111-1111-111111111111',
+      name: 'Ada · #1',
+      role: 'agent',
+      additionalDirectories: [],
+      files: { settings: 'settings.json', mcp: null, system: 'instructions.md' },
+      notify: { script: 'notify.cjs', url: 'http://127.0.0.1:1/api/hooks/t' },
+      codexHook: 'codex-hook.cjs',
+      plugin: 'file:///plugin.mjs',
+      browser: null,
+    };
+    const opencode = launchArgs('opencode', base);
+    const custom = launchArgs('local-qwen', { ...base, model: `${provider.id}/${provider.model}`, provider });
+    // Same args, with the custom provider's --model inserted (OpenCode's own call asks for no model at all).
+    expect(opencode.args).toEqual(['--auto', '--standalone', '--prompt', 'build it']);
+    expect(custom.args).toEqual(['--auto', '--standalone', '--model', `${provider.id}/${provider.model}`, '--prompt', 'build it']);
+    const customConfig = JSON.parse(custom.env.OPENCODE_CONFIG_CONTENT);
+    const opencodeConfig = JSON.parse(opencode.env.OPENCODE_CONFIG_CONTENT);
+    const { providers, ...customRest } = customConfig;
+    // Same config, plus the one provider block.
+    expect(providers).toEqual({ [provider.id]: customProviderOpencodeConfig(provider) });
+    expect(customRest).toEqual(opencodeConfig);
+  });
+
+  it('customProviderOpencodeConfig only includes a limit when set', () => {
+    const { id, name, baseURL, apiKey, model } = provider;
+    const noLimits = customProviderOpencodeConfig({ id, name, baseURL, apiKey, model });
+    expect(noLimits.models[model].limit).toBeUndefined();
+    const withLimits = customProviderOpencodeConfig(provider);
+    expect(withLimits.models[model].limit).toEqual({ context: provider.contextLimit, output: provider.outputLimit });
   });
 });
 

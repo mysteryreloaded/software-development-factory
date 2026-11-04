@@ -1,4 +1,4 @@
-import type { AgentCli, AgentRole, UsageLimitView, UsageView, UsageWarningView } from '../shared/types.ts';
+import type { AgentRole, CliId, UsageLimitView, UsageView, UsageWarningView } from '../shared/types.ts';
 import { clock, limitName, usedPercent } from '../shared/usage.ts';
 
 export { clock };
@@ -29,13 +29,13 @@ export interface UsageClock {
  * CLI or the office's default (the same rule as the swarm's sessionRuntime). In the SDK runtime the Agent SDK runs
  * Claude Code, so every session is Claude's whatever CLI the agent has (`inTerminal` false).
  */
-export function sessionCli(facts: { role: AgentRole; cli: AgentCli | '' }, defaultCli: AgentCli, inTerminal: boolean): AgentCli {
+export function sessionCli(facts: { role: AgentRole; cli: CliId | '' }, defaultCli: CliId, inTerminal: boolean): CliId {
   if (!inTerminal) return 'claude';
   return facts.role === 'ceo' ? 'claude' : facts.cli || defaultCli;
 }
 
 /** Whether a session uses Claude. Only these sessions draw on Claude's shared subscription. */
-export function usesClaude(facts: { role: AgentRole; cli: AgentCli | '' }, defaultCli: AgentCli, inTerminal: boolean): boolean {
+export function usesClaude(facts: { role: AgentRole; cli: CliId | '' }, defaultCli: CliId, inTerminal: boolean): boolean {
   return sessionCli(facts, defaultCli, inTerminal) === 'claude';
 }
 

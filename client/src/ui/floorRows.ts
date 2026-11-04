@@ -1,7 +1,7 @@
 // The floor as a list (FloorList.tsx), for anyone who can't use the 3D view: one row per person with their status in
 // words and its shape, the coding agent they run, and what they're doing. Pure, so the wording is tested.
 
-import type { AgentCli, AgentStatus, CliView, SwarmSettings } from '../../../shared/types';
+import type { CliId, AgentStatus, CliView, SwarmSettings } from '../../../shared/types';
 import type { Agent } from '../store';
 import { KIND_ICON, STATUS_KIND, type StatusKind } from './statusLook';
 
@@ -26,12 +26,12 @@ const STATUS_WORDS: Record<AgentStatus, string> = {
 };
 
 /** The coding agents' names until the office has listed them (CliView.label). */
-const CLI_NAMES: Record<AgentCli, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
+const CLI_NAMES: Record<CliId, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
 
 type Runtime = Pick<SwarmSettings, 'runtime' | 'defaultCli'>;
 
 /** The coding agent someone runs: their own pick in Real terminals; the Agent SDK is Claude Code for everyone. */
-export const workerCli = (a: Pick<Agent, 'cli' | 'role'>, settings: Runtime): AgentCli =>
+export const workerCli = (a: Pick<Agent, 'cli' | 'role'>, settings: Runtime): CliId =>
   a.role === 'ceo' || settings.runtime !== 'terminal' ? 'claude' : a.cli || settings.defaultCli;
 
 /** What someone is, in a word or two: the CEO, or the coding agent they run. */

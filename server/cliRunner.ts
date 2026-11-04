@@ -6,7 +6,7 @@ import type { Request, Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { browserProblem, playwrightMcp } from './browser.ts';
 import { HOME_DIR } from './config.ts';
-import { cliLabel, CODEX_HOOK_SOURCE, codexThread, commandFor, hookReviewKey, interruptions, isCli, launchArgs, NOTIFY_SOURCE, OPENCODE_PLUGIN_FILES, STATUSLINE_SOURCE, trustKey } from './clis.ts';
+import { cliLabel, CODEX_HOOK_SOURCE, codexThread, commandFor, hookReviewKey, interruptions, launchArgs, NOTIFY_SOURCE, OPENCODE_PLUGIN_FILES, STATUSLINE_SOURCE, trustKey } from './clis.ts';
 import { adoptPty, discardPty, hooksReady, keeperHookUrl, keeperPid, leaveKeeper, spawnPty, startKeeper, terminalsAvailable, type Pty } from './ptyClient.ts';
 import {
   clip,
@@ -25,7 +25,7 @@ import {
 } from './agentRunner.ts';
 import type { OfficeTools } from './ceo.ts';
 import type { AgentTerminal } from './terminal.ts';
-import type { AgentCli } from '../shared/types.ts';
+import type { CliId } from '../shared/types.ts';
 import { parseRateLimits } from '../shared/usage.ts';
 
 // One agent session as the real CLI in a pseudo-terminal: the same contract as the Agent SDK runner (log lines, the
@@ -158,7 +158,7 @@ function quietly(fn: () => void) {
  */
 interface LiveCli {
   agentId: string;
-  cli: AgentCli;
+  cli: CliId;
   term: AgentTerminal;
   proc: Pty | null;
   token: string;
@@ -209,7 +209,7 @@ function endLive(live: LiveCli): Promise<void> {
 /** What the keeper holds with a CLI's terminal, so the office can pick it up again after a restart. */
 interface CliMeta {
   agentId: string;
-  cli: AgentCli;
+  cli: CliId;
   token: string;
   dir: string;
   resumeId: string | null;
@@ -247,7 +247,7 @@ function waitAtPrompt(l: LiveCli) {
 
 export interface ReconnectedCli {
   agentId: string;
-  cli: AgentCli;
+  cli: CliId;
   resumeId: string | null;
   /** It was working on a task: the office should follow its session again. */
   busy: boolean;
@@ -265,7 +265,7 @@ export async function reconnectClis(terminalFor: (agentId: string) => AgentTermi
   for (const h of held) {
     const meta = (h.meta ?? {}) as Partial<CliMeta>;
     const term = meta.agentId ? terminalFor(meta.agentId) : null;
-    if (h.exit !== null || !term || lives.has(term) || !isCli(meta.cli) || !meta.token || !meta.dir || !meta.agentId) {
+    if (h.exit !== null || !term || lives.has(term) || !meta.cli || !meta.token || !meta.dir || !meta.agentId) {
       discardPty(h);
       if (meta.cli === 'codex' && meta.resumeId) void codexThread('archive', meta.resumeId, h.exit === null ? new Promise((r) => setTimeout(r, 5000)) : undefined);
       continue;
@@ -675,6 +675,7 @@ export function startCliSession(opts: SessionOptions, callbacks: SessionCallback
     codexHook: path.join(BIN_DIR, 'codex-hook.cjs'),
     plugin: pathToFileURL(path.join(BIN_DIR, 'opencode-plugin')).href,
     browser,
+    provider: opts.provider,
   });
 
   // Each agent must be a clean instance on the account its CLI is logged into: no API keys (they would switch Claude

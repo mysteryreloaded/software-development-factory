@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { floorPrCounts, isBusy, pendingRequests, unreadMessages, useStore, type PhoneTab } from '../store';
-import { CEO_ID, type AgentCli, type AttachmentView, type CliView, type EffortLevel, type HireRequestView, type PhoneMessage, type SwarmSettings } from '../../../shared/types';
+import { CEO_ID, type CliId, type AttachmentView, type CliView, type EffortLevel, type HireRequestView, type PhoneMessage, type SwarmSettings } from '../../../shared/types';
 import { humanSize, MAX_FILES } from '../../../shared/attachments';
 import { AttachButton, AttachmentChips, usePendingAttachments } from './AttachButton';
 import { Markdown } from './Markdown';
@@ -47,16 +47,16 @@ function Avatar({ name, color, size = 34 }: { name: string; color: string; size?
 const EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /** A coding agent's name, as the office lists it. */
-export const cliLabel = (clis: CliView[], id: AgentCli) => clis.find((c) => c.id === id)?.label ?? id;
+export const cliLabel = (clis: CliView[], id: CliId) => clis.find((c) => c.id === id)?.label ?? id;
 
 /** The coding agent a new agent will run: their own pick, else the office default; the Agent SDK runtime is Claude Code for everyone. */
-export const hireCli = (cli: AgentCli | '', settings: Pick<SwarmSettings, 'runtime' | 'defaultCli'>): AgentCli =>
+export const hireCli = (cli: CliId | '', settings: Pick<SwarmSettings, 'runtime' | 'defaultCli'>): CliId =>
   settings.runtime !== 'terminal' ? 'claude' : cli || settings.defaultCli;
 
 /** What the manager can set up on a new agent before hiring them: the CEO's picks to start with ('' = the office default). */
 export interface HireSetup {
   name: string;
-  cli: AgentCli | '';
+  cli: CliId | '';
   model: string;
   effort: EffortLevel | '';
 }
@@ -93,7 +93,7 @@ export function HireSetupFields({ value, onChange, disabled }: { value: HireSetu
           value={sdk ? '' : value.cli}
           disabled={disabled || sdk}
           title={sdk ? 'The Agent SDK runs Claude Code for every agent (Settings → How agents run)' : undefined}
-          onChange={(e) => set({ cli: e.target.value as AgentCli | '' })}
+          onChange={(e) => set({ cli: e.target.value as CliId | '' })}
         >
           <option value="">{sdk ? 'Claude Code' : `${cliLabel(clis, settings.defaultCli)} (default)`}</option>
           {[...clis]

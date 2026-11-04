@@ -1,7 +1,7 @@
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { blockers, holdUps, setDependsOn } from '../shared/issues.ts';
-import { FLOOR_SEATS, type AgentCli, type CeoJobKind, type QaStatus } from '../shared/types.ts';
+import { FLOOR_SEATS, type CeoJobKind, type CliId, type QaStatus } from '../shared/types.ts';
 import { CLIS } from './clis.ts';
 import { MAX_PR_DIFF } from './github.ts';
 import { HttpError } from './httpError.ts';
@@ -32,8 +32,8 @@ export interface OfficeHandlers {
   companyStatus(): string;
   agentDetail(a: { agent_id: string }): string;
   setFloorProfile(a: { floor: number; summary?: string; qa_brief?: string; preview_command?: string; preview_env?: Record<string, string> }): string;
-  scaleTeam(a: { floor: number; size: number; reason: string; cli?: AgentCli; model?: string; effort?: string }): string;
-  configureAgent(a: { agent_id: string; cli?: AgentCli | ''; model?: string; effort?: string }): string;
+  scaleTeam(a: { floor: number; size: number; reason: string; cli?: CliId; model?: string; effort?: string }): string;
+  configureAgent(a: { agent_id: string; cli?: CliId | ''; model?: string; effort?: string }): string;
   fileIssue(a: { floor: number; title: string; body: string }): Promise<string>;
   setDependencies(a: { floor: number; number: number; depends_on: number[] }): Promise<string>;
   closeIssue(a: { floor: number; number: number; reason: string }): Promise<string>;
@@ -55,7 +55,8 @@ export interface OfficeTools {
 }
 
 const EFFORT = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
-const CLI = z.enum(['claude', 'codex', 'opencode']);
+// A built-in CLI id or a custom provider's id (#113): the handler (swarm.ts) validates it against what the office knows.
+const CLI = z.string().min(1).max(60);
 
 export function createOfficeTools(h: OfficeHandlers): OfficeTools {
   const run = async (fn: () => string | Promise<string>) => {
@@ -273,7 +274,7 @@ export function ceoSystemPrompt(o: {
   company: string;
   manager: string;
   notesFile: string;
-  sessionLimits: Partial<Record<AgentCli, number>>;
+  sessionLimits: Partial<Record<CliId, number>>;
   maxAgents: number;
   scaling: 'approve' | 'auto';
 }) {

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useId, useMemo, useState, type CSSProperties } from 'react';
 import { api } from '../api';
 import { isBusy, useStore, type Agent } from '../store';
-import type { AgentCli, AgentPromptView, CliView, EffortLevel } from '../../../shared/types';
+import type { CliId, AgentPromptView, CliView, EffortLevel } from '../../../shared/types';
 import { ACCENT_COLORS, BUILDS, FACIAL_HAIR, GLASSES, HAIR_COLORS, HAIR_STYLES, HEADWEAR, OUTFITS, SKIN_TONES, type AgentStyle, type HairStyle, type Outfit } from '../../../shared/looks';
 import { CLAUDE_MODELS, effectiveModel, modelSuggestions } from '../../../shared/models';
 import { TALL_HAIR, appearanceFor, randomStyle } from '../world/appearance';
@@ -13,7 +13,7 @@ import { workerCli } from './floorRows';
 
 export const EFFORTS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-export const cliName = (clis: CliView[], id: AgentCli) => clis.find((c) => c.id === id)?.label ?? id;
+export const cliName = (clis: CliView[], id: CliId) => clis.find((c) => c.id === id)?.label ?? id;
 
 type Patch = Parameters<typeof api.updateAgent>[1];
 
@@ -65,7 +65,7 @@ export function CliSelect({ agent, id, style }: FieldProps) {
   const settings = useStore((s) => s.settings);
   const clis = useStore((s) => s.clis);
   return (
-    <select id={id} value={agent.cli} title="Their coding agent" aria-label={id ? undefined : 'Coding agent'} style={style} onChange={(e) => void save(agent.id, { cli: e.target.value as AgentCli | '' })}>
+    <select id={id} value={agent.cli} title="Their coding agent" aria-label={id ? undefined : 'Coding agent'} style={style} onChange={(e) => void save(agent.id, { cli: e.target.value as CliId | '' })}>
       <option value="">{cliName(clis, settings.defaultCli)} (default)</option>
       <CliOptions clis={clis} />
     </select>

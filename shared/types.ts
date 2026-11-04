@@ -179,14 +179,48 @@ export type AgentRuntime = 'terminal' | 'sdk';
 /** The coding-agent CLI an agent runs in its terminal. The CEO is always Claude Code. */
 export type AgentCli = 'claude' | 'codex' | 'opencode';
 
+/**
+ * A built-in CLI id, or a custom provider's id (#113): an agent's `cli`, the office's `defaultCli`, and the
+ * sessionLimits/sessionsRunning keys can all be either. server/clis.ts's `cliRuns` maps one to the CLI it actually
+ * runs (built-ins to themselves, a custom provider to 'opencode').
+ */
+export type CliId = AgentCli | string;
+
 /** A coding-agent CLI the office knows how to run, and whether it's installed on this machine. */
 export interface CliView {
-  id: AgentCli;
+  id: CliId;
   label: string;
   installed: boolean;
   version: string | null;
   /** Hooks report every tool call and enforce the guard rails; the others report only when a turn ends. */
   integrated: boolean;
+  /** A custom provider (#113), not one of the three built-in CLIs. */
+  custom?: boolean;
+  /** A custom provider's id maps to the CLI it actually runs ('opencode'); absent for a built-in. */
+  runs?: AgentCli;
+}
+
+/**
+ * A coding-agent provider the manager added from an OpenAI-compatible endpoint (#113): it runs through the OpenCode
+ * CLI, wired into its config, so an agent on it behaves exactly like an OpenCode agent. `id` is a slug of `name`,
+ * unique among the office's providers, never one of the built-in CLI ids, and stays the same when renamed. The API
+ * key is never here: it lives in the secrets file (server/secrets.ts) and never reaches the client or the state file.
+ */
+export interface CustomProvider {
+  id: string;
+  name: string;
+  baseURL: string;
+  model: string;
+  contextLimit?: number;
+  outputLimit?: number;
+}
+
+/** POST /api/providers/check's answer: whether the endpoint is reachable, and whether its model is listed. */
+export interface ProviderCheckResult {
+  reachable: boolean;
+  status: number | null; // the HTTP status, when one came back
+  modelListed: boolean | null; // null when it couldn't be determined (not reachable, or a non-OK response)
+  error: string | null;
 }
 
 /** Messages on an agent's terminal socket (/ws/term?agent=<id>), server to browser. */
@@ -213,7 +247,7 @@ export interface AgentView {
   style: AgentStyle | null; // the manager's picks in the look editor (null: the look seeded from their id)
   model: string; // '' = use the swarm default model, or a model id / alias
   effort: EffortLevel | ''; // '' = use the swarm default effort
-  cli: AgentCli | ''; // the CLI they run in the terminal runtime ('' = the office default)
+  cli: CliId | ''; // the CLI (or custom provider) they run in the terminal runtime ('' = the office default)
   terminal: boolean; // they have a terminal to watch (the terminal runtime); otherwise their log lines are the screen
   status: AgentStatus;
   issueNumber: number | null; // the issue being built, or the one the PR under test or fix closes
@@ -306,11 +340,11 @@ export interface QaShotView {
 }
 
 export interface SwarmSettings {
-  sessionLimits: Partial<Record<AgentCli, number>>; // most sessions running at once, per coding agent; missing or 0 = no limit
+  sessionLimits: Partial<Record<CliId, number>>; // most sessions running at once, per coding agent or custom provider; missing or 0 = no limit
   defaultModel: string;
   defaultEffort: EffortLevel;
   runtime: AgentRuntime;
-  defaultCli: AgentCli; // what agents run in their terminals unless they have their own
+  defaultCli: CliId; // what agents run in their terminals unless they have their own
   scaling: 'approve' | 'auto'; // the CEO's team changes wait for the manager (new agents wait in the lobby), or apply at once
   maxAgents: number; // most agents on a floor: 1 to FLOOR_SEATS (DEFAULT_MAX_AGENTS)
   ceoHeartbeatMin: number; // minutes between the CEO's periodic reviews; 0 = off
@@ -523,7 +557,7 @@ export interface HireRequestView {
   agentId: string | null; // let-go: who; hire: who was hired once approved
   name: string; // the new agent's name (let-go: the agent's name)
   reason: string;
-  cli: AgentCli | ''; // the coding agent they'll run ('' = the office default)
+  cli: CliId | ''; // the coding agent they'll run ('' = the office default)
   model: string; // '' = the default model
   effort: EffortLevel | '';
   look: AgentLook;
@@ -657,7 +691,7 @@ export interface WorldSnapshot {
   ops: OpsView;
   doctor?: DoctorFinding[]; // the office doctor's findings the manager hasn't ignored
   clis: CliView[];
-  sessionsRunning: Partial<Record<AgentCli, number>>; // busy sessions right now, per coding agent (the CLI each counts against: server/pacing.ts's sessionCli)
+  sessionsRunning: Partial<Record<CliId, number>>; // busy sessions right now, per coding agent or custom provider (server/pacing.ts's sessionCli)
   voiceKeySet: boolean; // an ElevenLabs key is saved (the key itself never leaves the server)
   voiceKeyHint: string; // its last 4 characters, '' when none
   voiceCache: VoiceCacheView;
@@ -703,7 +737,7 @@ export type ServerEvent =
   | { type: 'ops'; ops: OpsView }
   | { type: 'doctor'; doctor: DoctorFinding[] }
   | { type: 'clis'; clis: CliView[] }
-  | { type: 'sessionsRunning'; sessionsRunning: Partial<Record<AgentCli, number>> }
+  | { type: 'sessionsRunning'; sessionsRunning: Partial<Record<CliId, number>> }
   | { type: 'voiceKey'; voiceKeySet: boolean; voiceKeyHint: string }
   | { type: 'voiceCache'; voiceCache: VoiceCacheView }
   | { type: 'weather'; weather: WeatherView }
