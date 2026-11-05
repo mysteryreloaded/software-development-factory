@@ -198,6 +198,8 @@ export interface CliView {
   custom?: boolean;
   /** A custom provider's id maps to the CLI it actually runs ('opencode'); absent for a built-in. */
   runs?: AgentCli;
+  /** A custom provider's model, fixed for every agent on it; absent for a built-in. */
+  model?: string;
 }
 
 /**
