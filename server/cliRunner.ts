@@ -332,6 +332,12 @@ export function resumableSession(b: Record<string, unknown>, exists: (file: stri
 /** Claude Code was told to resume a conversation that isn't on disk (it says so and exits 1). */
 export const lostConversation = (screen: string) => /No conversation found with session ID/i.test(screen);
 
+/** The CLI's own error text, for a session that quit before it ever got going (a bad flag, config or help screen). */
+export function cliErrorDetail(screen: string): string {
+  const lines = screen.split('\n').map((l) => l.trimEnd()).filter(Boolean);
+  return clip(lines.slice(-4).join(' ').trim(), 200);
+}
+
 export function startCliSession(opts: SessionOptions, callbacks: SessionCallbacks): SessionHandle {
   const term = opts.terminal!;
   // A follow-up to the session a CLI is still waiting in picks that CLI up again, and so does an office that restarted
@@ -573,7 +579,8 @@ export function startCliSession(opts: SessionOptions, callbacks: SessionCallback
       return;
     }
     const ok = exitCode === 0 && (lastText !== '' || (cli !== 'claude' && Date.now() - started > 20_000));
-    finish({ ok, text: lastText, errors: ok ? [] : [`${label} exited${exitCode ? ` with code ${exitCode}` : ''} before finishing.`] });
+    const detail = !ok && !begun ? cliErrorDetail(term.screen()) : '';
+    finish({ ok, text: lastText, errors: ok ? [] : [`${label} exited${exitCode ? ` with code ${exitCode}` : ''} before finishing.${detail ? ` ${detail}` : ''}`] });
   };
 
   const handle: SessionHandle = {

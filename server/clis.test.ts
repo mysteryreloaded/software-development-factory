@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -121,7 +122,7 @@ describe('custom providers (#113): one mapping, no copy', () => {
     expect(commandFor('local-qwen')).toEqual(commandFor('opencode'));
   });
 
-  it("launchArgs for a custom provider equals OpenCode's except for the provider block and --model", () => {
+  it("launchArgs for a custom provider equals OpenCode's except for the provider and model config (#120: opencode has no --model flag)", () => {
     const base: LaunchContext = {
       prompt: 'build it',
       systemAppend: 'You are Ada.',
@@ -139,13 +140,15 @@ describe('custom providers (#113): one mapping, no copy', () => {
     };
     const opencode = launchArgs('opencode', base);
     const custom = launchArgs('local-qwen', { ...base, model: `${provider.id}/${provider.model}`, provider });
-    // Same args, with the custom provider's --model inserted (OpenCode's own call asks for no model at all).
+    // Same args either way: the model goes in the config, never on the command line.
     expect(opencode.args).toEqual(['--auto', '--standalone', '--prompt', 'build it']);
-    expect(custom.args).toEqual(['--auto', '--standalone', '--model', `${provider.id}/${provider.model}`, '--prompt', 'build it']);
+    expect(custom.args).toEqual(['--auto', '--standalone', '--prompt', 'build it']);
     const customConfig = JSON.parse(custom.env.OPENCODE_CONFIG_CONTENT);
     const opencodeConfig = JSON.parse(opencode.env.OPENCODE_CONFIG_CONTENT);
-    const { providers, ...customRest } = customConfig;
-    // Same config, plus the one provider block.
+    expect(opencodeConfig.model).toBeUndefined();
+    expect(customConfig.model).toBe(`${provider.id}/${provider.model}`);
+    const { providers, model, ...customRest } = customConfig;
+    // Same config, plus the one provider block and the model key.
     expect(providers).toEqual({ [provider.id]: customProviderOpencodeConfig(provider) });
     expect(customRest).toEqual(opencodeConfig);
   });
@@ -234,6 +237,16 @@ describe('launchArgs', () => {
       expect(args).not.toContain('--server');
       expect(args.slice(args.indexOf('--prompt'))).toEqual(['--prompt', '--looks like a flag']);
     }
+  });
+
+  it('gives a built-in OpenCode agent with a model its own model key, never a --model flag (#120)', () => {
+    const noModel = launchArgs('opencode', ctx());
+    expect(noModel.args).toEqual(['--auto', '--standalone', '--prompt', '--looks like a flag']); // byte-for-byte unchanged
+    expect(JSON.parse(noModel.env.OPENCODE_CONFIG_CONTENT).model).toBeUndefined();
+    const withModel = launchArgs('opencode', ctx({ model: 'anthropic/claude-sonnet-5' }));
+    expect(withModel.args).not.toContain('--model');
+    expect(withModel.args).toEqual(['--auto', '--standalone', '--prompt', '--looks like a flag']);
+    expect(JSON.parse(withModel.env.OPENCODE_CONFIG_CONTENT).model).toBe('anthropic/claude-sonnet-5');
   });
 });
 
@@ -395,6 +408,58 @@ describe("the CEO's office tools in the log", () => {
     expect(describeOfficeTool('set_dependencies', { floor: 1, number: 7, depends_on: [] })).toBe('🔗 set_dependencies #7 → floor 1 · depends on nothing');
     expect(describeOfficeTool('file_issue', { floor: 1, title: 'Dark mode', body: 'x' })).toBe('📝 file_issue "Dark mode" → floor 1');
   });
+});
+
+describe('opencode launch args against the real installed CLI (#120, skipped when opencode is not on PATH)', () => {
+  const cmd = commandFor('opencode');
+  const provider = { id: 'local-qwen', name: 'Local Qwen', baseURL: 'http://127.0.0.1:1/v1', apiKey: 'sk-test', model: 'qwen-27b' };
+  const base: LaunchContext = {
+    prompt: 'hi',
+    systemAppend: 'You are Ada.',
+    model: '',
+    effort: 'medium',
+    sessionId: '11111111-1111-1111-1111-111111111111',
+    name: 'Ada · #1',
+    role: 'agent',
+    additionalDirectories: [],
+    files: { settings: 'settings.json', mcp: null, system: 'instructions.md' },
+    notify: { script: 'notify.cjs', url: 'http://127.0.0.1:1/api/hooks/t' },
+    codexHook: 'codex-hook.cjs',
+    plugin: 'file:///plugin.mjs',
+    browser: null,
+  };
+
+  /** Spawns the real CLI with these args/env; waits up to `ms` for it to quit on its own, then kills it. */
+  function tryLaunch(launch: { args: string[]; env: Record<string, string> }, ms = 4000): Promise<{ exited: boolean; output: string }> {
+    return new Promise((resolve) => {
+      const child = spawn(cmd!.file, [...cmd!.args, ...launch.args], { env: { ...process.env, ...launch.env } });
+      let output = '';
+      child.stdout.on('data', (d) => (output += d.toString()));
+      child.stderr.on('data', (d) => (output += d.toString()));
+      const timer = setTimeout(() => {
+        child.kill();
+        resolve({ exited: false, output });
+      }, ms);
+      child.on('exit', () => {
+        clearTimeout(timer);
+        resolve({ exited: true, output });
+      });
+    });
+  }
+
+  // Today's bug (#120): opencode has no --model flag, so passing one makes the CLI die within milliseconds printing
+  // its own --help text ("Help requested" / a ShowHelp error and the USAGE dump), instead of starting the session.
+  const diedOnArgs = (r: { exited: boolean; output: string }) => /Help requested|ShowHelp/.test(r.output) || (r.exited && /USAGE\s+opencode <subcommand>/.test(r.output));
+
+  it.skipIf(!cmd)('gets a custom provider past argument parsing', async () => {
+    const launch = launchArgs('local-qwen', { ...base, model: `${provider.id}/${provider.model}`, provider });
+    expect(diedOnArgs(await tryLaunch(launch))).toBe(false);
+  }, 10_000);
+
+  it.skipIf(!cmd)('gets a built-in OpenCode agent with a model past argument parsing', async () => {
+    const launch = launchArgs('opencode', { ...base, model: 'anthropic/claude-sonnet-5' });
+    expect(diedOnArgs(await tryLaunch(launch))).toBe(false);
+  }, 10_000);
 });
 
 describe('newScreenshots', () => {

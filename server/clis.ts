@@ -287,20 +287,14 @@ export function launchArgs(id: CliId, ctx: LaunchContext): Launch {
         instructions: [ctx.files.system],
         autoupdate: false, // several agents starting at once must not each reinstall it
         permission: { edit: 'allow', bash: 'allow', webfetch: 'allow' }, // it can't stop to ask either
+        ...(ctx.model ? { model: ctx.model } : {}), // no --model flag on this CLI (#120): it's a config key
         ...(ctx.browser ? { mcp: { playwright: { type: 'local', command: [ctx.browser.command, ...ctx.browser.args], enabled: true } } } : {}),
         ...(ctx.provider ? { providers: { [ctx.provider.id]: customProviderOpencodeConfig(ctx.provider) } } : {}),
       };
       // No project argument: it starts in its terminal's folder, and a desk path in its command line would make the
       // desk clean-up take it for a leftover.
       // --standalone: each session's config, plugin env and browser folder must be its own, and the background service keeps the first session's.
-      const args = [
-        '--auto',
-        '--standalone',
-        ...(ctx.model ? ['--model', ctx.model] : []),
-        ...(ctx.resumeId ? ['--session', ctx.resumeId] : []),
-        '--prompt',
-        ctx.prompt,
-      ];
+      const args = ['--auto', '--standalone', ...(ctx.resumeId ? ['--session', ctx.resumeId] : []), '--prompt', ctx.prompt];
       return { args, env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(config), CUBEFARM_NOTIFY_URL: ctx.notify.url } };
     }
   }
