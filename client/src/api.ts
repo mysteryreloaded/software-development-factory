@@ -90,6 +90,7 @@ export const api = {
       autoMerge?: boolean;
       ceoReview?: boolean;
       browserTesting?: boolean;
+      lookTool?: boolean;
       color?: string;
       links?: string[];
       mission?: string;

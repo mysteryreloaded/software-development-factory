@@ -28,6 +28,8 @@ interface PromptBase {
   branch: string;
   /** What the office did about the desk's dependencies (deps.ts depsPromptLine); empty or absent says nothing. */
   depsLine?: string;
+  /** The look tool is wired into this session (#123, OpenCode only): step 4 gets one more sentence about it. */
+  lookTool?: boolean;
 }
 
 export interface DevPromptInput extends PromptBase {
@@ -56,10 +58,14 @@ export const PLACEHOLDERS = {
 /** In every agent's prompt (the CEO's too): an office session ends with its turn, so nothing wakes them later. */
 export const ONE_TURN = "Your session ends when your turn ends: background tasks and notifications won't wake you. Never end a turn to wait. Wait in the foreground with a timeout, then finish.";
 
+/** Appended to step 4 when the look tool is wired into the session (#123): screenshots never reach the model directly. */
+const LOOK_TOOL_LINE =
+  ' Screenshots are saved as files and not shown to you. To see one, call look_at_image with its path and your question. For fine detail, measure positions with browser_evaluate and confirm with region + zoom. Never open more than one image yourself in this session.';
+
 export const devBranch = (issue: number | string, slug: string) => `swarm/issue-${issue}-${slug}`;
 export const qaBranch = (pr: number | string, slug: string) => `qa/pr-${pr}-${slug}`;
 
-export function devSystemPrompt({ agent: a, repo, port, cwd, branch, linked, fixing, depsLine }: DevPromptInput) {
+export function devSystemPrompt({ agent: a, repo, port, cwd, branch, linked, fixing, depsLine, lookTool }: DevPromptInput) {
   const push = fixing ? `git push origin HEAD:${fixing.headRef}` : `git push -u origin ${branch}`;
   const links = linked.map((r) => `- ${r.fullName}: read-only reference clone at ${r.dir}`);
   return [
@@ -81,7 +87,7 @@ export function devSystemPrompt({ agent: a, repo, port, cwd, branch, linked, fix
     '2. Implement the change with focused commits and clear messages.',
     "3. Run the project's existing tests, linters and build (if any) and fix what you broke. Install dependencies first if needed (e.g. npm install when node_modules is missing).",
     repo.browserTesting
-      ? `4. If the project has a web UI, start its dev server in the background on port ${port} (reserved for you, so you don't collide with teammates), then check your change with the Playwright browser tools (mcp__playwright__browser_navigate, browser_snapshot, browser_click, browser_take_screenshot). Stop the dev server when you're done.`
+      ? `4. If the project has a web UI, start its dev server in the background on port ${port} (reserved for you, so you don't collide with teammates), then check your change with the Playwright browser tools (mcp__playwright__browser_navigate, browser_snapshot, browser_click, browser_take_screenshot). Stop the dev server when you're done.${lookTool ? LOOK_TOOL_LINE : ''}`
       : '4. Verify the behaviour you changed as directly as you can.',
     `5. Push: ${push}`,
     fixing
@@ -96,7 +102,7 @@ export function devSystemPrompt({ agent: a, repo, port, cwd, branch, linked, fix
     .join('\n');
 }
 
-export function qaSystemPrompt({ agent: a, repo, port, cwd, branch, pr, depsLine, testStep }: QaPromptInput) {
+export function qaSystemPrompt({ agent: a, repo, port, cwd, branch, pr, depsLine, testStep, lookTool }: QaPromptInput) {
   return [
     `You are ${a.name}, a software engineer on an autonomous agent team ("cubefarm"). On this task you are QA: you review and independently verify a pull request before it is merged. Your sign-off is the review: ${repo.autoMerge ? "on this floor a PR you pass merges by itself as soon as GitHub's checks are green, so nobody else reads the code after you. " : ''}Be thorough and skeptical, but fair: fail a PR only for real problems (broken behaviour, failing tests or build, the issue's requirements not met, obvious regressions), not for style preferences.`,
     '',
@@ -115,7 +121,7 @@ export function qaSystemPrompt({ agent: a, repo, port, cwd, branch, pr, depsLine
     `2. Review the code as a careful reviewer would: git diff origin/${repo.defaultBranch}...HEAD. Look for bugs, unhandled errors and edge cases, security problems, leftover debug code, and new logic without tests.`,
     testStep ?? "3. Install dependencies if needed (e.g. npm install when node_modules is missing), then run the project's test suite, linters, type checks and build (whichever exist).",
     repo.browserTesting
-      ? `4. If the project has a UI, start it in the background on port ${port} (reserved for you) and exercise the change in a real browser with the Playwright tools: navigate, click, type, resize to a phone size, try edge cases, and check the console for errors. Take a screenshot with browser_take_screenshot (no filename) of every important state: the screenshots are attached to the PR as evidence. Stop the server afterwards.`
+      ? `4. If the project has a UI, start it in the background on port ${port} (reserved for you) and exercise the change in a real browser with the Playwright tools: navigate, click, type, resize to a phone size, try edge cases, and check the console for errors. Take a screenshot with browser_take_screenshot (no filename) of every important state: the screenshots are attached to the PR as evidence. Stop the server afterwards.${lookTool ? LOOK_TOOL_LINE : ''}`
       : '4. Exercise the changed behaviour directly (run the program, call the API, write a quick script).',
     '5. You may write throwaway scripts to probe behaviour, but do not commit them.',
     "A merge conflict with the default branch is not a fail, nor is a red check unrelated to this change (a flake or an outage: say why): judge the change itself (on a throwaway merge if you need newer work) and pass it if it's good. The office sends conflicting PRs back for a merge fix, then you re-test, and re-runs a failed check before anyone fixes it.",

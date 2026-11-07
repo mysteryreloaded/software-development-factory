@@ -25,6 +25,13 @@ describe('the Playwright MCP server', () => {
     expect(playwrightMcp()!.args).not.toContain('--output-dir');
   });
 
+  it('leaves --image-responses out unless asked, and passes "omit" when asked (#123, look tool sessions)', () => {
+    expect(playwrightMcp(path.join('session', 'browser'))!.args).not.toContain('--image-responses');
+    expect(playwrightMcp(path.join('session', 'browser'), false)!.args).not.toContain('--image-responses');
+    const omit = playwrightMcp(path.join('session', 'browser'), true)!.args;
+    expect(omit.slice(-2)).toEqual(['--image-responses', 'omit']);
+  });
+
   it('passes Windows paths with spaces as whole arguments, unquoted', () => {
     const cmd = playwrightMcpCommand(
       'C:\\Users\\A B\\AppData\\npm\\node_modules\\cubefarm\\node_modules\\@playwright\\mcp\\cli.js',

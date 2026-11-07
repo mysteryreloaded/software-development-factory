@@ -66,6 +66,7 @@ function repo(patch: Partial<RepoView> = {}): RepoView {
     ceoReview: false,
     folderSync: 'in sync',
     browserTesting: true,
+    lookTool: false,
     links: [],
     mission: 'Build the thing',
     summary: 'A web app',

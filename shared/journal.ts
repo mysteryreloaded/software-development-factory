@@ -196,6 +196,7 @@ export function compactRepo(r: RepoView, secrets: readonly string[] = []): RepoV
     ceoReview: r.ceoReview,
     folderSync: null,
     browserTesting: r.browserTesting,
+    lookTool: r.lookTool,
     links: r.links,
     mission: '',
     summary: text(r.summary, 140, secrets),

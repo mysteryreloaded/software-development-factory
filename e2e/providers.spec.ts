@@ -108,7 +108,8 @@ test('add, edit (keeping the key), assign an agent, and delete a custom provider
   await page.getByLabel('Name', { exact: true }).fill('My Test Provider');
   await page.getByLabel('Model name').fill('demo-model-2');
   await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByText('My Test Provider')).toBeVisible();
+  // Scoped to the row's <b>: the look tool's provider picker (#123) also lists the name, as an <option>.
+  await expect(page.locator('b').filter({ hasText: 'My Test Provider' })).toBeVisible();
   await expect(page.getByText(/🔑 key set/)).toBeVisible(); // the key survived the edit
 
   // Hire an agent (by name, through the API: the demo's own simulated hiring/let-go churn makes a row count

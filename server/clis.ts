@@ -197,6 +197,8 @@ export interface LaunchContext {
   browser: { command: string; args: string[] } | null;
   /** A custom provider (#113): wired into OpenCode's config on top of everything else an OpenCode agent gets. null/absent for a built-in CLI. */
   provider?: { id: string; name: string; baseURL: string; apiKey: string; model: string; contextLimit?: number; outputLimit?: number } | null;
+  /** The look tool's URL for this session (#123, OpenCode only): wired in as a remote MCP server named "look". null/absent: off. */
+  lookUrl?: string | null;
 }
 
 export interface Launch {
@@ -282,13 +284,16 @@ export function launchArgs(id: CliId, ctx: LaunchContext): Launch {
       return { args: ctx.resumeId ? ['resume', ...args, ctx.resumeId, ctx.prompt] : [...args, '--', ctx.prompt], env: { CUBEFARM_HOOK_URL: ctx.notify.url } };
     }
     case 'opencode': {
+      const mcp: Record<string, unknown> = {};
+      if (ctx.browser) mcp.playwright = { type: 'local', command: [ctx.browser.command, ...ctx.browser.args], enabled: true };
+      if (ctx.lookUrl) mcp.look = { type: 'remote', url: ctx.lookUrl, enabled: true };
       const config = {
         plugin: [ctx.plugin],
         instructions: [ctx.files.system],
         autoupdate: false, // several agents starting at once must not each reinstall it
         permission: { edit: 'allow', bash: 'allow', webfetch: 'allow' }, // it can't stop to ask either
         ...(ctx.model ? { model: ctx.model } : {}), // no --model flag on this CLI (#120): it's a config key
-        ...(ctx.browser ? { mcp: { playwright: { type: 'local', command: [ctx.browser.command, ...ctx.browser.args], enabled: true } } } : {}),
+        ...(Object.keys(mcp).length ? { mcp } : {}),
         ...(ctx.provider ? { providers: { [ctx.provider.id]: customProviderOpencodeConfig(ctx.provider) } } : {}),
       };
       // No project argument: it starts in its terminal's folder, and a desk path in its command line would make the

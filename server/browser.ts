@@ -26,16 +26,20 @@ export function playwrightMcpCli(): string | null {
 /**
  * The MCP server command: node on the CLI script, each path its own argument (no shell, so spaces need no quoting).
  * browser-init.js keeps pages from taking the real mouse with pointer lock (headless Chrome does on Windows).
- * `outputDir` gets snapshots and unnamed screenshots (the terminal runtime collects them from there).
+ * `outputDir` gets snapshots and unnamed screenshots (the terminal runtime collects them from there). `omitImages`
+ * (#123, look tool sessions only) still saves screenshots to `outputDir` but never sends them to the model.
  */
-export function playwrightMcpCommand(cli: string, initScript: string, outputDir?: string, node = process.execPath): McpCommand {
-  return { command: node, args: [cli, '--headless', '--isolated', ...(outputDir ? ['--output-dir', outputDir] : []), '--init-script', initScript] };
+export function playwrightMcpCommand(cli: string, initScript: string, outputDir?: string, node = process.execPath, omitImages = false): McpCommand {
+  return {
+    command: node,
+    args: [cli, '--headless', '--isolated', ...(outputDir ? ['--output-dir', outputDir] : []), '--init-script', initScript, ...(omitImages ? ['--image-responses', 'omit'] : [])],
+  };
 }
 
 /** The office's Playwright MCP server for a session, or null when the pinned package can't be found. */
-export function playwrightMcp(outputDir?: string): McpCommand | null {
+export function playwrightMcp(outputDir?: string, omitImages = false): McpCommand | null {
   const cli = playwrightMcpCli();
-  return cli ? playwrightMcpCommand(cli, path.join(import.meta.dirname, 'browser-init.js'), outputDir) : null;
+  return cli ? playwrightMcpCommand(cli, path.join(import.meta.dirname, 'browser-init.js'), outputDir, process.execPath, omitImages) : null;
 }
 
 /** Where Playwright's "chrome" channel looks for Google Chrome (bin/cubefarm.js doctor checks the same places). */

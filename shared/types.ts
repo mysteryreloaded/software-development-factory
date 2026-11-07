@@ -71,6 +71,7 @@ export interface RepoView {
   ceoReview: boolean; // QA-passed PRs wait for the CEO to approve the head commit before they merge
   folderSync: string | null; // how the floor's main checkout stands against GitHub: "in sync", "updated to abc1234", "2 behind: local changes" …
   browserTesting: boolean;
+  lookTool: boolean; // OpenCode agents on this floor get the look tool (#123): ask a vision model about a screenshot or video
   links: string[]; // ids of related repos this floor's agents can read for context
   mission: string; // the manager's brief: what this floor is building
   summary: string; // the CEO's one-line read of the project, e.g. "3D browser game · Three.js + Vite"
@@ -366,6 +367,7 @@ export interface SwarmSettings {
   listen: ListenSettings;
   notify: NotifySettings;
   previewAddress: string; // '' = off; else an http(s) template with {floor} in its host or port, so other devices reach a floor's running app (shared/previewAddress.ts)
+  lookProvider: string | null; // the custom provider (#113) the look tool (#123) asks; null = none picked, so the tool stays off even where its floor switch is on
 }
 
 /** What the office tells the manager about when they're away (docs/pocket.md). */

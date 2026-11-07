@@ -145,6 +145,9 @@ function FloorRow({ repo, all }: { repo: RepoView; all: RepoView[] }) {
         <label className="toggle">
           <input type="checkbox" checked={repo.browserTesting} onChange={(e) => patch({ browserTesting: e.target.checked })} /> 🌐 Browser testing (Playwright MCP)
         </label>
+        <label className="toggle" title="OpenCode agents on this floor can ask a vision model about a screenshot or video, without it ever reaching their own conversation. Pick the model in Settings → Providers.">
+          <input type="checkbox" checked={repo.lookTool} onChange={(e) => patch({ lookTool: e.target.checked })} /> 👁 Look tool for OpenCode agents
+        </label>
         <span className="spacer" />
         <button
           className="btn btn-small btn-ghost"

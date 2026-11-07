@@ -248,6 +248,26 @@ describe('launchArgs', () => {
     expect(withModel.args).toEqual(['--auto', '--standalone', '--prompt', '--looks like a flag']);
     expect(JSON.parse(withModel.env.OPENCODE_CONFIG_CONTENT).model).toBe('anthropic/claude-sonnet-5');
   });
+
+  it('wires the look tool into OpenCode as a remote MCP server named "look", only when a URL is given (#123)', () => {
+    const off = launchArgs('opencode', ctx());
+    expect(JSON.parse(off.env.OPENCODE_CONFIG_CONTENT).mcp).toBeUndefined();
+    const on = launchArgs('opencode', ctx({ lookUrl: 'http://127.0.0.1:1/api/look/t' }));
+    expect(JSON.parse(on.env.OPENCODE_CONFIG_CONTENT).mcp).toEqual({ look: { type: 'remote', url: 'http://127.0.0.1:1/api/look/t', enabled: true } });
+    expect(on.args).toEqual(off.args); // the look tool never changes the command line
+  });
+
+  it('keeps both playwright and look in the same mcp block when a session has both (#123)', () => {
+    const { env } = launchArgs('opencode', ctx({ browser: { command: 'node', args: ['cli.js'] }, lookUrl: 'http://127.0.0.1:1/api/look/t' }));
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT).mcp).toEqual({
+      playwright: { type: 'local', command: ['node', 'cli.js'], enabled: true },
+      look: { type: 'remote', url: 'http://127.0.0.1:1/api/look/t', enabled: true },
+    });
+  });
+
+  it('never gives Claude Code or Codex the look tool: their launch args are unchanged with lookUrl set (#123)', () => {
+    for (const cli of ['claude', 'codex'] as const) expect(launchArgs(cli, ctx({ lookUrl: 'http://127.0.0.1:1/api/look/t' }))).toEqual(launchArgs(cli, ctx()));
+  });
 });
 
 describe('resumeChoice', () => {

@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +7,9 @@ import type { Request, Response } from 'express';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { browserProblem, playwrightMcp } from './browser.ts';
 import { HOME_DIR } from './config.ts';
-import { cliLabel, CODEX_HOOK_SOURCE, codexThread, commandFor, hookReviewKey, interruptions, launchArgs, NOTIFY_SOURCE, OPENCODE_PLUGIN_FILES, STATUSLINE_SOURCE, trustKey } from './clis.ts';
+import { cliLabel, CODEX_HOOK_SOURCE, cliRuns, codexThread, commandFor, hookReviewKey, interruptions, launchArgs, NOTIFY_SOURCE, OPENCODE_PLUGIN_FILES, STATUSLINE_SOURCE, trustKey } from './clis.ts';
+import { createLookServer } from './lookMcp.ts';
+import type { FfmpegRunner, LookDeps } from './look.ts';
 import { adoptPty, discardPty, hooksReady, keeperHookUrl, keeperPid, leaveKeeper, spawnPty, startKeeper, terminalsAvailable, type Pty } from './ptyClient.ts';
 import {
   clip,
@@ -62,8 +65,18 @@ export function setOfficeUrl(url: string) {
 interface Route {
   hook(body: Record<string, unknown>): Record<string, unknown>;
   office?: OfficeTools;
+  look?: LookDeps;
 }
 const routes = new Map<string, Route>();
+
+/** The look tool's ffmpeg runner (#123): plain execFile, so look.ts's isEnoent (err.code === 'ENOENT') sees the real spawn error. */
+const runFfmpeg: FfmpegRunner = (args) =>
+  new Promise((resolve, reject) => {
+    execFile('ffmpeg', args, { timeout: 120_000, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout: stdout.toString(), stderr: stderr.toString() });
+    });
+  });
 
 /** A hook, status line or notify call from a CLI (POST /api/hooks/:token). The answer is the hook's output. */
 export function handleHook(token: string, body: unknown): Record<string, unknown> {
@@ -85,6 +98,23 @@ export async function handleMcp(token: string, req: Request, res: Response) {
     return;
   }
   const server = office.serve();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  res.on('close', () => {
+    void transport.close();
+    void server.close();
+  });
+  await server.connect(transport);
+  await transport.handleRequest(req, res, req.body);
+}
+
+/** The look tool over MCP (#123, Streamable HTTP, stateless: a fresh server per request), for the session's token. `lookFor` is injected so tests can serve a fake token without a live session. */
+export async function handleLook(token: string, req: Request, res: Response, lookFor: (t: string) => LookDeps | undefined = (t) => routes.get(t)?.look) {
+  const look = lookFor(token);
+  if (!look) {
+    res.status(404).json({ jsonrpc: '2.0', error: { code: -32001, message: 'This session has ended.' }, id: null });
+    return;
+  }
+  const server = createLookServer(look);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   res.on('close', () => {
     void transport.close();
@@ -221,10 +251,10 @@ const metaOf = (l: LiveCli): CliMeta => ({ agentId: l.agentId, cli: l.cli, token
 const remember = (l: LiveCli) => l.proc?.setMeta(metaOf(l));
 
 /** A CLI is running in its terminal: its output, its keys and its hooks are connected. */
-function wire(l: LiveCli, office?: OfficeTools) {
+function wire(l: LiveCli, office?: OfficeTools, look?: LookDeps) {
   const p = l.proc!;
   lives.set(l.term, l);
-  routes.set(l.token, { hook: (b) => (l.session ? l.session.hook(b) : idleHook(l, b)), office });
+  routes.set(l.token, { hook: (b) => (l.session ? l.session.hook(b) : idleHook(l, b)), office, look });
   l.term.bind({ write: (d) => quietly(() => p.write(d)), resize: (c, r) => quietly(() => p.resize(c, r)) });
   p.onData((data) => {
     if (lives.get(l.term) === l) l.term.write(data);
@@ -632,8 +662,12 @@ export function startCliSession(opts: SessionOptions, callbacks: SessionCallback
   // Through the keeper, a hook waits while the office restarts instead of failing: the CLIs allow it longer.
   const keeper = keeperHookUrl();
   const hookUrl = `${keeper ?? officeUrl}/api/hooks/${token}`;
+  // The look tool (#123): only OpenCode sessions whose floor and provider both resolved it.
+  const wantsLook = !!opts.look && cliRuns(cli) === 'opencode';
+  const lookUrl = wantsLook ? `${officeUrl}/api/look/${token}` : null;
   // The browser for a session. Its snapshots and unnamed screenshots go to the session's folder, not the worktree.
-  const browser = opts.browserTesting ? playwrightMcp(path.join(dir, 'browser')) : null;
+  // Look tool sessions start it with --image-responses omit: screenshots still save there, never reach the model.
+  const browser = opts.browserTesting ? playwrightMcp(path.join(dir, 'browser'), wantsLook) : null;
   const browserIssue = opts.browserTesting ? browserProblem(browser) : null;
   if (browserIssue) log([{ kind: 'error', text: browserIssue }]);
   let prompt = opts.prompt;
@@ -683,7 +717,9 @@ export function startCliSession(opts: SessionOptions, callbacks: SessionCallback
     plugin: pathToFileURL(path.join(BIN_DIR, 'opencode-plugin')).href,
     browser,
     provider: opts.provider,
+    lookUrl,
   });
+  const lookDeps: LookDeps | undefined = wantsLook && opts.look ? { endpoint: opts.look, fetch, ffmpeg: runFfmpeg, readFile: (p) => fs.promises.readFile(p), tmpDir: dir } : undefined;
 
   // Each agent must be a clean instance on the account its CLI is logged into: no API keys (they would switch Claude
   // Code's billing to the API) and nothing inherited from a Claude Code session the office itself was started from.
@@ -711,7 +747,7 @@ export function startCliSession(opts: SessionOptions, callbacks: SessionCallback
     }
     l.proc = p;
     live = l;
-    wire(l, opts.office);
+    wire(l, opts.office, lookDeps);
     shotTimer = setInterval(collectShots, 2000);
 
     // Starting up: answer the folder-trust question for the office's own worktrees (the answer that trusts it), and
