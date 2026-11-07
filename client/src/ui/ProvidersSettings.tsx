@@ -199,6 +199,33 @@ function CustomProviderRow({ p, onEdit }: { p: CustomProviderView; onEdit: () =>
   );
 }
 
+/** Settings → Providers: which custom provider (if any) the look tool (#123) asks. */
+function LookProviderPicker({ custom }: { custom: CustomProviderView[] }) {
+  const lookProvider = useStore((s) => s.settings.lookProvider);
+  const [error, setError] = useState('');
+  const save = (id: string) => void api.updateSettings({ lookProvider: id || null }).then(() => setError(''), (err) => setError(err instanceof Error ? err.message : String(err)));
+  return (
+    <div className="row wrap">
+      <label className="field">
+        <span>👁 The look tool uses:</span>
+        <select value={lookProvider ?? ''} onChange={(e) => save(e.target.value)}>
+          <option value="">None (off everywhere)</option>
+          {custom.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {error && (
+        <p className="term-error small" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function ProvidersTab() {
   const [list, setList] = useState<{ builtIn: BuiltInProvider[]; custom: CustomProviderView[] } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -240,6 +267,7 @@ export function ProvidersTab() {
             ))}
             {list.custom.map((p) => (open !== 'add' && open?.id === p.id ? null : <CustomProviderRow key={p.id} p={p} onEdit={() => setOpen(p)} />))}
             {list.custom.length === 0 && <p className="muted small">No custom providers yet.</p>}
+            {list.custom.length > 0 && <LookProviderPicker custom={list.custom} />}
           </>
         )}
       </div>

@@ -11,7 +11,7 @@ import { DAY_PARTS } from '../shared/speech.ts';
 import { DEMO, DEMO_SCALE, PORT, STATE_FILE, VERSION, WORKSPACE_ROOT } from './config.ts';
 import { MACHINES_DIR } from './workspace.ts';
 import { realBackend } from './backend.ts';
-import { handleHook, handleMcp, setOfficeUrl } from './cliRunner.ts';
+import { handleHook, handleLook, handleMcp, setOfficeUrl } from './cliRunner.ts';
 import { createDemoBackend } from './demo.ts';
 import { parseRange } from './journal.ts';
 import { underLauncher } from './officeUpdate.ts';
@@ -45,6 +45,9 @@ app.use(previewHostMiddleware(previewHostBackend));
 app.post('/api/hooks/:token', express.json({ limit: '64mb' }), (req, res) => void res.json(handleHook(String(req.params.token), req.body)));
 app.post('/api/mcp/:token', express.json({ limit: '4mb' }), (req, res, next) => void handleMcp(String(req.params.token), req, res).catch(next));
 app.all('/api/mcp/:token', (_req, res) => void res.status(405).set('Allow', 'POST').end());
+// The look tool (#123), served only to OpenCode sessions whose floor switch and provider both resolved.
+app.post('/api/look/:token', express.json({ limit: '4mb' }), (req, res, next) => void handleLook(String(req.params.token), req, res).catch(next));
+app.all('/api/look/:token', (_req, res) => void res.status(405).set('Allow', 'POST').end());
 
 type Handler = (req: Request, res: Response) => Promise<unknown> | unknown;
 const route = (fn: Handler) => async (req: Request, res: Response, next: NextFunction) => {

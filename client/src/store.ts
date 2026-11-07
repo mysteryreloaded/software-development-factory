@@ -242,6 +242,7 @@ export const useStore = create<State>((set, get) => ({
     listen: { provider: 'off', autoSend: false, handsFree: false },
     notify: DEFAULT_NOTIFY,
     previewAddress: '',
+    lookProvider: null,
   },
   clis: [],
   sessionsRunning: {},

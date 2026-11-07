@@ -81,6 +81,7 @@ function repo(pulls: PullInfo[]): RepoView {
     ceoReview: false,
     folderSync: null,
     browserTesting: false,
+    lookTool: false,
     links: [],
     mission: '',
     summary: '',

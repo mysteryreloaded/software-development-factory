@@ -52,6 +52,7 @@ const floor = (id: string, n: number, issues: number): RepoView => ({
   ceoReview: false,
   folderSync: null,
   browserTesting: true,
+  lookTool: false,
   links: [],
   mission: '',
   summary: '',

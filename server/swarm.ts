@@ -123,6 +123,7 @@ interface PersistedRepo {
   autoMerge: boolean; // PRs merge themselves once QA passes and GitHub's checks are green
   ceoReview: boolean; // QA-passed PRs wait for the CEO to approve the head commit before they merge
   browserTesting: boolean;
+  lookTool: boolean; // OpenCode agents on this floor get the look tool (#123)
   links: string[]; // other connected repos this floor's agents may read
   localPath: string | null; // the manager's own project folder (null: a clone under WORKSPACE_ROOT)
   mission: string;
@@ -504,6 +505,7 @@ export class Swarm {
       listen: { ...DEFAULT_LISTEN },
       notify: notifySettings(DEFAULT_NOTIFY, {}),
       previewAddress: '',
+      lookProvider: null,
     },
     repos: [],
     agents: [],
@@ -662,6 +664,7 @@ export class Swarm {
           summary: r.summary ?? '',
           qaBrief: r.qaBrief ?? '',
           localPath: r.localPath ?? null,
+          lookTool: r.lookTool ?? false,
           preview: { command: r.preview?.command ?? null, env: { ...r.preview?.env } },
         })),
         // Developers and QA testers became agents (docs/agents.md): testers keep their seats, now the east-wall desks.
@@ -767,6 +770,7 @@ export class Swarm {
     const knownProviderIds = new Set(this.state.customProviders.map((p) => p.id));
     for (const a of this.state.agents) if (a.cli && !isCli(a.cli) && !knownProviderIds.has(a.cli)) a.cli = '';
     if (!isCli(this.state.settings.defaultCli) && !knownProviderIds.has(this.state.settings.defaultCli)) this.state.settings.defaultCli = 'claude';
+    if (this.state.settings.lookProvider && !knownProviderIds.has(this.state.settings.lookProvider)) this.state.settings.lookProvider = null;
     for (const r of this.state.repos) if (r.localPath) this.backend.setLocalPath(r.fullName, r.localPath);
     const interrupted: PersistedAgent[] = [];
     for (const a of this.state.agents) {
@@ -999,6 +1003,7 @@ export class Swarm {
       ceoReview: r.ceoReview,
       folderSync: rt.folderSync,
       browserTesting: r.browserTesting,
+      lookTool: r.lookTool,
       links: r.links,
       mission: r.mission,
       summary: r.summary,
@@ -1412,6 +1417,7 @@ export class Swarm {
       autoMerge: true,
       ceoReview: false,
       browserTesting: true,
+      lookTool: false,
       links: [],
       localPath: folder,
       mission: (opts.mission ?? '').trim().slice(0, 4000),
@@ -1518,7 +1524,7 @@ export class Swarm {
 
   updateRepo(
     id: string,
-    patch: Partial<Pick<PersistedRepo, 'autoAssign' | 'autoMerge' | 'ceoReview' | 'browserTesting' | 'color' | 'links' | 'mission' | 'summary' | 'qaBrief'>> & { previewCommand?: unknown; previewEnv?: unknown },
+    patch: Partial<Pick<PersistedRepo, 'autoAssign' | 'autoMerge' | 'ceoReview' | 'browserTesting' | 'lookTool' | 'color' | 'links' | 'mission' | 'summary' | 'qaBrief'>> & { previewCommand?: unknown; previewEnv?: unknown },
   ) {
     const repo = this.repo(id);
     const preview = parsePreviewPatch(patch.previewCommand, patch.previewEnv);
@@ -1538,6 +1544,7 @@ export class Swarm {
           this.enqueueCeo({ kind: 'code-review', repoId: repo.id, prNumber: rec.prNumber, at: Date.now() });
     }
     if (patch.browserTesting !== undefined) repo.browserTesting = !!patch.browserTesting;
+    if (patch.lookTool !== undefined) repo.lookTool = !!patch.lookTool;
     if (patch.color && /^#[0-9a-f]{6}$/i.test(patch.color)) repo.color = patch.color;
     if (Array.isArray(patch.links)) repo.links = patch.links.filter((l) => l !== id && this.state.repos.some((r) => r.id === l));
     if (typeof patch.mission === 'string') repo.mission = patch.mission.trim().slice(0, 4000);
@@ -2459,6 +2466,16 @@ export class Swarm {
     return apiKey ? { ...p, apiKey } : null;
   }
 
+  /** The look tool's endpoint for a session (#123): only when the floor's switch is on, the session runs OpenCode, and lookProvider resolves to a provider with a stored key. */
+  private lookEndpoint(repo: PersistedRepo, cli: CliId): { baseURL: string; model: string; apiKey: string } | null {
+    if (!repo.lookTool || cliRuns(cli) !== 'opencode') return null;
+    const id = this.state.settings.lookProvider;
+    const p = id ? this.state.customProviders.find((x) => x.id === id) : undefined;
+    if (!p) return null;
+    const apiKey = this.providerKeys.get(p.id);
+    return apiKey ? { baseURL: p.baseURL, model: p.model, apiKey } : null;
+  }
+
   // ---------- terminals ----------
 
   private async loadTerminal(agentId: string): Promise<AgentTerminal | null> {
@@ -2499,7 +2516,7 @@ export class Swarm {
   }
 
   private buildSystemAppend(a: PersistedAgent, repo: PersistedRepo, cwd: string, branch: string, fixing?: { pr: number; headRef: string }, deps?: DeskDeps) {
-    return devSystemPrompt({ agent: a, repo, port: this.port(a), cwd, branch, linked: this.linkedDirs(repo), fixing, depsLine: depsPromptLine(deps?.outcome, deps?.installer) });
+    return devSystemPrompt({ agent: a, repo, port: this.port(a), cwd, branch, linked: this.linkedDirs(repo), fixing, depsLine: depsPromptLine(deps?.outcome, deps?.installer), lookTool: !!this.lookEndpoint(repo, this.agentCli(a)) });
   }
 
   private linkedDirs(repo: PersistedRepo) {
@@ -2511,7 +2528,7 @@ export class Swarm {
     const a = this.agent(id);
     if (a.role === 'ceo') return ceoPromptPreview(ceoSystemPrompt(this.ceoPromptInput(a)));
     const repo = this.repo(a.repoId);
-    return agentPromptPreview({ agent: a, repo, port: this.port(a), slug: slugify(a.name), linked: this.linkedDirs(repo) });
+    return agentPromptPreview({ agent: a, repo, port: this.port(a), slug: slugify(a.name), linked: this.linkedDirs(repo), lookTool: !!this.lookEndpoint(repo, this.agentCli(a)) });
   }
 
   private beginTask(a: PersistedAgent, patch: Partial<PersistedAgent>, banner: string, preparing: string) {
@@ -2697,6 +2714,9 @@ export class Swarm {
     rt.cli = how.cli ?? 'claude';
     if (dropped)
       this.appendLog(a, [{ kind: 'system', text: `↻ Their last session was ${cliLabel((resumeCli ?? a.sessionCli) ?? 'claude', this.state.customProviders)}'s; starting a fresh ${cliLabel(how.cli ?? 'claude', this.state.customProviders)} session.` }]);
+    const look = this.lookEndpoint(repo, rt.cli);
+    if (repo.lookTool && cliRuns(rt.cli) === 'opencode' && !look)
+      this.appendLog(a, [{ kind: 'system', text: `⚠ Look tool is on for this floor, but ${this.state.settings.lookProvider ? 'its provider has no stored key' : 'no provider is picked for it (Settings → Providers)'}; this session runs without it.` }]);
     this.emitAgent(a);
     const active = (entries: LogEntry[]) => {
       if (entries.some((e) => e.kind !== 'manager')) this.activity.set(a.id, Date.now());
@@ -2715,6 +2735,7 @@ export class Swarm {
         env: this.machineEnv(a),
         outputSchema,
         provider: this.providerFor(how.cli),
+        look,
         // An agent's CLI stays at its prompt after building or fixing, for the manager and for follow-ups; after QA it
         // closes, so the next QA run of that PR is a fresh session.
         keepAlive: a.task !== 'qa',
@@ -2959,7 +2980,7 @@ export class Swarm {
   }
 
   private buildQaSystemAppend(a: PersistedAgent, repo: PersistedRepo, cwd: string, branch: string, pr: PrDetails, testStep: string, deps?: DeskDeps) {
-    return qaSystemPrompt({ agent: a, repo, port: this.port(a), cwd, branch, pr, testStep, depsLine: depsPromptLine(deps?.outcome, deps?.installer) });
+    return qaSystemPrompt({ agent: a, repo, port: this.port(a), cwd, branch, pr, testStep, depsLine: depsPromptLine(deps?.outcome, deps?.installer), lookTool: !!this.lookEndpoint(repo, this.agentCli(a)) });
   }
 
   private async runQa(a: PersistedAgent, repo: PersistedRepo, rec: QaRecord) {
@@ -3498,6 +3519,11 @@ export class Swarm {
       if (addr === null) throw new HttpError(400, 'The preview address must be an http(s) address with {floor} in its host or port');
       s.previewAddress = addr;
     }
+    if (patch.lookProvider !== undefined) {
+      if (patch.lookProvider === null) s.lookProvider = null;
+      else if (this.state.customProviders.some((p) => p.id === patch.lookProvider)) s.lookProvider = patch.lookProvider;
+      else throw new HttpError(400, `No custom provider "${patch.lookProvider}".`);
+    }
     this.save();
     this.broadcast({ type: 'settings', settings: s });
     this.emitCeo();
@@ -3583,6 +3609,7 @@ export class Swarm {
     }
     const [removed] = this.state.customProviders.splice(idx, 1);
     this.providerKeys.delete(id);
+    if (this.state.settings.lookProvider === id) this.state.settings.lookProvider = null;
     void this.saveProviderKeys();
     this.emitProviders();
     return removed;

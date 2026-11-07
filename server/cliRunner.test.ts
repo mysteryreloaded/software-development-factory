@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { lostConversation, resumableSession } from './cliRunner.ts';
+import express from 'express';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { handleLook, lostConversation, resumableSession } from './cliRunner.ts';
+import type { FfmpegRunner, LookDeps, ReadFile } from './look.ts';
 
 describe('resumableSession', () => {
   const onDisk = (files: string[]) => (file: string) => files.includes(file);
@@ -26,5 +30,53 @@ describe('lostConversation', () => {
 
   it('ignores other screens', () => {
     expect(lostConversation('Claude Code v2.1.280\n❯ ')).toBe(false);
+  });
+});
+
+describe('the look tool over HTTP (#123)', () => {
+  let server: http.Server;
+  let base: string;
+
+  const fakeDeps = (): LookDeps => {
+    const ffmpeg: FfmpegRunner = async () => ({ stdout: '', stderr: '' });
+    const readFile: ReadFile = async () => {
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    };
+    return { endpoint: { baseURL: 'http://model.test/v1', model: 'm' }, fetch: fetch, ffmpeg, readFile, tmpDir: '/tmp' };
+  };
+
+  beforeAll(async () => {
+    const app = express();
+    app.post('/api/look/:token', express.json({ limit: '4mb' }), (req, res, next) =>
+      void handleLook(String(req.params.token), req, res, (t) => (t === 'known' ? fakeDeps() : undefined)).catch(next),
+    );
+    server = http.createServer(app);
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise((r) => server.close(r));
+  });
+
+  const rpc = (token: string, body: unknown) =>
+    fetch(`${base}/api/look/${token}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify(body),
+    });
+
+  it('answers 404 for an unknown token', async () => {
+    const res = await rpc('nope', { jsonrpc: '2.0', method: 'tools/list', id: 1 });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/session has ended/);
+  });
+
+  it('serves both look tools for a known token', async () => {
+    const res = await rpc('known', { jsonrpc: '2.0', method: 'tools/list', id: 1 });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result: { tools: { name: string }[] } };
+    expect(body.result.tools.map((t) => t.name).sort()).toEqual(['look_at_image', 'look_at_video']);
   });
 });

@@ -36,6 +36,8 @@ export interface SessionOptions {
   cli?: CliId;
   /** A custom provider (#113): this runs OpenCode with it wired into the config. Ignored for a built-in CLI. */
   provider?: { id: string; name: string; baseURL: string; apiKey: string; model: string; contextLimit?: number; outputLimit?: number } | null;
+  /** The look tool's endpoint (#123): only resolved by the swarm when the floor's switch is on, the session runs OpenCode, and lookProvider has a stored key. Ignored by anything but the terminal runtime's OpenCode sessions. */
+  look?: { baseURL: string; model: string; apiKey: string } | null;
   /** Who and on what, for the CLI's session name and status line, e.g. "Ada · #12 Add dark mode". */
   label?: string;
   /** Leave the CLI waiting at its prompt when the task is done, for the manager and for follow-ups. */

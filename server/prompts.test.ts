@@ -142,6 +142,24 @@ ${ONE_TURN}`);
     expect(devSystemPrompt({ ...dev, agent: agent(), repo: repo(), depsLine: '' })).toBe(`${BEFORE.devFull}\n${ONE_TURN}`);
   });
 
+  it('adds the look-tool sentence to step 4 only when lookTool is on (#123)', () => {
+    const SENTENCE = 'Screenshots are saved as files and not shown to you. To see one, call look_at_image with its path and your question.';
+    const devOff = devSystemPrompt({ ...dev, agent: agent(), repo: repo() });
+    const devOn = devSystemPrompt({ ...dev, agent: agent(), repo: repo(), lookTool: true });
+    expect(devOff).not.toContain(SENTENCE);
+    expect(devOn).toContain(SENTENCE);
+    expect(devOn.replace(` ${SENTENCE} For fine detail, measure positions with browser_evaluate and confirm with region + zoom. Never open more than one image yourself in this session.`, '')).toBe(devOff);
+
+    const qaOff = qaSystemPrompt({ ...qa, agent: agent(), repo: repo() });
+    const qaOn = qaSystemPrompt({ ...qa, agent: agent(), repo: repo(), lookTool: true });
+    expect(qaOff).not.toContain(SENTENCE);
+    expect(qaOn).toContain(SENTENCE);
+
+    // Off when there's no browser step to begin with, even if lookTool is asked for.
+    const noBrowser = devSystemPrompt({ ...dev, agent: agent(), repo: repo({ browserTesting: false }), lookTool: true });
+    expect(noBrowser).not.toContain(SENTENCE);
+  });
+
   it("put a PR's own test step in the QA prompt", () => {
     const step = "3. GitHub's checks run on this PR.";
     const text = qaSystemPrompt({ ...qa, agent: agent(), repo: repo(), testStep: step });
